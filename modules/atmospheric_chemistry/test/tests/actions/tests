@@ -1,0 +1,32 @@
+[Tests]
+  [./inorganic_box]
+    type = RunApp
+    input = mcm_inorganic_box.i
+    requirement = 'The system shall be able to parse an inorganic MCM Facsimile mechanism file (20 species, 48 reactions) and set up a zero-dimensional ODE system using MCMFacsimileAction.'
+  [../]
+  [./mcm_parse]
+    type = RunApp
+    input = mcm_boxmodel_parse.i
+    requirement = 'The MCMBoxModel shall parse a 396-species inorganic MCM mechanism file without error.'
+  [../]
+  [./atchem2_comparison]
+    type = CSVDiff
+    input = atchem2_validation.i
+    csvdiff = atchem2_comparison.csv
+    rel_err = 1.5e-2
+    requirement = 'The system shall produce species concentrations with less than 1.5% error relative to AtChem2 reference for an MCM v3.3.1 subset (29 species, 71 reactions) with SZA photolysis over a 12-hour diurnal cycle.'
+  [../]
+  [./coupled_tutorial]
+    type = RunApp
+    input = coupled_tutorial.i
+    requirement = 'The MCMFacsimileAction with include_transport=true shall create a fully-coupled diffusion-reaction system and converge a 50-step transient solve.'
+  [../]
+  [./f0am_chamber]
+    type = CSVDiff
+    input = f0am_chamber.i
+    csvdiff = f0am_chamber_out.csv
+    rel_err = 1e-2
+    abs_zero = 1e-12
+    requirement = 'The MCMFacsimileAction 0D box model shall match F0AM ode15s reference within 0.1% for the 5-species tutorial mechanism under chamber conditions (T=298K, P=1013 mbar, no transport).'
+  [../]
+[]

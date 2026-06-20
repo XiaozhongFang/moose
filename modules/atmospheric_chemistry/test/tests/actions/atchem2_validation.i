@@ -1,0 +1,110 @@
+# MOOSE vs AtChem2 validation test
+# Using AtChem2 example mechanism (MCM v3.3.1 subset)
+# Matching default AtChem2 conditions
+
+[Mesh]
+  [gen]
+    type = GeneratedMeshGenerator
+    dim = 1
+    nx = 1
+  []
+[]
+
+[MCMFacsimileAction]
+  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
+  temperature = 288.15
+  air_density = 2.55e19
+  water_vapor = 4.45e17
+  mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
+  # SZA-based photolysis with AtChem2 defaults
+  latitude = 51.51
+  longitude = 0.13
+  day = 21
+  month = 6
+  year = 2010
+[]
+
+[ICs]
+  [CH4_ic]
+    type = ConstantIC
+    variable = CH4
+    value = 4.9e13
+  []
+  [CO_ic]
+    type = ConstantIC
+    variable = CO
+    value = 3.6e12
+  []
+  [O3_ic]
+    type = ConstantIC
+    variable = O3
+    value = 5.2e11
+  []
+  [NO2_ic]
+    type = ConstantIC
+    variable = NO2
+    value = 2.4e11
+  []
+[]
+
+[Executioner]
+  type = Transient
+  solve_type = PJFNK
+  dt = 900
+  end_time = 43200
+  l_max_its = 50
+  l_tol = 1e-5
+  nl_max_its = 10
+  nl_rel_tol = 1e-4
+  nl_abs_tol = 1e-3
+  [TimeStepper]
+    type = ConstantDT
+    dt = 900
+  []
+[]
+
+[Postprocessors]
+  [./O3_val]
+    type = ElementAverageValue
+    variable = O3
+  [../]
+  [./NO_val]
+    type = ElementAverageValue
+    variable = NO
+  [../]
+  [./NO2_val]
+    type = ElementAverageValue
+    variable = NO2
+  [../]
+  [./CO_val]
+    type = ElementAverageValue
+    variable = CO
+  [../]
+  [./OH_val]
+    type = ElementAverageValue
+    variable = OH
+  [../]
+  [./HO2_val]
+    type = ElementAverageValue
+    variable = HO2
+  [../]
+  [./CH4_val]
+    type = ElementAverageValue
+    variable = CH4
+  [../]
+[]
+
+[Preconditioning]
+  [smp]
+    type = SMP
+    full = true
+  []
+[]
+
+[Outputs]
+  exodus = true
+  csv = true
+  execute_on = 'timestep_end'
+  file_base = atchem2_comparison
+  time_step_interval = 1
+[]

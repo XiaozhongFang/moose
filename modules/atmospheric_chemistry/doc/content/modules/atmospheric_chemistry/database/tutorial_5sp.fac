@@ -1,0 +1,21 @@
+* Tutorial mechanism: 5 species, 6 reactions (F0AM LearnF0AM_ODE.mlx)
+* ONE = placeholder species (conc=1), RO2 = placeholder
+* A, B, C = evolving species
+
+VARIABLE ONE RO2 A B C ;
+
+* Rate constants
+K1 = 1.0D-3 ;
+K2 = 1.0D-2 ;
+K3 = 1.0D-4 ;
+K4 = 1.0D-1 ;
+K5 = 5.0D-1 ;
+K6 = 1.0D-4 ;
+
+* Reactions
+% K1     : A + B = C + B ;
+% K2     : B     = ;
+% K3     : A     = ;
+% K4     : B + B = ;
+% K5     : ONE   = A ;
+% K6     : C     = ;
