@@ -173,12 +173,26 @@ MCMFacsimileParser::processStatement(const std::string & statement)
   if (s.empty())
     return;
 
+  // Strip trailing inline * ... ; comment:
+  //   "KMT01 = 2.0D-12 ; * text ;" → "KMT01 = 2.0D-12"
+  auto star_pos = s.rfind(" * ");
+  if (star_pos != std::string::npos)
+  {
+    auto trail_sc = s.find(';', star_pos);
+    if (trail_sc != std::string::npos)
+      s.erase(star_pos);
+  }
+
   auto sc_pos = s.rfind(';');
   if (sc_pos != std::string::npos)
     s.erase(sc_pos);
   s.erase(s.find_last_not_of(" \t") + 1);
   if (s.empty())
     return;
+
+  // Strip CONSTANT prefix: "CONSTANT TEMP 298.15" → "TEMP 298.15"
+  if (s.find("CONSTANT ") == 0)
+    s = s.substr(9);
 
   if (s.find("VARIABLE") == 0)
   {
@@ -195,10 +209,14 @@ MCMFacsimileParser::processStatement(const std::string & statement)
   }
   else if (s.find('=') != std::string::npos)
   {
+    // Skip RO2 sum declaration: "RO2 = CH3O2 + C2H5O2" is a section marker, not a rate coefficient
     auto eq_pos = s.find('=');
     std::string name = s.substr(0, eq_pos);
     name.erase(0, name.find_first_not_of(" \t"));
     name.erase(name.find_last_not_of(" \t") + 1);
+    if (name == "RO2")
+      return;
+
     std::string expr = s.substr(eq_pos + 1);
     expr.erase(0, expr.find_first_not_of(" \t"));
     expr.erase(expr.find_last_not_of(" \t") + 1);

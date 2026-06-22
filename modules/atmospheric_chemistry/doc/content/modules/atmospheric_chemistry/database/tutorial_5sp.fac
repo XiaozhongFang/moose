@@ -2,7 +2,9 @@
 * ONE = placeholder species (conc=1), RO2 = placeholder
 * A, B, C = evolving species
 
-VARIABLE ONE RO2 A B C ;
+VARIABLE
+ ONE RO2 A B C ;
+***************************************************************************** ;
 
 * Rate constants
 K1 = 1.0D-3 ;

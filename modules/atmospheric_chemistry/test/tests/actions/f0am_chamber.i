@@ -16,8 +16,8 @@
 []
 
 [ICs]
-  [A_ic]   type = ConstantIC  variable = A   value = 1  []
-  [B_ic]   type = ConstantIC  variable = B   value = 0.1  []
+  [A_ic]   type = ConstantIC  variable = A   value = 100  []
+  [B_ic]   type = ConstantIC  variable = B   value = 0.05  []
   [C_ic]   type = ConstantIC  variable = C   value = 0  []
   [ONE_ic] type = ConstantIC  variable = ONE value = 1 []
   [RO2_ic] type = ConstantIC  variable = RO2 value = 0 []
