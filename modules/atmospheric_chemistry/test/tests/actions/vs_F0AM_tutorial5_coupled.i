@@ -1,6 +1,9 @@
-# 纯0D化学对比测试: 5物种6反应 (vs F0AM ode15s gold)
-# Chamber conditions: T=298K, P=1013 mbar, no transport
-# Matching F0AM ExampleSetup_Chamber.m for 5-species mechanism
+# vs F0AM ode15s — tutorial_5sp — coupled mode (FEM 0D transport)
+# Reproduces F0AM LearnF0AM_ODE.mlx: 5 species, 6 reactions
+# Chamber conditions: T=298K, no photolysis, no transport
+#
+# Reference: F0AM ExampleSetup_Chamber.m with tutorial_5sp mechanism
+# Gold file: vs_F0AM_tutorial5_coupled.csv
 
 [Mesh]
   [gen]
@@ -41,5 +44,5 @@
 
 [Outputs]
   csv = true
-  file_base = 'f0am_chamber_out'
+  file_base = 'vs_F0AM_tutorial5_coupled'
 []

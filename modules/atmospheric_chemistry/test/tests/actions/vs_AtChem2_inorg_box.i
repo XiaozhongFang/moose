@@ -1,6 +1,6 @@
-# MOOSE 盒子模式测试（ScalarVariable + ChemistryODEKernel）
-# 使用 AtChem2 示例机制（MCM v3.3.1 子集）
-# 对标 atchem2_validation.i，但使用 mode=box
+# vs AtChem2 CVODE — MCM inorganic — box mode (ScalarVariable 0D ODE)
+# AtChem2 example mechanism (MCM v3.3.1 subset, ~30 species)
+# Matching AtChem2 model_mcm_inorg: 12h diurnal cycle, SZA photolysis
 
 [Mesh]
   [gen]
@@ -94,6 +94,6 @@
 [Outputs]
   csv = true
   execute_on = 'timestep_end'
-  file_base = atchem2_box_mode
+  file_base = 'vs_AtChem2_inorg_box'
   time_step_interval = 1
 []
