@@ -330,7 +330,19 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
     vars += "," + _species_names[i];
     _name_to_index[_species_names[i]] = 5 + coeff_names.size() + i;
   }
-  _j_index_start = 5 + coeff_names.size() + _n_species;
+
+  // RO2 is a derived/lumped species (RO2 = CH3O2 + ...), not in VARIABLE list.
+  // It may appear in rate expressions directly. Add it as a variable with value 0.
+  bool has_ro2_in_species = false;
+  for (auto & s : _species_names)
+    if (s == "RO2") { has_ro2_in_species = true; break; }
+  if (!has_ro2_in_species)
+  {
+    vars += ",RO2";
+    _name_to_index["RO2"] = 5 + coeff_names.size() + _n_species;
+  }
+  unsigned int n_extra_vars = has_ro2_in_species ? 0 : 1;
+  _j_index_start = 5 + coeff_names.size() + _n_species + n_extra_vars;
   for (auto & n : j_numbers)
   {
     std::string jname = "PHOTOJ" + std::to_string(n);
@@ -339,9 +351,8 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
   }
 
   unsigned int n_vars = _name_to_index.size();
-  // Count unique J vars
   unsigned int n_j = j_numbers.size();
-  _func_params.resize(5 + coeff_names.size() + _n_species + n_j, 0.0);
+  _func_params.resize(5 + coeff_names.size() + _n_species + n_extra_vars + n_j, 0.0);
 
   // Parse coefficients
   _coeff_parsers.resize(coeff_names.size());
@@ -350,7 +361,8 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
     _coeff_parsers[i] = std::make_shared<SymFunction>();
     setParserFeatureFlags(_coeff_parsers[i]);
     if (_coeff_parsers[i]->Parse(coeff_exprs[i], vars) >= 0)
-      mooseError("MCMBoxModel: Bad coefficient '", coeff_names[i], "': ", coeff_exprs[i]);
+      mooseError("MCMBoxModel: Bad coefficient '", coeff_names[i], "': ", coeff_exprs[i], "\n",
+                 _coeff_parsers[i]->ErrorMsg());
     if (!_disable_fpoptimizer)
       _coeff_parsers[i]->Optimize();
   }
@@ -362,7 +374,8 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
     _reaction_parsers[r] = std::make_shared<SymFunction>();
     setParserFeatureFlags(_reaction_parsers[r]);
     if (_reaction_parsers[r]->Parse(rxn_exprs[r], vars) >= 0)
-      mooseError("MCMBoxModel: Bad reaction ", r, ": ", rxn_exprs[r]);
+      mooseError("MCMBoxModel: Bad reaction ", r, ": ", rxn_exprs[r], "\n",
+                 _reaction_parsers[r]->ErrorMsg());
     if (!_disable_fpoptimizer)
       _reaction_parsers[r]->Optimize();
   }
