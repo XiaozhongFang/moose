@@ -13,6 +13,7 @@
 #include "AppFactory.h"
 #include "MooseSyntax.h"
 
+#include "AtmosphericChemistryApp.h"
 #include "ChemicalReactionsApp.h"
 #include "ContactApp.h"
 #include "ElectromagneticsApp.h"
@@ -68,6 +69,7 @@ CombinedApp::registerApps()
 {
   registerApp(CombinedApp);
 
+  AtmosphericChemistryApp::registerApps();
   ChemicalReactionsApp::registerApps();
   ContactApp::registerApps();
   ElectromagneticsApp::registerApps();
@@ -104,6 +106,7 @@ CombinedApp::registerAll(Factory & f, ActionFactory & af, Syntax & s)
   Registry::registerObjectsTo(f, {"CombinedApp"});
   Registry::registerActionsTo(af, {"CombinedApp"});
 
+  AtmosphericChemistryApp::registerAll(f, af, s);
   ChemicalReactionsApp::registerAll(f, af, s);
   ContactApp::registerAll(f, af, s);
   ElectromagneticsApp::registerAll(f, af, s);

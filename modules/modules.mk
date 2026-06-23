@@ -15,6 +15,7 @@ ifneq (,$(MODULE_NAME))
 endif
 
 ifeq ($(ALL_MODULES),yes)
+        ATMOSPHERIC_CHEMISTRY       := yes
         CHEMICAL_REACTIONS          := yes
         CONTACT                     := yes
         ELECTROMAGNETICS            := yes

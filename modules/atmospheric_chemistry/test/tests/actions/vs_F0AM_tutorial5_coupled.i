@@ -1,6 +1,6 @@
 # vs F0AM ode15s — tutorial_5sp — coupled mode (FEM 0D transport)
 # Reproduces F0AM LearnF0AM_ODE.mlx: 5 species, 6 reactions
-# Chamber conditions: T=298K, no photolysis, no transport
+# tspan=[0,10]s · BDF2 · RelTol=1e-3 · AbsTol=1e-6
 #
 # Reference: F0AM ExampleSetup_Chamber.m with tutorial_5sp mechanism
 # Gold file: vs_F0AM_tutorial5_coupled.csv
@@ -36,10 +36,15 @@
 [Executioner]
   type = Transient
   solve_type = NEWTON
+  scheme = 'bdf2'
+  end_time = 10
   dt = 0.1
-  num_steps = 10
-  nl_rel_tol = 1e-8
-  nl_abs_tol = 1e-10
+  nl_rel_tol = 1e-3
+  nl_abs_tol = 1e-6
+  [TimeStepper]
+    type = ConstantDT
+    dt = 0.1
+  []
 []
 
 [Outputs]
