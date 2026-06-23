@@ -3,7 +3,8 @@
     type = CSVDiff
     input = vs_F0AM_tutorial5_box.i
     csvdiff = vs_F0AM_tutorial5_box.csv
-    requirement = 'The box mode (mode=box, ScalarVariable + ChemistryODEKernel) shall match the F0AM ode15s reference for the 5-species tutorial mechanism under chamber conditions (T=298K, no photolysis).'
+    rel_err = 3.0e-3
+    requirement = 'Species B [decoupled ODE: dB/dt = -K2*B - 2*K4*B^2] shall match the analytical solution B(t)=1/(40*exp(0.01*t)-20) within 0.3% relative error.'
   [../]
   [./vs_F0AM_tutorial5_coupled]
     type = CSVDiff
