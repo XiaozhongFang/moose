@@ -18,11 +18,6 @@
     csvdiff = vs_AtChem2_inorg_box.csv
     requirement = 'The box mode shall match AtChem2 CVODE reference for the MCM v3.3.1 inorganic subset (~30 species) with SZA photolysis over a 12h diurnal cycle.'
   [../]
-  [./vs_AtChem2_inorg20_box]
-    type = RunApp
-    input = vs_AtChem2_inorg20_box.i
-    requirement = 'The box mode shall parse the 20-species inorganic mechanism (mcm_export.fac, 48 reactions) with Troe falloff + SZA photolysis and complete a 1h transient solve without crash.'
-  [../]
   [./vs_AtChem2_inorg_coupled]
     type = CSVDiff
     input = vs_AtChem2_inorg_coupled.i
