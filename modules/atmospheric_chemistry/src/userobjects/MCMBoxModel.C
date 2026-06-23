@@ -54,16 +54,11 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
   if (_n_reactions == 0 || _n_species == 0)
     return;
 
-  // Step 1: compute reactant products G[i] = C[iG[i][0]] * C[iG[i][1]]
+  // Step 1: compute reactant products G[i] = C[iG[i][0]] * C[iG[i][1]] * C[iG[i][2]]
+  // All indices are valid species indices (padded with ONE=0, conc=1)
   std::vector<Real> G(_n_reactions);
   for (unsigned int r = 0; r < _n_reactions; ++r)
-  {
-    int idx0 = _iG[r][0];
-    int idx1 = _iG[r][1];
-    Real c0 = (idx0 >= 0 && idx0 < (int)_n_species) ? C[idx0] : 1.0;
-    Real c1 = (idx1 >= 0 && idx1 < (int)_n_species) ? C[idx1] : 1.0;
-    G[r] = c0 * c1;
-  }
+    G[r] = C[_iG[r][0]] * C[_iG[r][1]] * C[_iG[r][2]];
 
   // Step 2: rates = k .* G
   std::vector<Real> rates(_n_reactions);
@@ -74,13 +69,6 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
   for (unsigned int r = 0; r < _n_reactions; ++r)
     for (unsigned int s = 0; s < _n_species; ++s)
       dC[s] += _f[r][s] * rates[r];
-
-  // Step 4: zero out placeholder species (ONE, RO2)
-  // In FACSIMILE format, ONE is a dummy species (conc=1) used to convert
-  // zero/first-order reactions to pseudo-second-order form. It must not evolve.
-  for (unsigned int s = 0; s < _n_species; ++s)
-    if (_species_names[s] == "ONE")
-      dC[s] = 0.0;
 }
 
 void
@@ -93,49 +81,44 @@ MCMBoxModel::computeJacobianTriplets(
   if (_n_reactions == 0 || _n_species == 0)
     return;
 
-  // For each reaction r: rate = k_r * C_iG0 * C_iG1
-  // d(rate)/dC_iG0 = k_r * C_iG1  (if iG0 >= 0 and not equal to iG1)
-  // d(rate)/dC_iG1 = k_r * C_iG0  (if iG1 >= 0 and not equal to iG0)
-  //
-  // For second-order self-reaction (iG0 == iG1):  d(k*C^2)/dC = 2*k*C
-  //
-  // d(dC_s)/dC_j = sum_r f[r][s] * d(rate_r)/dC_j
+  // F0AM-style 3-term product Jacobian:
+  //   rate_r = k_r * C[i0] * C[i1] * C[i2]
+  //   d(rate_r)/dC[j] = k_r * sum_{k where iG[k]==j} prod_{m≠k} C[iG[m]]
+  //   J[s][j] += f[r][s] * d(rate_r)/dC[j]
 
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
-    int idx0 = _iG[r][0];
-    int idx1 = _iG[r][1];
+    const int i0 = _iG[r][0], i1 = _iG[r][1], i2 = _iG[r][2];
+    const Real c0 = C[i0], c1 = C[i1], c2 = C[i2];
+    const Real k = _k[r];
 
-    Real c0 = (idx0 >= 0 && idx0 < (int)_n_species) ? C[idx0] : 1.0;
-    Real c1 = (idx1 >= 0 && idx1 < (int)_n_species) ? C[idx1] : 1.0;
-
-    if (idx0 == idx1 && idx0 >= 0)
+    // Contribution from C[i0]: dr/dC[i0] = k * c1 * c2
     {
-      // Self-reaction: d(k*C^2)/dC = 2*k*C
-      Real drate_dc = 2.0 * _k[r] * c0;
-      for (unsigned int s = 0; s < _n_species; ++s)
-        if (std::abs(_f[r][s]) > 1e-30)
-          J.emplace_back(s, (unsigned int)idx0, drate_dc * _f[r][s]);
+      Real drate = k * c1 * c2;
+      // For self-reaction duplicates (i0==i1 or i0==i2), this is the ONLY contribution
+      // and the product rule automatically gives k*c1*c2 = k*C[i0]*C[i2] which is correct
+      if (std::abs(drate) > 1e-30)
+        for (unsigned int s = 0; s < _n_species; ++s)
+          if (std::abs(_f[r][s]) > 1e-30)
+            J.emplace_back(s, (unsigned int)i0, drate * _f[r][s]);
     }
-    else
+    // Contribution from C[i1]: dr/dC[i1] = k * c0 * c2
+    if (i1 != i0)  // skip if already accounted (self-reaction)
     {
-      // d(rate)/dC_iG0
-      if (idx0 >= 0)
-      {
-        Real drate_dc0 = _k[r] * c1;
+      Real drate = k * c0 * c2;
+      if (std::abs(drate) > 1e-30)
         for (unsigned int s = 0; s < _n_species; ++s)
           if (std::abs(_f[r][s]) > 1e-30)
-            J.emplace_back(s, (unsigned int)idx0, drate_dc0 * _f[r][s]);
-      }
-
-      // d(rate)/dC_iG1
-      if (idx1 >= 0)
-      {
-        Real drate_dc1 = _k[r] * c0;
+            J.emplace_back(s, (unsigned int)i1, drate * _f[r][s]);
+    }
+    // Contribution from C[i2]: dr/dC[i2] = k * c0 * c1
+    if (i2 != i0 && i2 != i1)  // skip if already accounted
+    {
+      Real drate = k * c0 * c1;
+      if (std::abs(drate) > 1e-30)
         for (unsigned int s = 0; s < _n_species; ++s)
           if (std::abs(_f[r][s]) > 1e-30)
-            J.emplace_back(s, (unsigned int)idx1, drate_dc1 * _f[r][s]);
-      }
+            J.emplace_back(s, (unsigned int)i2, drate * _f[r][s]);
     }
   }
 }
@@ -191,69 +174,32 @@ MCMBoxModel::_buildJacobianCache() const
 
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
-    int idx0 = _iG[r][0];
-    int idx1 = _iG[r][1];
+    const int i0 = _iG[r][0], i1 = _iG[r][1], i2 = _iG[r][2];
+    const Real c0 = _cached_C[i0], c1 = _cached_C[i1], c2 = _cached_C[i2];
+    const Real k = _k[r];
 
-    Real c0 = (idx0 >= 0 && idx0 < (int)_n_species) ? _cached_C[idx0] : 1.0;
-    Real c1 = (idx1 >= 0 && idx1 < (int)_n_species) ? _cached_C[idx1] : 1.0;
-
-    if (idx0 == idx1 && idx0 >= 0)
-    {
-      // Self-reaction: d(k*C^2)/dC = 2*k*C
-      Real drate_dc = 2.0 * _k[r] * c0;
+    // Helper: accumulate Jacobian contribution (s, j) += val
+    auto accum = [&](unsigned int j, Real drate) {
       for (unsigned int s = 0; s < _n_species; ++s)
       {
-        Real val = drate_dc * _f[r][s];
-        if (std::abs(val) > 1e-30)
-        {
+        Real val = drate * _f[r][s];
+        if (std::abs(val) < 1e-30) continue;
+        if (j == s)
           _cached_diag_J[s] += val;
-          // Self-reaction off-diagonal: s != idx0, but since both reactants same,
-          // the only non-zero Jacobian entry is on the diagonal.
-        }
-      }
-    }
-    else
-    {
-      // d(rate)/dC_iG0
-      if (idx0 >= 0)
-      {
-        Real drate_dc0 = _k[r] * c1;
-        for (unsigned int s = 0; s < _n_species; ++s)
+        else
         {
-          Real val = drate_dc0 * _f[r][s];
-          if (std::abs(val) > 1e-30)
-          {
-            if ((unsigned int)idx0 == s)
-              _cached_diag_J[s] += val;
-            else
-            {
-              uint64_t key = (static_cast<uint64_t>(s) << 32) | static_cast<uint64_t>(idx0);
-              _cached_offdiag_J[key] += val;
-            }
-          }
+          uint64_t key = (static_cast<uint64_t>(s) << 32) | static_cast<uint64_t>(j);
+          _cached_offdiag_J[key] += val;
         }
       }
+    };
 
-      // d(rate)/dC_iG1
-      if (idx1 >= 0)
-      {
-        Real drate_dc1 = _k[r] * c0;
-        for (unsigned int s = 0; s < _n_species; ++s)
-        {
-          Real val = drate_dc1 * _f[r][s];
-          if (std::abs(val) > 1e-30)
-          {
-            if ((unsigned int)idx1 == s)
-              _cached_diag_J[s] += val;
-            else
-            {
-              uint64_t key = (static_cast<uint64_t>(s) << 32) | static_cast<uint64_t>(idx1);
-              _cached_offdiag_J[key] += val;
-            }
-          }
-        }
-      }
-    }
+    // dr/dC[i0] = k * c1 * c2
+    accum((unsigned int)i0, k * c1 * c2);
+    // dr/dC[i1] = k * c0 * c2
+    if (i1 != i0) accum((unsigned int)i1, k * c0 * c2);
+    // dr/dC[i2] = k * c0 * c1
+    if (i2 != i0 && i2 != i1) accum((unsigned int)i2, k * c0 * c1);
   }
 }
 
@@ -332,9 +278,9 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
       _console << std::setw(6) << _f[r][s];
     _console << "\n";
   }
-  _console << "\niG (reactant indices per reaction, -1=pseudo-1st):\n";
+  _console << "\niG (reactant indices per reaction):\n";
   for (unsigned int r = 0; r < _n_reactions; ++r)
-    _console << "  Rx" << r << ": [" << _iG[r][0] << ", " << _iG[r][1] << "]\n";
+    _console << "  Rx" << r << ": [" << _iG[r][0] << ", " << _iG[r][1] << ", " << _iG[r][2] << "]\n";
   _console << "\nk (rate constants):\n";
   for (unsigned int r = 0; r < _n_reactions; ++r)
     _console << "  Rx" << r << ": " << std::scientific << _k[r] << "\n";
@@ -374,10 +320,7 @@ Real
 MCMBoxModel::reactionRate(unsigned int r, const std::vector<Real> & C) const
 {
   if (r >= _n_reactions || C.size() != _n_species) return 0.0;
-  int idx0 = _iG[r][0], idx1 = _iG[r][1];
-  Real c0 = (idx0 >= 0 && idx0 < (int)_n_species) ? C[idx0] : 1.0;
-  Real c1 = (idx1 >= 0 && idx1 < (int)_n_species) ? C[idx1] : 1.0;
-  return _k[r] * c0 * c1;
+  return _k[r] * C[_iG[r][0]] * C[_iG[r][1]] * C[_iG[r][2]];
 }
 
 Real

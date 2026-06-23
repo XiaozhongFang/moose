@@ -80,9 +80,9 @@ MCMFacsimileParser::parse(const std::string & filename, const std::string & phot
     for (unsigned int s = 0; s < n_sp; ++s)
       mech.stoichiometry[s][r] = _stoichiometric[s][r];
 
-  mech.reactant_indices.assign(n_rxn, std::vector<int>(2, -1));
+  mech.reactant_indices.assign(n_rxn, std::vector<int>(3, 0));
   for (unsigned int r = 0; r < n_rxn; ++r)
-    for (int k = 0; k < 2; ++k)
+    for (int k = 0; k < 3; ++k)
       mech.reactant_indices[r][k] = _reactant_indices[r][k];
 
   mech.coefficient_names = _eval_order;
@@ -408,6 +408,12 @@ MCMFacsimileParser::buildStoichiometricMatrix()
   unsigned int n_sp = _species.size(), n_rx = _reactions.size();
   _stoichiometric.assign(n_sp, std::vector<Real>(n_rx, 0.0));
 
+  // Find ONE species index (FACSIMILE placeholder, must have net coeff = 0)
+  int one_idx = -1;
+  for (unsigned int s = 0; s < n_sp; ++s)
+    if (_species[s] == "ONE")
+    { one_idx = (int)s; break; }
+
   for (unsigned int r = 0; r < n_rx; ++r)
   {
     for (auto & [coeff, name] : _reactions[r].reactants)
@@ -422,6 +428,9 @@ MCMFacsimileParser::buildStoichiometricMatrix()
       if (it != _species.end())
         _stoichiometric[it - _species.begin()][r] += coeff;
     }
+    // ONE is a placeholder (conc=1) — must have net stoichiometry 0
+    if (one_idx >= 0)
+      _stoichiometric[one_idx][r] = 0.0;
   }
 }
 
@@ -429,7 +438,8 @@ void
 MCMFacsimileParser::buildReactantIndices()
 {
   unsigned int n_rx = _reactions.size();
-  _reactant_indices.assign(n_rx, std::vector<int>(2, -1));
+  // 3-column iG matching F0AM convention. Default to ONE index (0).
+  _reactant_indices.assign(n_rx, std::vector<int>(3, 0));
 
   for (unsigned int r = 0; r < n_rx; ++r)
   {
@@ -442,7 +452,7 @@ MCMFacsimileParser::buildReactantIndices()
 
       int idx = (int)(it - _species.begin());
       // Unroll merged coefficients (e.g. B+B → coeff=2 → push B twice)
-      for (int c = 0; c < (int)coeff && k < 2; ++c)
+      for (int c = 0; c < (int)coeff && k < 3; ++c)
       {
         _reactant_indices[r][k] = idx;
         ++k;

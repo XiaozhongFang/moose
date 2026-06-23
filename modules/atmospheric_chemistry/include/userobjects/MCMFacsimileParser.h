@@ -40,7 +40,7 @@ struct ParsedMechanism
   /// Full stoichiometric matrix: stoichiometry[species][reaction]
   std::vector<std::vector<Real>> stoichiometry;
 
-  /// Reactant indices: reactant_indices[reaction] = {idx0, idx1} (-1 for pseudo-first-order)
+  /// Reactant indices: reactant_indices[reaction][0..2], padded with ONE index (0)
   std::vector<std::vector<int>> reactant_indices;
 
   /// Rate coefficient expressions (in topological evaluation order)
@@ -100,6 +100,6 @@ private:
   /// Transposed stoichiometric matrix: stoichiometry[species][reaction]
   std::vector<std::vector<Real>> _stoichiometric;
 
-  /// Reactant indices per reaction: _reactant_indices[reaction][0..1]
+  /// Reactant indices per reaction: _reactant_indices[reaction][0..2]
   std::vector<std::vector<int>> _reactant_indices;
 };

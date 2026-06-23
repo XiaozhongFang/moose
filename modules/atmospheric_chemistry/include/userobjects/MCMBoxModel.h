@@ -168,7 +168,7 @@ protected:
   /// Stoichiometric coefficients: _f[reaction][species]
   std::vector<std::vector<Real>> _f;
 
-  /// Reactant indices: _iG[reaction][0..1], -1 for pseudo-first-order
+  /// Reactant indices: _iG[reaction][0..2], padded with ONE index (0)
   std::vector<std::vector<int>> _iG;
 
   /// Pre-computed (or template) rate constants

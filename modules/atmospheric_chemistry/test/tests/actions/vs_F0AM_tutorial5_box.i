@@ -32,7 +32,7 @@
   type = Transient
   solve_type = NEWTON
   scheme = 'bdf2'
-  end_time = 10
+  end_time = 400
   dt = 0.1
   nl_rel_tol = 1e-3
   nl_abs_tol = 1e-6
@@ -44,5 +44,6 @@
 
 [Outputs]
   csv = true
+  execute_on = 'initial timestep_end'
   file_base = 'vs_F0AM_tutorial5_box'
 []
