@@ -73,6 +73,13 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
   for (unsigned int r = 0; r < _n_reactions; ++r)
     for (unsigned int s = 0; s < _n_species; ++s)
       dC[s] += _f[r][s] * rates[r];
+
+  // Step 4: zero out placeholder species (ONE, RO2)
+  // In FACSIMILE format, ONE is a dummy species (conc=1) used to convert
+  // zero/first-order reactions to pseudo-second-order form. It must not evolve.
+  for (unsigned int s = 0; s < _n_species; ++s)
+    if (_species_names[s] == "ONE")
+      dC[s] = 0.0;
 }
 
 void
@@ -266,7 +273,45 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
   // Copy reactant indices
   _iG = mech.reactant_indices;
 
+  // --- Evaluate rate coefficients ---
+  // Build map from coefficient name → numeric value
+  std::map<std::string, Real> coeff_map;
+  for (unsigned int i = 0; i < mech.coefficient_names.size(); ++i)
+  {
+    const std::string & expr = mech.coefficient_expressions[i];
+    Real val = 1.0;
+    try
+    {
+      val = std::stod(expr);
+    }
+    catch (...)
+    {
+      mooseWarning("MCMBoxModel: coefficient '", mech.coefficient_names[i],
+                   "' has non-numeric expression '", expr, "'; using 1.0");
+    }
+    coeff_map[mech.coefficient_names[i]] = val;
+  }
+
+  // Resolve reaction rate expressions
   _k.assign(_n_reactions, 1.0);
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+  {
+    const std::string & expr = mech.reactions[r].rate_expression;
+    auto it = coeff_map.find(expr);
+    if (it != coeff_map.end())
+      _k[r] = it->second;
+    else
+    {
+      // Try direct numeric parse
+      try { _k[r] = std::stod(expr); }
+      catch (...)
+      {
+        mooseWarning("MCMBoxModel: cannot evaluate rate '", expr, "' for reaction ", r,
+                     "; using 1.0");
+      }
+    }
+  }
+
   _dirty = true;
 }
 
