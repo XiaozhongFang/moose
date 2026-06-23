@@ -205,8 +205,15 @@ protected:
   Real _temperature;
   Real _air_density;
   Real _water_vapor;
+  Real _jfac;
+  // Photolysis J parameters (CL/CMM/CNN per J number)
+  std::vector<unsigned int> _j_numbers;
+  std::vector<Real> _j_CL_vals, _j_CMM_vals, _j_CNN_vals;
+  unsigned int _n_j_vars;
   void evaluateCoefficients();
   void setupFparser(const ParsedMechanism & mech);
+  unsigned int computeDayOfYear() const;
+  Real calculateCosSZA(Real t) const;
 
   // -- Cache for single-species ODEKernel interface --
   /// Dirty flag: true when cache needs recomputation

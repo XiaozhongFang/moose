@@ -235,6 +235,13 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<Real>("temperature") = getParam<Real>("temperature");
   params.set<Real>("air_density") = getParam<Real>("air_density");
   params.set<Real>("water_vapor") = getParam<Real>("water_vapor");
+  params.set<Real>("latitude") = getParam<Real>("latitude");
+  params.set<Real>("longitude") = getParam<Real>("longitude");
+  params.set<unsigned int>("day") = getParam<unsigned int>("day");
+  params.set<unsigned int>("month") = getParam<unsigned int>("month");
+  params.set<unsigned int>("year") = getParam<unsigned int>("year");
+  params.set<Real>("jfac") = getParam<Real>("jfac");
+  params.set<std::string>("photolysis_file") = getParam<std::string>("mcm_photolysis_file");
   _problem->addUserObject("MCMBoxModel", "box_model", params);
   _console << "AtmosphericChemistry (box): Created MCMBoxModel UserObject" << std::endl;
 }

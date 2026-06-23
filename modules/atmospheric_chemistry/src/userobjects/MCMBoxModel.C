@@ -19,9 +19,17 @@ MCMBoxModel::validParams()
   params += FunctionParserUtils<false>::validParams();
   params.addParam<std::string>(
       "mechanism_file", "", "Path to MCM Facsimile (.fac) mechanism file for auto-parsing");
+  params.addParam<std::string>(
+      "photolysis_file", "", "Path to MCM photolysis-rates data file (e.g. mcm_photolysis_rates_v3.3.1.dat)");
   params.addParam<Real>("temperature", 298.15, "Ambient temperature (K)");
   params.addParam<Real>("air_density", 2.46e19, "Air number density (molecules/cm^3)");
   params.addParam<Real>("water_vapor", 2.46e17, "Background water vapor (molecules/cm^3)");
+  params.addParam<Real>("latitude", 51.51, "Latitude (deg N)");
+  params.addParam<Real>("longitude", 0.13, "Longitude (deg E)");
+  params.addParam<unsigned int>("day", 21, "Day of month");
+  params.addParam<unsigned int>("month", 6, "Month");
+  params.addParam<unsigned int>("year", 2010, "Year");
+  params.addParam<Real>("jfac", 1.0, "JFAC scaling factor");
   params.addClassDescription(
       "Centralized box model UserObject for atmospheric chemistry ODE systems.");
   return params;
@@ -35,6 +43,12 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _temperature(getParam<Real>("temperature")),
     _air_density(getParam<Real>("air_density")),
     _water_vapor(getParam<Real>("water_vapor")),
+    _lat(getParam<Real>("latitude")),
+    _lon(getParam<Real>("longitude")),
+    _day((int)getParam<unsigned int>("day")),
+    _month((int)getParam<unsigned int>("month")),
+    _year((int)getParam<unsigned int>("year")),
+    _jfac(getParam<Real>("jfac")),
     _photolysis_method(MCM_SZA), _kdil(0.0), _dirty(true)
 {
 }
@@ -48,8 +62,9 @@ MCMBoxModel::initialize()
   std::string mech_file = getParam<std::string>("mechanism_file");
   if (!mech_file.empty())
   {
+    std::string photo_file = getParam<std::string>("photolysis_file");
     MCMFacsimileParser parser;
-    ParsedMechanism mech = parser.parse(mech_file);
+    ParsedMechanism mech = parser.parse(mech_file, photo_file);
     loadMechanism(mech);
     _console << "MCMBoxModel: Loaded " << _n_species << " species, "
              << _n_reactions << " reactions from " << mech_file << std::endl;
@@ -380,6 +395,15 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
     if (!_disable_fpoptimizer)
       _reaction_parsers[r]->Optimize();
   }
+
+  // Store photolysis parameters for SZA-based J calculation
+  _j_numbers = mech.j_numbers;
+  _j_CL_vals = mech.j_CL;
+  _j_CMM_vals = mech.j_CMM;
+  _j_CNN_vals = mech.j_CNN;
+  _n_j_vars = _j_numbers.size();
+  if (_n_j_vars > 0)
+    _console << "MCMBoxModel: " << _n_j_vars << " photolysis J values loaded" << std::endl;
 }
 
 void
@@ -393,6 +417,27 @@ MCMBoxModel::evaluateCoefficients()
   _func_params[3] = 0.78 * _air_density;
   _func_params[4] = _water_vapor;
 
+  // Compute photolysis J values from solar zenith angle
+  if (!_j_CL_vals.empty())
+  {
+    Real cosx = calculateCosSZA(_t);
+    Real secx = (cosx > 1.0e-10) ? (1.0 / cosx) : 1.0e2;
+    for (size_t i = 0; i < _j_CL_vals.size(); ++i)
+    {
+      unsigned int jn = _j_numbers[i];
+      std::string jname = "PHOTOJ" + std::to_string(jn);
+      auto it = _name_to_index.find(jname);
+      if (it != _name_to_index.end())
+      {
+        if (cosx > 1.0e-10)
+          _func_params[it->second] = _j_CL_vals[i] * std::pow(cosx, _j_CMM_vals[i])
+                                     * std::exp(-_j_CNN_vals[i] * secx) * _jfac;
+        else
+          _func_params[it->second] = 0.0;
+      }
+    }
+  }
+
   unsigned int n_coeff = _coeff_parsers.size();
   // Evaluate coefficients in topological order
   for (unsigned int i = 0; i < n_coeff; ++i)
@@ -402,9 +447,7 @@ MCMBoxModel::evaluateCoefficients()
     _func_params[5 + i] = val;
   }
 
-  // Set species concentrations in fparser buffer (needed when rate
-  // expressions reference species directly, e.g. 2*KCH3O2*RO2*...)
-  // Use cached concentrations from last computeDCdt call
+  // Set species concentrations in fparser buffer
   for (unsigned int s = 0; s < _n_species; ++s)
   {
     auto it = _name_to_index.find(_species_names[s]);
@@ -412,7 +455,7 @@ MCMBoxModel::evaluateCoefficients()
       _func_params[it->second] = (_cached_C.empty() ? 0.0 :
           (s < _cached_C.size() ? _cached_C[s] : 0.0));
   }
-  // RO2 = sum of peroxy radicals (CH3O2, C2H5O2, ...)
+  // RO2 = sum of peroxy radicals
   auto it_ro2 = _name_to_index.find("RO2");
   if (it_ro2 != _name_to_index.end())
   {
@@ -433,6 +476,41 @@ MCMBoxModel::evaluateCoefficients()
     Real val = evaluate(_reaction_parsers[r]);
     _k[r] = (std::isnan(val)) ? 1.0 : val;
   }
+}
+
+unsigned int
+MCMBoxModel::computeDayOfYear() const
+{
+  unsigned int days_in_months[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if ((_year % 4 == 0 && _year % 100 != 0) || _year % 400 == 0)
+    days_in_months[1] = 29;
+  unsigned int doy = 0;
+  for (unsigned int m = 0; m < (unsigned int)(_month - 1); ++m)
+    doy += days_in_months[m];
+  doy += _day;
+  return doy;
+}
+
+Real
+MCMBoxModel::calculateCosSZA(Real t) const
+{
+  const Real pi = 3.14159265358979323846;
+  unsigned int doy = computeDayOfYear();
+  unsigned int days_in_year =
+      ((_year % 4 == 0 && _year % 100 != 0) || _year % 400 == 0) ? 366 : 365;
+  Real theta = 2.0 * pi * (Real)doy / (Real)days_in_year;
+  Real dec = 0.006918 - 0.399912 * cos(theta) + 0.070257 * sin(theta) -
+             0.006758 * cos(2.0 * theta) + 0.000907 * sin(2.0 * theta) -
+             0.002697 * cos(3.0 * theta) + 0.001480 * sin(3.0 * theta);
+  Real eqt = 0.000075 + 0.001868 * cos(theta) - 0.032077 * sin(theta) -
+             0.014615 * cos(2.0 * theta) - 0.040849 * sin(2.0 * theta);
+  Real current_frac_hour = std::fmod(t / 3600.0, 24.0);
+  Real lat_rad = _lat * pi / 180.0;
+  Real lon_rad = _lon * pi / 180.0;
+  Real lha = pi * ((current_frac_hour / 12.0) - (1.0 + _lon / 180.0)) + eqt;
+  Real cosx = cos(lha) * cos(lat_rad) * cos(dec) + sin(lat_rad) * sin(dec);
+  if (cosx <= 0.0) cosx = 0.0;
+  return cosx;
 }
 
 // -- Constrained species --
