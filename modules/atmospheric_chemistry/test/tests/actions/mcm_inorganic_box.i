@@ -9,7 +9,8 @@
   []
 []
 
-[MCMFacsimileAction]
+[AtmosphericChemistry]
+  mode = coupled
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_export.fac'
   temperature = 298.15
   air_density = 2.46e19

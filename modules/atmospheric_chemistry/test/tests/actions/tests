@@ -2,7 +2,7 @@
   [./inorganic_box]
     type = RunApp
     input = mcm_inorganic_box.i
-    requirement = 'The system shall be able to parse an inorganic MCM Facsimile mechanism file (20 species, 48 reactions) and set up a zero-dimensional ODE system using MCMFacsimileAction.'
+    requirement = 'The system shall be able to parse an inorganic MCM Facsimile mechanism file (20 species, 48 reactions) and set up a zero-dimensional ODE system using AtmosphericChemistryAction (mode=coupled).'
   [../]
   [./mcm_parse]
     type = RunApp
@@ -19,7 +19,7 @@
   [./coupled_tutorial]
     type = RunApp
     input = coupled_tutorial.i
-    requirement = 'The MCMFacsimileAction with include_transport=true shall create a fully-coupled diffusion-reaction system and converge a 50-step transient solve.'
+    requirement = 'The AtmosphericChemistryAction (mode=coupled) with include_transport=true shall create a fully-coupled diffusion-reaction system and converge a 50-step transient solve.'
   [../]
   [./f0am_chamber]
     type = CSVDiff
@@ -27,6 +27,11 @@
     csvdiff = f0am_chamber_out.csv
     rel_err = 1e-2
     abs_zero = 1e-12
-    requirement = 'The MCMFacsimileAction 0D box model shall match F0AM ode15s reference within 0.1% for the 5-species tutorial mechanism under chamber conditions (T=298K, P=1013 mbar, no transport).'
+    requirement = 'The AtmosphericChemistryAction (mode=coupled) 0D box model shall match F0AM ode15s reference within 0.1% for the 5-species tutorial mechanism under chamber conditions (T=298K, P=1013 mbar, no transport).'
+  [../]
+  [./box_mode]
+    type = RunApp
+    input = atchem2_box_mode.i
+    requirement = 'The AtmosphericChemistryAction (mode=box) shall parse a mechanism, create ScalarVariables with ODETimeDerivative + ChemistryODEKernel, and complete a transient solve without error.'
   [../]
 []

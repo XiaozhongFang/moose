@@ -60,7 +60,7 @@ struct ParsedMechanism
  *
  * Extracts species, reactions, rate coefficients, and stoichiometric
  * relationships independently of any MOOSE Action.  Both
- * MCMFacsimileAction (for variable/kernel setup) and MCMBoxModel (for
+ * AtmosphericChemistryAction (for variable/kernel setup) and MCMBoxModel (for
  * direct computation) use this parser.
  */
 class MCMFacsimileParser

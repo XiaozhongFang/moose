@@ -15,6 +15,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 /**
  * Centralized box model for atmospheric chemistry ODE systems.
@@ -33,8 +34,8 @@
  *   dC/dt = f^T * (k .* prod(C[iG], 2))
  *
  * Usage:
- *   This object is typically created by MCMFacsimileAction during
- *   the "add_user_object" task.
+ *   This object is typically created by AtmosphericChemistryAction during
+ *   the "add_user_object" task (box mode).
  */
 class MCMBoxModel : public GeneralUserObject
 {
@@ -62,6 +63,35 @@ public:
    */
   void computeJacobianTriplets(const std::vector<Real> & C,
                                std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const;
+
+  // -- Cached single-species interface (for ScalarKernel / ODEKernel) --
+  /**
+   * Mark the internal cache as dirty. Called by ChemistryODEKernel::reinit()
+   * before each residual/Jacobian evaluation. Idempotent — multiple calls
+   * between evaluations are safe.
+   */
+  void markDirty() const { _dirty = true; }
+
+  /**
+   * Get dC/dt for a single species, caching the full computation.
+   * On first call after markDirty(), computes the complete dC/dt vector
+   * and caches it. Subsequent calls return cached values.
+   * @param idx Species index (0..nSpecies-1)
+   * @param C   Current concentration vector [molec/cm^3]
+   */
+  Real getDCdt(unsigned int idx, const std::vector<Real> & C) const;
+
+  /**
+   * Get diagonal Jacobian element d(dC_i)/dC_i, caching the full Jacobian.
+   * On first call after markDirty(), builds the sparse Jacobian cache.
+   */
+  Real getJacobianDiagonal(unsigned int idx, const std::vector<Real> & C) const;
+
+  /**
+   * Get off-diagonal Jacobian element d(dC_i)/dC_j, caching the full Jacobian.
+   * Returns 0.0 for entries that are structurally zero in the Jacobian.
+   */
+  Real getJacobianOffDiagonal(unsigned int i, unsigned int j, const std::vector<Real> & C) const;
 
   // -- Query interface --
   unsigned int nSpecies() const { return _n_species; }
@@ -161,4 +191,19 @@ protected:
   // -- Dilution --
   Real _kdil;
   std::vector<Real> _conc_bkgd;
+
+  // -- Cache for single-species ODEKernel interface --
+  /// Dirty flag: true when cache needs recomputation
+  mutable bool _dirty;
+  /// Cached dC/dt vector (length = nSpecies)
+  mutable std::vector<Real> _cached_dC;
+  /// Cached last concentration vector for Jacobian cache keying
+  mutable std::vector<Real> _cached_C;
+  /// Cached diagonal Jacobian elements
+  mutable std::vector<Real> _cached_diag_J;
+  /// Cached off-diagonal Jacobian elements: key = (row << 32) | col
+  mutable std::unordered_map<uint64_t, Real> _cached_offdiag_J;
+
+  /// Build the sparse Jacobian cache from the current _cached_C
+  void _buildJacobianCache() const;
 };

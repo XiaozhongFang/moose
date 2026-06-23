@@ -5,20 +5,29 @@ atmospheric chemistry simulations using Master Chemical Mechanism (MCM) chemical
 
 ## Overview
 
-The module is built around two complementary interfaces:
+The module uses a unified `[AtmosphericChemistry]` Action with two modes:
 
-1. **MCMFacsimileAction** — A high-level MOOSE Action that parses `.fac` mechanism files and
-   automatically creates the complete ODE system (variables, kernels, materials).
-2. **MCMBoxModel** — A standalone UserObject for direct ODE computation, providing an F0AM-compatible
-   interface for dC/dt, analytical Jacobian, solar cycles, and dilution.
+1. **Box mode** (`mode = box`) — 0-D ODE using ScalarVariable + ChemistryODEKernel + MCMBoxModel.
+   Suitable for large mechanisms (up to full MCM ~5832 species).
+2. **Coupled mode** (`mode = coupled`) — FEM transport + chemistry using MooseVariableFE +
+   ChemicalSourceKernel + MCMRatesMaterial. Suitable for spatially-resolved simulations (5--50 species).
 
 ## Quick Start
 
 ```moose
-[MCMFacsimileAction]
+# Box mode (0-D ODE, ScalarVariable)
+[AtmosphericChemistry]
+  mode = box
   mechanism_file = 'mechanism.fac'
   temperature = 298
-  include_transport = true   # enable diffusion + reaction coupling
+[]
+
+# Coupled mode (FEM transport + chemistry)
+[AtmosphericChemistry]
+  mode = coupled
+  mechanism_file = 'mechanism.fac'
+  temperature = 298
+  include_transport = true
 []
 ```
 
@@ -51,10 +60,11 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 
 ## Objects
 
-- [`MCMFacsimileAction`](source/actions/MCMFacsimileAction.md) — Parses `.fac` and builds MOOSE system
-- [`MCMBoxModel`](source/userobjects/MCMBoxModel.md) — 0-D chemical ODE engine
-- [`MCMRatesMaterial`](source/materials/MCMRatesMaterial.md) — Runtime rate evaluation
-- [`ChemicalSourceKernel`](source/kernels/ChemicalSourceKernel.md) — ODE source term with analytical Jacobian
+- [`AtmosphericChemistryAction`](source/actions/AtmosphericChemistryAction.md) — Unified Action (box / coupled modes)
+- [`MCMBoxModel`](source/userobjects/MCMBoxModel.md) — 0-D chemical ODE engine with caching interface
+- [`ChemistryODEKernel`](source/kernels/ChemistryODEKernel.md) — Box mode ScalarKernel bridge to MCMBoxModel
+- [`ChemicalSourceKernel`](source/kernels/ChemicalSourceKernel.md) — FEM chemical source with analytical Jacobian
+- [`MCMRatesMaterial`](source/materials/MCMRatesMaterial.md) — Runtime rate evaluation (coupled mode)
 - [`MCMConstraintKernel`](source/kernels/MCMConstraintKernel.md) — Fixed-species constraint
 - [`MCMEmissionKernel`](source/kernels/MCMEmissionKernel.md) — Emission source
 - [`MCMDepositionKernel`](source/kernels/MCMDepositionKernel.md) — Dry deposition

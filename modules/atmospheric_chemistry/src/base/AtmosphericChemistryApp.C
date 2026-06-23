@@ -39,7 +39,7 @@ AtmosphericChemistryApp::registerAll(Factory & f, ActionFactory & af, Syntax & s
   Registry::registerObjectsTo(f, {"AtmosphericChemistryApp"});
   Registry::registerActionsTo(af, {"AtmosphericChemistryApp"});
 
-  registerSyntax("MCMFacsimileAction", "MCMFacsimileAction");
+  registerSyntax("AtmosphericChemistryAction", "AtmosphericChemistry");
 }
 
 void

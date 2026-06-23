@@ -2,7 +2,8 @@
   [gen]  type = GeneratedMeshGenerator  dim = 1  nx = 20  xmin = 0  xmax = 1  []
 []
 
-[MCMFacsimileAction]
+[AtmosphericChemistry]
+  mode = coupled
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/tutorial_5sp.fac'
   temperature = 298
   include_transport = true

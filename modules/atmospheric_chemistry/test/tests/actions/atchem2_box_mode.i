@@ -1,6 +1,6 @@
-# MOOSE vs AtChem2 validation test
-# Using AtChem2 example mechanism (MCM v3.3.1 subset)
-# Matching default AtChem2 conditions
+# MOOSE 盒子模式测试（ScalarVariable + ChemistryODEKernel）
+# 使用 AtChem2 示例机制（MCM v3.3.1 子集）
+# 对标 atchem2_validation.i，但使用 mode=box
 
 [Mesh]
   [gen]
@@ -11,7 +11,7 @@
 []
 
 [AtmosphericChemistry]
-  mode = coupled
+  mode = box
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
   temperature = 288.15
   air_density = 2.55e19
@@ -27,22 +27,22 @@
 
 [ICs]
   [CH4_ic]
-    type = ConstantIC
+    type = ScalarConstantIC
     variable = CH4
     value = 4.9e13
   []
   [CO_ic]
-    type = ConstantIC
+    type = ScalarConstantIC
     variable = CO
     value = 3.6e12
   []
   [O3_ic]
-    type = ConstantIC
+    type = ScalarConstantIC
     variable = O3
     value = 5.2e11
   []
   [NO2_ic]
-    type = ConstantIC
+    type = ScalarConstantIC
     variable = NO2
     value = 2.4e11
   []
@@ -52,7 +52,7 @@
   type = Transient
   solve_type = PJFNK
   dt = 900
-  end_time = 43200
+  end_time = 3600
   l_max_its = 50
   l_tol = 1e-5
   nl_max_its = 10
@@ -65,47 +65,35 @@
 []
 
 [Postprocessors]
-  [./O3_val]
-    type = ElementAverageValue
+  [O3_val]
+    type = ScalarVariable
     variable = O3
-  [../]
-  [./NO_val]
-    type = ElementAverageValue
+  []
+  [NO_val]
+    type = ScalarVariable
     variable = NO
-  [../]
-  [./NO2_val]
-    type = ElementAverageValue
+  []
+  [NO2_val]
+    type = ScalarVariable
     variable = NO2
-  [../]
-  [./CO_val]
-    type = ElementAverageValue
-    variable = CO
-  [../]
-  [./OH_val]
-    type = ElementAverageValue
+  []
+  [OH_val]
+    type = ScalarVariable
     variable = OH
-  [../]
-  [./HO2_val]
-    type = ElementAverageValue
+  []
+  [HO2_val]
+    type = ScalarVariable
     variable = HO2
-  [../]
-  [./CH4_val]
-    type = ElementAverageValue
+  []
+  [CH4_val]
+    type = ScalarVariable
     variable = CH4
-  [../]
-[]
-
-[Preconditioning]
-  [smp]
-    type = SMP
-    full = true
   []
 []
 
 [Outputs]
-  exodus = true
   csv = true
   execute_on = 'timestep_end'
-  file_base = atchem2_comparison
+  file_base = atchem2_box_mode
   time_step_interval = 1
 []

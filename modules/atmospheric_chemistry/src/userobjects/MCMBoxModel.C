@@ -26,7 +26,7 @@ MCMBoxModel::validParams()
 
 MCMBoxModel::MCMBoxModel(const InputParameters & params)
   : GeneralUserObject(params), _n_species(0), _n_reactions(0),
-    _photolysis_method(MCM_SZA), _kdil(0.0)
+    _photolysis_method(MCM_SZA), _kdil(0.0), _dirty(true)
 {
 }
 
@@ -132,6 +132,123 @@ MCMBoxModel::computeJacobianTriplets(
   }
 }
 
+// -- Cached single-species interface --
+
+Real
+MCMBoxModel::getDCdt(unsigned int idx, const std::vector<Real> & C) const
+{
+  if (_dirty || _cached_dC.size() != _n_species)
+  {
+    _cached_dC.resize(_n_species);
+    computeDCdt(C, _cached_dC);
+    _dirty = false;
+  }
+  return (idx < _n_species) ? _cached_dC[idx] : 0.0;
+}
+
+Real
+MCMBoxModel::getJacobianDiagonal(unsigned int idx, const std::vector<Real> & C) const
+{
+  if (_dirty || _cached_C != C || _cached_diag_J.size() != _n_species)
+  {
+    _cached_C = C;
+    _buildJacobianCache();
+    _dirty = false;
+  }
+  return (idx < _n_species) ? _cached_diag_J[idx] : 0.0;
+}
+
+Real
+MCMBoxModel::getJacobianOffDiagonal(unsigned int i, unsigned int j, const std::vector<Real> & C) const
+{
+  if (_dirty || _cached_C != C || _cached_diag_J.size() != _n_species)
+  {
+    _cached_C = C;
+    _buildJacobianCache();
+    _dirty = false;
+  }
+  uint64_t key = (static_cast<uint64_t>(i) << 32) | static_cast<uint64_t>(j);
+  auto it = _cached_offdiag_J.find(key);
+  return (it != _cached_offdiag_J.end()) ? it->second : 0.0;
+}
+
+void
+MCMBoxModel::_buildJacobianCache() const
+{
+  _cached_diag_J.assign(_n_species, 0.0);
+  _cached_offdiag_J.clear();
+
+  if (_n_reactions == 0 || _n_species == 0)
+    return;
+
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+  {
+    int idx0 = _iG[r][0];
+    int idx1 = _iG[r][1];
+
+    Real c0 = (idx0 >= 0 && idx0 < (int)_n_species) ? _cached_C[idx0] : 1.0;
+    Real c1 = (idx1 >= 0 && idx1 < (int)_n_species) ? _cached_C[idx1] : 1.0;
+
+    if (idx0 == idx1 && idx0 >= 0)
+    {
+      // Self-reaction: d(k*C^2)/dC = 2*k*C
+      Real drate_dc = 2.0 * _k[r] * c0;
+      for (unsigned int s = 0; s < _n_species; ++s)
+      {
+        Real val = drate_dc * _f[r][s];
+        if (std::abs(val) > 1e-30)
+        {
+          _cached_diag_J[s] += val;
+          // Self-reaction off-diagonal: s != idx0, but since both reactants same,
+          // the only non-zero Jacobian entry is on the diagonal.
+        }
+      }
+    }
+    else
+    {
+      // d(rate)/dC_iG0
+      if (idx0 >= 0)
+      {
+        Real drate_dc0 = _k[r] * c1;
+        for (unsigned int s = 0; s < _n_species; ++s)
+        {
+          Real val = drate_dc0 * _f[r][s];
+          if (std::abs(val) > 1e-30)
+          {
+            if ((unsigned int)idx0 == s)
+              _cached_diag_J[s] += val;
+            else
+            {
+              uint64_t key = (static_cast<uint64_t>(s) << 32) | static_cast<uint64_t>(idx0);
+              _cached_offdiag_J[key] += val;
+            }
+          }
+        }
+      }
+
+      // d(rate)/dC_iG1
+      if (idx1 >= 0)
+      {
+        Real drate_dc1 = _k[r] * c0;
+        for (unsigned int s = 0; s < _n_species; ++s)
+        {
+          Real val = drate_dc1 * _f[r][s];
+          if (std::abs(val) > 1e-30)
+          {
+            if ((unsigned int)idx1 == s)
+              _cached_diag_J[s] += val;
+            else
+            {
+              uint64_t key = (static_cast<uint64_t>(s) << 32) | static_cast<uint64_t>(idx1);
+              _cached_offdiag_J[key] += val;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 void
 MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
 {
@@ -150,6 +267,7 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
   _iG = mech.reactant_indices;
 
   _k.assign(_n_reactions, 1.0);
+  _dirty = true;
 }
 
 // -- Constrained species --
