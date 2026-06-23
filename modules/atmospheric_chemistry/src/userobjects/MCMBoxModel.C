@@ -8,7 +8,6 @@
 //* https://www.gnu.org/licenses/lgpl-2.1.html
 
 #include "MCMBoxModel.h"
-#include <iomanip>
 
 registerMooseObject("AtmosphericChemistryApp", MCMBoxModel);
 
@@ -260,31 +259,6 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
   }
 
   _dirty = true;
-
-  // --- Debug: print matrices for comparison with F0AM ---
-  _console << "\n===== MCMBoxModel matrices =====\n";
-  _console << "Species (" << _n_species << "):";
-  for (unsigned int s = 0; s < _n_species; ++s)
-    _console << " [" << s << "]=" << _species_names[s];
-  _console << "\n\nStoichiometric matrix f (nRx×nSp, F0AM convention):\n";
-  _console << "         ";
-  for (unsigned int s = 0; s < _n_species; ++s)
-    _console << std::setw(6) << _species_names[s];
-  _console << "\n";
-  for (unsigned int r = 0; r < _n_reactions; ++r)
-  {
-    _console << "Rx" << std::setw(2) << r << ":  ";
-    for (unsigned int s = 0; s < _n_species; ++s)
-      _console << std::setw(6) << _f[r][s];
-    _console << "\n";
-  }
-  _console << "\niG (reactant indices per reaction):\n";
-  for (unsigned int r = 0; r < _n_reactions; ++r)
-    _console << "  Rx" << r << ": [" << _iG[r][0] << ", " << _iG[r][1] << ", " << _iG[r][2] << "]\n";
-  _console << "\nk (rate constants):\n";
-  for (unsigned int r = 0; r < _n_reactions; ++r)
-    _console << "  Rx" << r << ": " << std::scientific << _k[r] << "\n";
-  _console << "===== end matrices =====\n\n";
 }
 
 // -- Constrained species --
