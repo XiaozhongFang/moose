@@ -28,12 +28,6 @@
   [RO2_ic] type = ScalarConstantIC  variable = RO2 value = 0 []
 []
 
-[Postprocessors]
-  [A_val]  type = ScalarVariable  variable = A  []
-  [B_val]  type = ScalarVariable  variable = B  []
-  [C_val]  type = ScalarVariable  variable = C  []
-[]
-
 [Executioner]
   type = Transient
   solve_type = NEWTON
