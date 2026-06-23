@@ -232,6 +232,9 @@ AtmosphericChemistryAction::actBoxAddUserObject()
 {
   auto params = _factory.getValidParams("MCMBoxModel");
   params.set<std::string>("mechanism_file") = _mechanism_file;
+  params.set<Real>("temperature") = getParam<Real>("temperature");
+  params.set<Real>("air_density") = getParam<Real>("air_density");
+  params.set<Real>("water_vapor") = getParam<Real>("water_vapor");
   _problem->addUserObject("MCMBoxModel", "box_model", params);
   _console << "AtmosphericChemistry (box): Created MCMBoxModel UserObject" << std::endl;
 }

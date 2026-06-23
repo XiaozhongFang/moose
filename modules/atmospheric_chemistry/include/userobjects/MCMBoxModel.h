@@ -12,10 +12,12 @@
 #include "GeneralUserObject.h"
 #include "MCMFacsimileParser.h"
 #include "HybridJTableReader.h"
+#include "FunctionParserUtils.h"
 
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <map>
 
 /**
  * Centralized box model for atmospheric chemistry ODE systems.
@@ -37,11 +39,14 @@
  *   This object is typically created by AtmosphericChemistryAction during
  *   the "add_user_object" task (box mode).
  */
-class MCMBoxModel : public GeneralUserObject
+class MCMBoxModel : public GeneralUserObject, public FunctionParserUtils<false>
 {
 public:
   static InputParameters validParams();
   MCMBoxModel(const InputParameters & params);
+
+  using FunctionParserUtils<false>::evaluate;
+  using FunctionParserUtils<false>::_func_params;
 
   // -- GeneralUserObject interface --
   void initialize() override;
@@ -191,6 +196,17 @@ protected:
   // -- Dilution --
   Real _kdil;
   std::vector<Real> _conc_bkgd;
+
+  // -- fparser for complex rate coefficients --
+  std::vector<SymFunctionPtr> _coeff_parsers;
+  std::vector<SymFunctionPtr> _reaction_parsers;
+  std::map<std::string, unsigned int> _name_to_index;
+  unsigned int _j_index_start;
+  Real _temperature;
+  Real _air_density;
+  Real _water_vapor;
+  void evaluateCoefficients();
+  void setupFparser(const ParsedMechanism & mech);
 
   // -- Cache for single-species ODEKernel interface --
   /// Dirty flag: true when cache needs recomputation

@@ -8,6 +8,7 @@
 //* https://www.gnu.org/licenses/lgpl-2.1.html
 
 #include "MCMBoxModel.h"
+#include "pcrecpp.h"
 
 registerMooseObject("AtmosphericChemistryApp", MCMBoxModel);
 
@@ -15,17 +16,25 @@ InputParameters
 MCMBoxModel::validParams()
 {
   InputParameters params = GeneralUserObject::validParams();
+  params += FunctionParserUtils<false>::validParams();
   params.addParam<std::string>(
       "mechanism_file", "", "Path to MCM Facsimile (.fac) mechanism file for auto-parsing");
+  params.addParam<Real>("temperature", 298.15, "Ambient temperature (K)");
+  params.addParam<Real>("air_density", 2.46e19, "Air number density (molecules/cm^3)");
+  params.addParam<Real>("water_vapor", 2.46e17, "Background water vapor (molecules/cm^3)");
   params.addClassDescription(
-      "Centralized box model UserObject for atmospheric chemistry ODE systems. "
-      "Manages stoichiometric coefficients, reactant indices, and rate constants, "
-      "and provides dC/dt computation following F0AM's dydt_eval algorithm.");
+      "Centralized box model UserObject for atmospheric chemistry ODE systems.");
   return params;
 }
 
 MCMBoxModel::MCMBoxModel(const InputParameters & params)
-  : GeneralUserObject(params), _n_species(0), _n_reactions(0),
+  : GeneralUserObject(params),
+    FunctionParserUtils<false>(params),
+    _n_species(0), _n_reactions(0),
+    _j_index_start(0),
+    _temperature(getParam<Real>("temperature")),
+    _air_density(getParam<Real>("air_density")),
+    _water_vapor(getParam<Real>("water_vapor")),
     _photolysis_method(MCM_SZA), _kdil(0.0), _dirty(true)
 {
 }
@@ -33,7 +42,9 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
 void
 MCMBoxModel::initialize()
 {
-  // Parse .fac file if provided (auto-populate from mechanism_file)
+  // Parse .fac file only once
+  if (_n_species > 0) return;
+
   std::string mech_file = getParam<std::string>("mechanism_file");
   if (!mech_file.empty())
   {
@@ -129,6 +140,8 @@ MCMBoxModel::getDCdt(unsigned int idx, const std::vector<Real> & C) const
 {
   if (_dirty || _cached_dC.size() != _n_species)
   {
+    if (!_coeff_parsers.empty())
+      const_cast<MCMBoxModel*>(this)->evaluateCoefficients();
     _cached_dC.resize(_n_species);
     computeDCdt(C, _cached_dC);
     _dirty = false;
@@ -219,46 +232,165 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
   // Copy reactant indices
   _iG = mech.reactant_indices;
 
-  // --- Evaluate rate coefficients ---
-  // Build map from coefficient name → numeric value
+  // --- Evaluate rate coefficients (fparser for complex expressions) ---
+  _k.assign(_n_reactions, 1.0);
+
+  // Try simple numeric parse first; fall back to fparser
   std::map<std::string, Real> coeff_map;
+  bool need_fparser = false;
+
   for (unsigned int i = 0; i < mech.coefficient_names.size(); ++i)
   {
     const std::string & expr = mech.coefficient_expressions[i];
-    Real val = 1.0;
     try
     {
-      val = std::stod(expr);
+      Real val = std::stod(expr);
+      coeff_map[mech.coefficient_names[i]] = val;
     }
     catch (...)
     {
-      mooseWarning("MCMBoxModel: coefficient '", mech.coefficient_names[i],
-                   "' has non-numeric expression '", expr, "'; using 1.0");
+      need_fparser = true;
+      break;
     }
-    coeff_map[mech.coefficient_names[i]] = val;
   }
 
-  // Resolve reaction rate expressions
-  _k.assign(_n_reactions, 1.0);
-  for (unsigned int r = 0; r < _n_reactions; ++r)
+  if (!need_fparser)
   {
-    const std::string & expr = mech.reactions[r].rate_expression;
-    auto it = coeff_map.find(expr);
-    if (it != coeff_map.end())
-      _k[r] = it->second;
-    else
+    // Simple case: all coefficients are numeric (e.g. tutorial_5sp)
+    for (unsigned int r = 0; r < _n_reactions; ++r)
     {
-      // Try direct numeric parse
-      try { _k[r] = std::stod(expr); }
-      catch (...)
-      {
-        mooseWarning("MCMBoxModel: cannot evaluate rate '", expr, "' for reaction ", r,
-                     "; using 1.0");
-      }
+      const std::string & expr = mech.reactions[r].rate_expression;
+      auto it = coeff_map.find(expr);
+      if (it != coeff_map.end())
+        _k[r] = it->second;
+      else
+        try { _k[r] = std::stod(expr); } catch (...) {}
     }
+  }
+  else
+  {
+    // Complex case: use fparser (see evaluateCoefficients)
+    _console << "MCMBoxModel: " << mech.coefficient_names.size()
+             << " coefficients — using fparser for complex expressions" << std::endl;
+    setupFparser(mech);
   }
 
   _dirty = true;
+}
+
+void
+MCMBoxModel::setupFparser(const ParsedMechanism & mech)
+{
+  auto coeff_exprs = mech.coefficient_expressions;
+  std::vector<std::string> coeff_names = mech.coefficient_names;
+  std::vector<std::string> rxn_exprs(_n_reactions);
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+    rxn_exprs[r] = mech.reactions[r].rate_expression;
+
+  // Convert J<N> to PHOTOJN (fparser doesn't allow < >)
+  auto replace_j = [](std::string & s) {
+    std::string result;
+    for (size_t i = 0; i < s.size(); )
+    {
+      if (i + 1 < s.size() && s[i] == 'J' && s[i+1] == '<')
+      {
+        std::string num; i += 2;
+        while (i < s.size() && s[i] >= '0' && s[i] <= '9') { num += s[i]; i++; }
+        result += "PHOTOJ" + num;
+        if (i < s.size() && s[i] == '>') i++;
+      }
+      else { result += s[i]; i++; }
+    }
+    s = result;
+  };
+  for (auto & e : coeff_exprs) replace_j(e);
+  for (auto & e : rxn_exprs) replace_j(e);
+
+  // Detect photolysis J numbers
+  std::set<int> j_numbers;
+  pcrecpp::RE re_j("PHOTOJ([0-9]+)");
+  for (auto & e : coeff_exprs)
+  { int jnum; pcrecpp::StringPiece sp(e); while (re_j.FindAndConsume(&sp, &jnum)) j_numbers.insert(jnum); }
+  for (auto & e : rxn_exprs)
+  { int jnum; pcrecpp::StringPiece sp(e); while (re_j.FindAndConsume(&sp, &jnum)) j_numbers.insert(jnum); }
+
+  // Build variable list
+  std::string vars = "TEMP,M,O2,N2,H2O";
+  _name_to_index["TEMP"] = 0; _name_to_index["M"] = 1;
+  _name_to_index["O2"] = 2; _name_to_index["N2"] = 3;
+  _name_to_index["H2O"] = 4;
+
+  for (unsigned int i = 0; i < coeff_names.size(); ++i)
+  {
+    vars += "," + coeff_names[i];
+    _name_to_index[coeff_names[i]] = 5 + i;
+  }
+  for (unsigned int i = 0; i < _n_species; ++i)
+  {
+    vars += "," + _species_names[i];
+    _name_to_index[_species_names[i]] = 5 + coeff_names.size() + i;
+  }
+  _j_index_start = 5 + coeff_names.size() + _n_species;
+  for (auto & n : j_numbers)
+  {
+    std::string jname = "PHOTOJ" + std::to_string(n);
+    vars += "," + jname;
+    _name_to_index[jname] = _j_index_start + _name_to_index.size() - _j_index_start;
+  }
+
+  unsigned int n_vars = _name_to_index.size();
+  // Count unique J vars
+  unsigned int n_j = j_numbers.size();
+  _func_params.resize(5 + coeff_names.size() + _n_species + n_j, 0.0);
+
+  // Parse coefficients
+  _coeff_parsers.resize(coeff_names.size());
+  for (unsigned int i = 0; i < coeff_names.size(); ++i)
+  {
+    _coeff_parsers[i] = std::make_shared<SymFunction>();
+    setParserFeatureFlags(_coeff_parsers[i]);
+    if (_coeff_parsers[i]->Parse(coeff_exprs[i], vars) >= 0)
+      mooseError("MCMBoxModel: Bad coefficient '", coeff_names[i], "': ", coeff_exprs[i]);
+    if (!_disable_fpoptimizer)
+      _coeff_parsers[i]->Optimize();
+  }
+
+  // Parse reaction expressions
+  _reaction_parsers.resize(_n_reactions);
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+  {
+    _reaction_parsers[r] = std::make_shared<SymFunction>();
+    setParserFeatureFlags(_reaction_parsers[r]);
+    if (_reaction_parsers[r]->Parse(rxn_exprs[r], vars) >= 0)
+      mooseError("MCMBoxModel: Bad reaction ", r, ": ", rxn_exprs[r]);
+    if (!_disable_fpoptimizer)
+      _reaction_parsers[r]->Optimize();
+  }
+}
+
+void
+MCMBoxModel::evaluateCoefficients()
+{
+  if (_coeff_parsers.empty()) return;
+
+  _func_params[0] = _temperature;
+  _func_params[1] = _air_density;
+  _func_params[2] = 0.21 * _air_density;
+  _func_params[3] = 0.78 * _air_density;
+  _func_params[4] = _water_vapor;
+
+  unsigned int n_coeff = _coeff_parsers.size();
+  for (unsigned int i = 0; i < n_coeff; ++i)
+  {
+    Real val = evaluate(_coeff_parsers[i]);
+    if (std::isnan(val)) val = 0.0;
+    _func_params[5 + i] = val;
+  }
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+  {
+    Real val = evaluate(_reaction_parsers[r]);
+    _k[r] = (std::isnan(val)) ? 1.0 : val;
+  }
 }
 
 // -- Constrained species --
