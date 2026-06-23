@@ -39,17 +39,19 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
   : GeneralUserObject(params),
     FunctionParserUtils<false>(params),
     _n_species(0), _n_reactions(0),
-    _j_index_start(0),
-    _temperature(getParam<Real>("temperature")),
-    _air_density(getParam<Real>("air_density")),
-    _water_vapor(getParam<Real>("water_vapor")),
+    _photolysis_method(MCM_SZA),
     _lat(getParam<Real>("latitude")),
     _lon(getParam<Real>("longitude")),
     _day((int)getParam<unsigned int>("day")),
     _month((int)getParam<unsigned int>("month")),
     _year((int)getParam<unsigned int>("year")),
+    _kdil(0.0),
+    _j_index_start(0),
+    _temperature(getParam<Real>("temperature")),
+    _air_density(getParam<Real>("air_density")),
+    _water_vapor(getParam<Real>("water_vapor")),
     _jfac(getParam<Real>("jfac")),
-    _photolysis_method(MCM_SZA), _kdil(0.0), _dirty(true)
+    _dirty(true)
 {
 }
 
@@ -366,7 +368,6 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
     _name_to_index[jname] = _j_index_start + _name_to_index.size() - _j_index_start;
   }
 
-  unsigned int n_vars = _name_to_index.size();
   unsigned int n_j = j_numbers.size();
   _func_params.resize(5 + coeff_names.size() + _n_species + n_extra_vars + n_j, 0.0);
 
@@ -506,7 +507,6 @@ MCMBoxModel::calculateCosSZA(Real t) const
              0.014615 * cos(2.0 * theta) - 0.040849 * sin(2.0 * theta);
   Real current_frac_hour = std::fmod(t / 3600.0, 24.0);
   Real lat_rad = _lat * pi / 180.0;
-  Real lon_rad = _lon * pi / 180.0;
   Real lha = pi * ((current_frac_hour / 12.0) - (1.0 + _lon / 180.0)) + eqt;
   Real cosx = cos(lha) * cos(lat_rad) * cos(dec) + sin(lat_rad) * sin(dec);
   if (cosx <= 0.0) cosx = 0.0;
@@ -629,14 +629,22 @@ MCMBoxModel::updatePhotolysisSZA(Real sza, Real jfac)
 void
 MCMBoxModel::setSolarCycle(Real lat, Real lon, int day, int month, int year)
 {
-  _lat = lat * M_PI / 180.0; _lon = lon * M_PI / 180.0;
-  Real doy = (month - 1) * 30 + day;
-  Real theta = 2.0 * M_PI * doy / 365.0;
-  _declination = 0.006918 - 0.399912*std::cos(theta) + 0.070257*std::sin(theta)
-    - 0.006758*std::cos(2*theta) + 0.000907*std::sin(2*theta)
-    - 0.002697*std::cos(3*theta) + 0.001480*std::sin(3*theta);
-  Real B = 2.0*M_PI*(doy-1.0)/365.0;
-  _eot = 0.165*std::sin(2*B) - 0.126*std::cos(B) - 0.025*std::sin(B);
+  _lat = lat * M_PI / 180.0;
+  _lon = lon * M_PI / 180.0;
+  _day = day;
+  _month = month;
+  _year = year;
+
+  unsigned int doy = computeDayOfYear();
+  unsigned int days_in_year =
+      ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0) ? 366 : 365;
+  Real theta = 2.0 * M_PI * (Real)doy / (Real)days_in_year;
+  Real B = 2.0 * M_PI * ((Real)doy - 1.0) / (Real)days_in_year;
+
+  _declination = 0.006918 - 0.399912 * std::cos(theta) + 0.070257 * std::sin(theta) -
+                 0.006758 * std::cos(2.0 * theta) + 0.000907 * std::sin(2.0 * theta) -
+                 0.002697 * std::cos(3.0 * theta) + 0.001480 * std::sin(3.0 * theta);
+  _eot = 0.165 * std::sin(2.0 * B) - 0.126 * std::cos(B) - 0.025 * std::sin(B);
 }
 
 Real
