@@ -437,9 +437,14 @@ MCMFacsimileParser::buildReactantIndices()
     for (auto & [coeff, name] : _reactions[r].reactants)
     {
       auto it = std::find(_species.begin(), _species.end(), name);
-      if (it != _species.end() && k < 2)
+      if (it == _species.end())
+        continue;
+
+      int idx = (int)(it - _species.begin());
+      // Unroll merged coefficients (e.g. B+B → coeff=2 → push B twice)
+      for (int c = 0; c < (int)coeff && k < 2; ++c)
       {
-        _reactant_indices[r][k] = (int)(it - _species.begin());
+        _reactant_indices[r][k] = idx;
         ++k;
       }
     }
