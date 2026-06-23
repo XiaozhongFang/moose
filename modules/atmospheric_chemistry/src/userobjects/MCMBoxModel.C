@@ -140,6 +140,7 @@ MCMBoxModel::getDCdt(unsigned int idx, const std::vector<Real> & C) const
 {
   if (_dirty || _cached_dC.size() != _n_species)
   {
+    _cached_C = C;  // store for evaluateCoefficients species lookup
     if (!_coeff_parsers.empty())
       const_cast<MCMBoxModel*>(this)->evaluateCoefficients();
     _cached_dC.resize(_n_species);
@@ -393,12 +394,40 @@ MCMBoxModel::evaluateCoefficients()
   _func_params[4] = _water_vapor;
 
   unsigned int n_coeff = _coeff_parsers.size();
+  // Evaluate coefficients in topological order
   for (unsigned int i = 0; i < n_coeff; ++i)
   {
     Real val = evaluate(_coeff_parsers[i]);
     if (std::isnan(val)) val = 0.0;
     _func_params[5 + i] = val;
   }
+
+  // Set species concentrations in fparser buffer (needed when rate
+  // expressions reference species directly, e.g. 2*KCH3O2*RO2*...)
+  // Use cached concentrations from last computeDCdt call
+  for (unsigned int s = 0; s < _n_species; ++s)
+  {
+    auto it = _name_to_index.find(_species_names[s]);
+    if (it != _name_to_index.end())
+      _func_params[it->second] = (_cached_C.empty() ? 0.0 :
+          (s < _cached_C.size() ? _cached_C[s] : 0.0));
+  }
+  // RO2 = sum of peroxy radicals (CH3O2, C2H5O2, ...)
+  auto it_ro2 = _name_to_index.find("RO2");
+  if (it_ro2 != _name_to_index.end())
+  {
+    Real ro2_sum = 0.0;
+    for (unsigned int s = 0; s < _n_species; ++s)
+      if (_species_names[s].size() >= 3 &&
+          _species_names[s].substr(_species_names[s].size() - 2) == "O2" &&
+          _species_names[s] != "HO2" && _species_names[s] != "NO2" &&
+          _species_names[s] != "SO2" && _species_names[s] != "H2O2")
+        ro2_sum += (_cached_C.empty() ? 0.0 :
+            (s < _cached_C.size() ? _cached_C[s] : 0.0));
+    _func_params[it_ro2->second] = ro2_sum;
+  }
+
+  // Evaluate reaction rate expressions → _k
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
     Real val = evaluate(_reaction_parsers[r]);
