@@ -64,6 +64,39 @@ Multi-day simulations track the solar zenith angle using Madronich (1993)
 parameterization, updating photolysis rates at each time step. Convergence
 mode (`checkConvergence()`) enables diurnal steady-state detection.
 
+### Air Density Calculation
+
+If [!param](/UserObjects/MCMBoxModel/press) is set (> 0 mbar), the air number
+density $M$ is computed dynamically from the ideal gas law
+(AtChem2 `calcAirDensity` equivalent):
+
+$$ M = 10^{-6} \cdot \frac{N_A}{R} \cdot \frac{p \times 100}{T} $$
+
+where $N_A = 6.02214129\times 10^{23}$ mol⁻¹, $R = 8.3144621$ J mol⁻¹ K⁻¹.
+If `press` is 0 (default), the fixed `air_density` parameter is used directly.
+
+### Humidity Calculation
+
+If [!param](/UserObjects/MCMBoxModel/rh) is set (≥ 0 %), the water vapor
+concentration is computed from relative humidity using the Vaisala (2013)
+formula (AtChem2 `convertRHtoH2O` equivalent):
+
+$$ p_{\text{sat}} = 6.116441 \cdot 10^{\frac{7.591386(T-273.15)}{T-273.15+240.7263}} \quad\text{(mbar)} $$
+$$ \text{H}_2\text{O} = \frac{\text{RH}/100 \cdot p_{\text{sat}}}{p - \text{RH}/100 \cdot p_{\text{sat}}} \cdot M $$
+
+If `rh` is −1 (default, AtChem2 sentinel), the fixed `water_vapor` parameter
+is used directly.
+
+### Dilution (Box Mode)
+
+If [!param](/UserObjects/MCMBoxModel/dilute) is set (> 0 s⁻¹), first-order
+dilution is applied at each timestep:
+
+$$ \frac{\mathrm{d}C_i}{\mathrm{d}t} \mathrel{-}= k_{\text{dil}} \cdot (C_i - C_i^{\text{bkgd}}) $$
+
+This matches AtChem2's DILUTE parameter.  Background concentrations default
+to zero (clean air dilution).
+
 ### Key API Methods
 
 | Method | Description |
