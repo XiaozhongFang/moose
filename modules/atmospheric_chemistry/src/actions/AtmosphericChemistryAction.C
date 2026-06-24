@@ -132,6 +132,7 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   ParsedMechanism mech = parser.parse(_mechanism_file, photo_path, peroxy_path);
 
   _species = mech.species;
+  _ro2_species = mech.ro2_species;
   for (auto & r : mech.reactions)
   {
     Reaction rx;
@@ -349,6 +350,11 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   params.set<std::vector<Real>>("j_cl_values") = j_cl_vals;
   params.set<std::vector<Real>>("j_cmm_values") = j_cmm_vals;
   params.set<std::vector<Real>>("j_cnn_values") = j_cnn_vals;
+
+  // Pass RO2 lumped-species list for fparser variable setup (box mode
+  // equivalent: MCMBoxModel::setupFparser adds RO2 as a derived variable)
+  if (!_ro2_species.empty())
+    params.set<std::vector<std::string>>("ro2_species") = _ro2_species;
 
   params.set<Real>("latitude") = getParam<Real>("latitude");
   params.set<Real>("longitude") = getParam<Real>("longitude");

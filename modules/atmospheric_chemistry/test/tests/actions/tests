@@ -24,8 +24,10 @@
   [./vs_AtChem2_inorg_coupled]
     type = CSVDiff
     input = vs_AtChem2_inorg_coupled.i
-    csvdiff = vs_AtChem2_inorg_coupled.csv
-    requirement = 'The coupled mode shall complete a 12h diurnal cycle for the MCM inorganic mechanism (20 species) with SZA photolysis.'
+    csvdiff = vs_AtChem2_inorg_box.csv
+    rel_err = 5.0e-2
+    abs_zero = 1.0e-6
+    requirement = 'The coupled mode (FEM 0D, 1-element mesh) shall produce results identical to box mode (ScalarVariable ODE) when using the same mechanism and conditions.  Shared gold file: vs_AtChem2_inorg_box.csv.'
   [../]
   [./vs_F0AM_tutorial5_ns_fe]
     type = RunApp

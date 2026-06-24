@@ -75,6 +75,7 @@ protected:
   std::map<std::string, std::string> _rate_coefficients;
   std::map<std::string, Real> _photolysis_rates;
   std::map<std::string, Real> _j_CL, _j_CMM, _j_CNN;
+  std::vector<std::string> _ro2_species;
   std::vector<Reaction> _reactions;
   std::vector<std::vector<Real>> _stoichiometric_matrix;
   std::map<std::string, std::string> _converted_coefficients;

@@ -95,6 +95,9 @@ private:
   /// Roof (chamber cover) open. false = CLOSED (all photolysis J=0).
   const bool _roof_open;
 
+  /// Indices of species that constitute RO2 (peroxy radical sum)
+  std::vector<unsigned int> _ro2_indices;
+
   /// Compute day of year from day/month/year
   unsigned int computeDayOfYear() const;
   /// Calculate cosine of solar zenith angle at simulation time t

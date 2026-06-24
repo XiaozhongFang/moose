@@ -57,6 +57,8 @@ MCMRatesMaterial::validParams()
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
   params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
 
+  params.addParam<std::vector<std::string>>("ro2_species", {}, "RO2 lumped-species component names (e.g. CH3O2). RO2 = sum of these species concentrations.");
+
   params.addClassDescription("Material that evaluates MCM reaction rates via sequential fparser evaluation");
   return params;
 }
@@ -88,6 +90,20 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
   _species_vals.resize(_n_species);
   for (unsigned int i = 0; i < _n_species; ++i)
     _species_vals[i] = &coupledValue("species_variables", i);
+
+  // Map RO2 lumped-species names → indices in the species variable list.
+  // RO2 = Σ[species_idx] (peroxy radical sum), computed before fparser
+  // evaluation in computeQpProperties().
+  {
+    auto ro2_names = getParam<std::vector<std::string>>("ro2_species");
+    auto sp_list = getParam<std::vector<std::string>>("species_list");
+    for (auto & ro2_name : ro2_names)
+    {
+      auto it = std::find(sp_list.begin(), sp_list.end(), ro2_name);
+      if (it != sp_list.end())
+        _ro2_indices.push_back((unsigned int)(it - sp_list.begin()));
+    }
+  }
 
   // Read all expression data first (for J<N> detection and conversion)
   auto coeff_exprs = getParam<std::vector<std::string>>("coefficient_expressions");
@@ -158,6 +174,15 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
     _species_vals_material[i] = &coupledValue("species_variables", i);
   }
 
+  // Add RO2 lumped variable if the mechanism uses it (e.g. atchem2_example.fac)
+  bool _has_ro2 = !_ro2_indices.empty();
+  if (_has_ro2)
+  {
+    vars += ",RO2";
+    _name_to_index["RO2"] = 5 + _n_coefficients + _n_species_material;
+  }
+  unsigned int _n_extra = _has_ro2 ? 1 : 0;
+
   // Add PHOTOJ variables
   for (auto & n : j_numbers)
   {
@@ -167,7 +192,7 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
   }
 
   // Resize parameter buffer
-  _func_params.resize(5 + _n_coefficients + _n_species_material + _n_j_variables, 0.0);
+  _func_params.resize(5 + _n_coefficients + _n_species_material + _n_extra + _n_j_variables, 0.0);
 
   // The photolysis-rates file contains ALL MCM J values (~35); the mechanism
   // may only reference a subset.  Require at least as many entries as the
@@ -240,9 +265,19 @@ MCMRatesMaterial::computeQpProperties()
         _func_params[_j_index_start + i] = 0.0;
   }
 
-  // Step 3: Update species concentration variables (for RO2 = CH3O2 etc.)
+  // Step 3: Update species concentration variables
   for (unsigned int i = 0; i < _n_species_material; ++i)
     _func_params[5 + _n_coefficients + i] = (*_species_vals_material[i])[_qp];
+
+  // RO2 = Σ[peroxy radicals] (lumped species, e.g. RO2 = CH3O2 + ...).
+  // Some MCM mechanisms use RO2 directly in rate expressions.
+  if (!_ro2_indices.empty())
+  {
+    Real ro2_sum = 0.0;
+    for (auto idx : _ro2_indices)
+      ro2_sum += (*_species_vals[idx])[_qp];
+    _func_params[5 + _n_coefficients + _n_species_material] = ro2_sum;
+  }
 
   // Step 4: Evaluate rate coefficients in topological order.
   for (unsigned int i = 0; i < _n_coefficients; ++i)
