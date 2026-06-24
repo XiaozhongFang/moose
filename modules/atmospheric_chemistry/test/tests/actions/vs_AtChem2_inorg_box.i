@@ -34,7 +34,7 @@
 []
 
 [Postprocessors]
-  # Photolysis rates — one per J<N> used in atchem2_example mechanism
+  # ── Photolysis rates — all J values from AtChem2 photolysisRates.output ──
   [J1]   type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 1   []
   [J2]   type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 2   []
   [J3]   type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 3   []
@@ -57,13 +57,33 @@
   [J22]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 22  []
   [J23]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 23  []
   [J24]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 24  []
+  [J31]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 31  []
+  [J32]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 32  []
+  [J33]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 33  []
   [J34]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 34  []
+  [J35]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 35  []
+  [J41]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 41  []
   [J51]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 51  []
-  # Environment variables (constant parameters, for plotting completeness)
-  [TEMP]  type = Receiver  default = 288.15    []
-  [PRESS] type = Receiver  default = 1.01325e5  []
-  [M]     type = Receiver  default = 2.55e19    []
-  [H2O]   type = Receiver  default = 4.45e17    []
+  [J52]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 52  []
+  [J53]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 53  []
+  [J54]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 54  []
+  [J55]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 55  []
+  [J56]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 56  []
+  [J61]  type = MCMPhotolysisPostprocessor  box_model = box_model  j_number = 61  []
+
+  # ── Environment variables (AtChem2 environmentVariables.output order) ──
+  [M_env]     type = Receiver  default = 2.55e19    []
+  [TEMP]      type = Receiver  default = 288.15     []
+  [PRESS]     type = Receiver  default = 1.01325e5  []
+  [RH]        type = Receiver  default = 0.0        []
+  [H2O]       type = Receiver  default = 4.45e17    []
+  [DEC]       type = Receiver  default = 0.0        []
+  [BLHEIGHT]  type = Receiver  default = 0.0        []
+  [DILUTE]    type = Receiver  default = 0.0        []
+  [JFAC]      type = Receiver  default = 1.0        []
+  [ROOF]      type = Receiver  default = 1.0        []
+  [ASA]       type = Receiver  default = 0.0        []
+  [RO2_sum]   type = Receiver  default = 0.0  []
 []
 
 [Executioner]
