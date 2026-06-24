@@ -169,12 +169,14 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
   // Resize parameter buffer
   _func_params.resize(5 + _n_coefficients + _n_species_material + _n_j_variables, 0.0);
 
-  // Validate that MCM photolysis parameter vectors match the number of J<N> variables
-  if (_j_CL.size() != _n_j_variables || _j_CMM.size() != _n_j_variables || _j_CNN.size() != _n_j_variables)
+  // The photolysis-rates file contains ALL MCM J values (~35); the mechanism
+  // may only reference a subset.  Require at least as many entries as the
+  // mechanism uses — extra entries in the file are harmless.
+  if (_j_CL.size() < _n_j_variables || _j_CMM.size() < _n_j_variables || _j_CNN.size() < _n_j_variables)
     mooseError("MCMRatesMaterial: MCM photolysis parameter vectors (j_cl/cmm/cnn_values) have size ",
                _j_CL.size(), "/", _j_CMM.size(), "/", _j_CNN.size(),
-               " but _n_j_variables = ", _n_j_variables,
-               ". These must match. Check that the MCM photolysis-rates file contains all J<N> used.");
+               " but the mechanism references ", _n_j_variables,
+               " J<N> variables. The photolysis-rates file must contain at least that many entries.");
 
   // Note: J values are not initialized here; they will be calculated from
   // solar zenith angle in computeQpProperties().

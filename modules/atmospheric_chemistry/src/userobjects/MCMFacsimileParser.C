@@ -175,13 +175,18 @@ MCMFacsimileParser::parse(const std::string & filename, const std::string & phot
   std::cout << "MCMFacsimileParser: Detected " << mech.ro2_species.size()
             << " RO2 species" << std::endl;
 
-  // Transfer photolysis data
-  for (auto & [jkey, cl_val] : _j_CL)
+  // Transfer photolysis data — only for J values actually referenced in
+  // the mechanism (not all 35 from the photolysis-rates file).  This
+  // prevents MCMRatesMaterial from receiving excess CL/CMM/CNN entries
+  // that don't correspond to any J variable in the mechanism expressions.
+  for (auto & jkey : _photolysis_rates)
   {
+    auto cl_it = _j_CL.find(jkey);
+    if (cl_it == _j_CL.end()) continue;
     unsigned int jn;
     pcrecpp::RE("J<([0-9]+)>").FullMatch(jkey, &jn);
     mech.j_numbers.push_back(jn);
-    mech.j_CL.push_back(cl_val);
+    mech.j_CL.push_back(cl_it->second);
     mech.j_CMM.push_back(_j_CMM[jkey]);
     mech.j_CNN.push_back(_j_CNN[jkey]);
   }
