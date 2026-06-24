@@ -135,7 +135,8 @@ def plot_grid(t_moose, moose_data, moose_cols, atchem_var, atchem_df,
     fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(11, 7))
     axs = axs.ravel()
     j = 0
-    step = max(1, len(t_moose) // 8)
+    N_MARKERS = 8  # keep ~8 markers per curve regardless of data density
+    moose_step = max(1, len(t_moose) // N_MARKERS)
     for i in range(nc):
         ax = axs[j]
         name = moose_cols[i]
@@ -143,7 +144,7 @@ def plot_grid(t_moose, moose_data, moose_cols, atchem_var, atchem_df,
         # MOOSE: black solid line + hollow ○ circle markers
         ax.plot(t_moose, moose_data[:, i], linestyle="-", color="black",
                 linewidth=1.0)
-        ax.plot(t_moose[::step], moose_data[::step, i],
+        ax.plot(t_moose[::moose_step], moose_data[::moose_step, i],
                 linestyle="none", marker="o", color="black",
                 markersize=4, markerfacecolor="none", markeredgewidth=0.8,
                 label="MOOSE")
@@ -154,7 +155,8 @@ def plot_grid(t_moose, moose_data, moose_cols, atchem_var, atchem_df,
             atchem_y = atchem_lookup[name]
             ax.plot(atchem_t, atchem_y, linestyle="--", color="#d62728",
                     linewidth=0.5, alpha=0.8)
-            ax.plot(atchem_t[::step], atchem_y[::step],
+            atchem_step = max(1, len(atchem_t) // N_MARKERS)
+            ax.plot(atchem_t[::atchem_step], atchem_y[::atchem_step],
                     linestyle="none", marker="^", color="#d62728",
                     markersize=4, markerfacecolor="none", markeredgewidth=0.8,
                     label="AtChem2")
