@@ -371,12 +371,12 @@ def main():
         if sol_names:
             sol_indices = [col_idx[s] for s in sol_names]
             sol_data = data[:, sol_indices]
-            # Prefer AtChem2's own photolysisRatesParameters.output (exact
-            # solar parameters from the Fortran code).  Fall back to our
-            # Madronich-1993 calculation when the file is not available.
-            sol_var, sol_df = _load_solar_atchem2(args.atchem2)
-            if sol_var is None:
-                sol_var, sol_df = _make_solar_atchem2(t, sol_names)
+            # Use Madronich (1993) formula for the AtChem2 overlay.
+            # AtChem2's photolysisRatesParameters.output has a bug: the
+            # t=0 row initialises all solar params to zero.  The Madronich
+            # formula is identical to what AtChem2's solar_functions_mod
+            # computes at t>0, and is the same formula used by MCMBoxModel.
+            sol_var, sol_df = _make_solar_atchem2(t, sol_names)
             plot_grid(t, sol_data, sol_names, sol_var, sol_df, "Solar", pdf)
 
     n_types = (1 if sp_names else 0) + (1 if j_names else 0) + \
