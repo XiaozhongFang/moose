@@ -42,10 +42,14 @@ python3 modules/atmospheric_chemistry/scripts/kpp_to_fac.py mechanism.kpp
 
 ## Utility Scripts
 
-| Script | Path | Purpose |
-|--------|------|---------|
-| KPP → FACSIMILE | `scripts/kpp_to_fac.py` | Convert `.kpp` → `.fac` |
-| RO2 Validation | `scripts/check_ro2.py` | Compare RO2 list against AtChem2 reference |
+| Script | Purpose |
+|--------|---------|
+| `scripts/kpp_to_fac.py` | Convert `.kpp` → `.fac` |
+| `scripts/check_ro2.py` | Compare RO2 list against AtChem2 reference |
+| `scripts/generate_atchem2_gold.py` | Generate gold CSV from AtChem2 reference output |
+| `scripts/plot_atchem2.py` | Plot MOOSE vs AtChem2 comparison (3×3 grid PDF) |
+| `scripts/plot_vs_f0am.py` | Plot MOOSE vs analytical solution for F0AM tutorial |
+| `scripts/gen_tutorial_gold.py` | Generate F0AM tutorial gold CSV from scipy ODE |
 
 ## Database
 
@@ -70,5 +74,8 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 - [`MCMDepositionKernel`](source/kernels/MCMDepositionKernel.md) — Dry deposition
 - [`MCMFacsimileParser`](source/userobjects/MCMFacsimileParser.md) — Standalone `.fac` parser
 - [`HybridJTableReader`](source/utils/HybridJTableReader.md) — TUV photolysis 4D interpolation
+- [`MCMSolarPostprocessor`](source/postprocessors/MCMSolarPostprocessor.md) — Solar parameters (cosx, secx, lha, etc.)
+- [`MCMPhotolysisPostprocessor`](source/postprocessors/MCMPhotolysisPostprocessor.md) — Individual photolysis J-values
+- [`MCMRO2Postprocessor`](source/postprocessors/MCMRO2Postprocessor.md) — Total peroxy radical (RO2) concentration
 
 !syntax complete groups=AtmosphericChemistryApp level=3
