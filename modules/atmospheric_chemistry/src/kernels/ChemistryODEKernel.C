@@ -58,13 +58,13 @@ ChemistryODEKernel::reinit()
   _box_model.setCurrentTime(_t);
 }
 
-std::vector<Real>
+const std::vector<Real> &
 ChemistryODEKernel::_buildC() const
 {
-  std::vector<Real> C(_species_vars.size());
+  _C_buffer.assign(_species_vars.size(), 0.0);
   for (unsigned int i = 0; i < _species_vars.size(); ++i)
-    C[i] = _species_vars[i]->sln()[0];
-  return C;
+    _C_buffer[i] = _species_vars[i]->sln()[0];
+  return _C_buffer;
 }
 
 Real

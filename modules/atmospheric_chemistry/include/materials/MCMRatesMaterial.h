@@ -54,13 +54,13 @@ private:
   unsigned int _n_species_material;
   /// Species concentration values at each qp (for fparser reference)
   std::vector<const VariableValue *> _species_vals_material;
-  /// Species names -> index in fparser param array
+  /// Species names -> index in fparser param array (constructor only)
   std::map<std::string, unsigned int> _species_name_to_index;
 
   /// fparser objects for each coefficient expression
   std::vector<SymFunctionPtr> _coeff_parsers;
 
-  /// Name-to-index mapping for the big parameter array
+  /// Name-to-index mapping for the big parameter array (constructor only)
   std::map<std::string, unsigned int> _name_to_index;
 
   /// Reaction rate expressions
@@ -73,11 +73,12 @@ private:
   /// Computed reaction rates R_i
   MaterialProperty<std::vector<Real>> & _reaction_rates;
 
-  /// J<N> variable support
+  /// J<N> variable support (constructor-computed offsets)
   unsigned int _n_j_variables;
   std::vector<std::string> _j_names;
-  std::map<std::string, unsigned int> _j_index;
   unsigned int _j_index_start;
+  /// Pre-allocated rate constant buffer (Per.14 — reused across QP calls)
+  std::vector<Real> _k_values;
 
   /// MCM photolysis parameters (CL, CMM, CNN) for SZA-based J calculation
   std::vector<Real> _j_CL;

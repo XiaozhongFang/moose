@@ -229,22 +229,24 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
     return;
 
   // Step 1: compute reactant products G[i] = C[iG[i][0]] * C[iG[i][1]] * C[iG[i][2]]
-  // All indices are valid species indices (padded with ONE=0, conc=1)
-  std::vector<Real> G(_n_reactions);
+  // All indices are valid species indices (padded with ONE=0, conc=1).
+  // Per.14: _scratch_G / _scratch_rates are mutable members pre-allocated once,
+  // avoiding heap allocation on every dC/dt call (~272 KiB per call for full MCM).
+  _scratch_G.assign(_n_reactions, 0.0);
   for (unsigned int r = 0; r < _n_reactions; ++r)
-    G[r] = C[_iG[r][0]] * C[_iG[r][1]] * C[_iG[r][2]];
+    _scratch_G[r] = C[_iG[r][0]] * C[_iG[r][1]] * C[_iG[r][2]];
 
   // Step 2: rates = k .* G
-  std::vector<Real> rates(_n_reactions);
+  _scratch_rates.assign(_n_reactions, 0.0);
   for (unsigned int r = 0; r < _n_reactions; ++r)
-    rates[r] = _k[r] * G[r];
+    _scratch_rates[r] = _k[r] * _scratch_G[r];
 
   // Step 3: dC = f^T * rates  — format-agnostic iteration via StoichMatrix.
   // forEachInRow dispatches based on _stoich.format (CSR or COO); the lambda
   // is fully inlined, so there is zero virtual-call overhead.
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
-    Real rate = rates[r];
+    Real rate = _scratch_rates[r];
     _stoich.forEachInRow(r, [&](int s, Real coeff) {
       dC[s] += coeff * rate;
     });
@@ -403,8 +405,14 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
   }
   _stoich.build(mech, fmt);
 
-  // Copy reactant indices
-  _iG = mech.reactant_indices;
+  // Copy reactant indices — convert vector<vector<int>> to flat array<int,3>
+  // Per.16: single contiguous allocation vs 17k independent heap allocations.
+  _iG.resize(_n_reactions);
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+  {
+    const auto & src = mech.reactant_indices[r];
+    _iG[r] = {src[0], src[1], src[2]};
+  }
 
   // --- Evaluate rate coefficients (fparser for complex expressions) ---
   _k.assign(_n_reactions, 1.0);
@@ -524,6 +532,15 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
     _name_to_index[jname] = _j_index_start + _name_to_index.size() - _j_index_start;
   }
 
+  // Pre-compute J photo indices into _func_params (Per.14 — avoids string+map in evaluateCoefficients)
+  _j_photo_indices.clear();
+  _j_photo_indices.reserve(_j_numbers.size());
+  for (auto & jn : _j_numbers)
+  {
+    std::string jname = "PHOTOJ" + std::to_string(jn);
+    _j_photo_indices.push_back(_name_to_index.at(jname));
+  }
+
   unsigned int n_j = j_numbers.size();
   _func_params.resize(5 + coeff_names.size() + _n_species + n_extra_vars + n_j, 0.0);
 
@@ -570,8 +587,8 @@ MCMBoxModel::evaluateCoefficients()
 
   _func_params[0] = _temperature;
   _func_params[1] = _air_density;
-  _func_params[2] = 0.21 * _air_density;
-  _func_params[3] = 0.78 * _air_density;
+  _func_params[2] = 0.21 * _air_density;  // O2 volume fraction
+  _func_params[3] = 0.78 * _air_density;  // N2 volume fraction
   _func_params[4] = _water_vapor;
 
   // Compute photolysis J values from solar zenith angle (MCM formula)
@@ -582,19 +599,14 @@ MCMBoxModel::evaluateCoefficients()
     const Real roof_factor = _roof_open ? 1.0 : 0.0;
     Real cosx = calculateCosSZA(_t);
     Real secx = (cosx > 1.0e-10) ? (1.0 / cosx) : 1.0e2;
+    // Per.14: use pre-computed _j_photo_indices instead of string+map lookup
     for (size_t i = 0; i < _j_CL_vals.size(); ++i)
     {
-      unsigned int jn = _j_numbers[i];
-      std::string jname = "PHOTOJ" + std::to_string(jn);
-      auto it = _name_to_index.find(jname);
-      if (it != _name_to_index.end())
-      {
-        if (cosx > 1.0e-10)
-          _func_params[it->second] = _j_CL_vals[i] * std::pow(cosx, _j_CMM_vals[i])
-                                     * std::exp(-_j_CNN_vals[i] * secx) * _jfac * roof_factor;
-        else
-          _func_params[it->second] = 0.0;
-      }
+      if (cosx > 1.0e-10)
+        _func_params[_j_photo_indices[i]] = _j_CL_vals[i] * std::pow(cosx, _j_CMM_vals[i])
+                                         * std::exp(-_j_CNN_vals[i] * secx) * _jfac * roof_factor;
+      else
+        _func_params[_j_photo_indices[i]] = 0.0;
     }
   }
 
@@ -650,7 +662,7 @@ MCMBoxModel::computeDayOfYear() const
 Real
 MCMBoxModel::calculateCosSZA(Real t) const
 {
-  const Real pi = 3.14159265358979323846;
+  constexpr Real pi = 3.14159265358979323846;
   unsigned int doy = computeDayOfYear();
   unsigned int days_in_year =
       ((_year % 4 == 0 && _year % 100 != 0) || _year % 400 == 0) ? 366 : 365;

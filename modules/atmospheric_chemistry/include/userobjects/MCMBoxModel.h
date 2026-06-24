@@ -331,8 +331,9 @@ protected:
   /// Format selected via "stoich_format" parameter (CSR or COO).
   StoichMatrix _stoich;
 
-  /// Reactant indices: _iG[reaction][0..2], padded with ONE index (0)
-  std::vector<std::vector<int>> _iG;
+  /// Reactant indices: _iG[reaction][0..2], padded with ONE index (0).
+  /// Fixed-size inner arrays (3 ints) — single contiguous allocation, cache-friendly.
+  std::vector<std::array<int, 3>> _iG;
 
   /// Pre-computed (or template) rate constants
   std::vector<Real> _k;
@@ -361,7 +362,10 @@ protected:
   // -- fparser for complex rate coefficients --
   std::vector<SymFunctionPtr> _coeff_parsers;
   std::vector<SymFunctionPtr> _reaction_parsers;
-  std::map<std::string, unsigned int> _name_to_index;
+  /// O(1) average lookup — evaluated every species/J in evaluateCoefficients().
+  std::unordered_map<std::string, unsigned int> _name_to_index;
+  /// Pre-computed J photo index offsets into _func_params (avoid string+map in hot path)
+  std::vector<unsigned int> _j_photo_indices;
   unsigned int _j_index_start;
   Real _temperature;
   Real _air_density;
@@ -390,6 +394,10 @@ protected:
   mutable std::vector<Real> _cached_diag_J;
   /// Cached off-diagonal Jacobian elements: key = (row << 32) | col
   mutable std::unordered_map<uint64_t, Real> _cached_offdiag_J;
+
+  /// Scratch buffers for computeDCdt (Per.14 — reused across calls, no per-call allocation)
+  mutable std::vector<Real> _scratch_G;
+  mutable std::vector<Real> _scratch_rates;
 
   /// RO2 species indices in the species vector (built from parser's ro2_species)
   std::vector<unsigned int> _ro2_indices;

@@ -35,6 +35,9 @@ ChemicalSourceKernel::ChemicalSourceKernel(const InputParameters & params)
     _coupled_vals(coupledValues("all_species")),
     _species_reactants(getParam<std::vector<std::vector<Real>>>("species_reactants"))
 {
+  // Build O(1) reverse index: jvar → species index (Per.14)
+  for (unsigned int k = 0; k < _n_species; ++k)
+    _coupled_var_to_idx[_coupled_vars[k]] = k;
 }
 
 Real
@@ -74,16 +77,11 @@ ChemicalSourceKernel::computeQpJacobian()
 Real
 ChemicalSourceKernel::computeQpOffDiagJacobian(unsigned int jvar)
 {
-  // Find if jvar corresponds to a coupled species
-  unsigned int k_idx = _n_species;
-  for (unsigned int k = 0; k < _n_species; ++k)
-    if (_coupled_vars[k] == jvar)
-    {
-      k_idx = k;
-      break;
-    }
-  if (k_idx >= _n_species)
+  // O(1) lookup via pre-built reverse index (Per.14)
+  auto it = _coupled_var_to_idx.find(jvar);
+  if (it == _coupled_var_to_idx.end())
     return 0.0;
+  unsigned int k_idx = it->second;
 
   // d(residual_j)/d(C_k) = -_test * phi_j * Σ_i S_{j,i} * dR_i/dC_k
   // dR_i/dC_k = ν_{i,k} * R_i / C_k  (if k is a reactant in reaction i)

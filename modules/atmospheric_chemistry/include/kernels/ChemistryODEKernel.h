@@ -54,6 +54,10 @@ protected:
   /// Pointers to all species' ScalarVariable objects (index = species index)
   std::vector<MooseVariableScalar *> _species_vars;
 
-  /// Build the full concentration vector from scalar variable values
-  std::vector<Real> _buildC() const;
+  /// Build the full concentration vector from scalar variable values.
+  /// Returns reference to pre-allocated _C_buffer (Per.14 — no allocation per call).
+  const std::vector<Real> & _buildC() const;
+
+  /// Pre-allocated concentration buffer; reused across all residual/Jacobian calls.
+  mutable std::vector<Real> _C_buffer;
 };

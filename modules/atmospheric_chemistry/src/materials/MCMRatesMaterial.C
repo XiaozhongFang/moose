@@ -132,7 +132,6 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
     while (re_j.FindAndConsume(&sp, &jnum)) j_numbers.insert(jnum);
   }
   _n_j_variables = j_numbers.size();
-  _j_index.clear();
   _j_names.clear();
 
   // Build master variable list with all variables
@@ -162,7 +161,6 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
   {
     std::string jname = "PHOTOJ" + std::to_string(n);
     vars += "," + jname;
-    _j_index[jname] = _j_index_start + _j_names.size();
     _j_names.push_back(jname);
   }
 
@@ -215,8 +213,8 @@ MCMRatesMaterial::computeQpProperties()
   // Step 1: Set base variable values
   _func_params[0] = _TEMP;
   _func_params[1] = _M;
-  _func_params[2] = 0.21 * _M; // O2 background (~21% of air)
-  _func_params[3] = 0.78 * _M; // N2 background (~78% of air)
+  _func_params[2] = 0.21 * _M; // O2 volume fraction
+  _func_params[3] = 0.78 * _M; // N2 volume fraction
   _func_params[4] = _H2O_val;
 
   // Step 2: Calculate photolysis rates from solar zenith angle (MCM formula)
@@ -247,18 +245,17 @@ MCMRatesMaterial::computeQpProperties()
     _func_params[5 + i] = val;
   }
 
-  // Step 5: Compute reaction rate k_i for each reaction
-  std::vector<Real> k_values(_n_reactions);
+  // Step 5: Compute reaction rate k_i for each reaction.
+  // _k_values is pre-allocated member buffer (Per.14 — no per-QP allocation).
+  _k_values.assign(_n_reactions, 0.0);
   for (unsigned int i = 0; i < _n_reactions; ++i)
-  {
-    k_values[i] = evaluate(_reaction_parsers[i]);
-  }
+    _k_values[i] = evaluate(_reaction_parsers[i]);
 
   // Step 6: Compute R_i = k_i * Π [C_reactant]^ν
   _reaction_rates[_qp].resize(_n_reactions);
   for (unsigned int i = 0; i < _n_reactions; ++i)
   {
-    Real rate = k_values[i];
+    Real rate = _k_values[i];
     if (std::isnan(rate))
       rate = 0.0;
     const auto & row = _reactant_matrix[i];
@@ -289,7 +286,7 @@ MCMRatesMaterial::computeDayOfYear() const
 Real
 MCMRatesMaterial::calculateCosSZA(Real t) const
 {
-  const Real pi = 3.14159265358979323846;
+  constexpr Real pi = 3.14159265358979323846;
 
   // Day angle (radians)
   unsigned int doy = computeDayOfYear();
