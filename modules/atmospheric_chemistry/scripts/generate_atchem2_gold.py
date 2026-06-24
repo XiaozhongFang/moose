@@ -79,7 +79,14 @@ def generate_gold(atchem2_dir, output_path):
         "SA", "SO2", "SO3",
     ]
 
-    # Solar params (MOOSE MCMSolarPostprocessor columns — computed below)
+    # Solar params (MCMSolarPostprocessor columns).
+    #
+    # NOTE: AtChem2 computes these identically (Madronich 1993, zenith_data_mod /
+    # solar_functions_mod) and PLOTS them (see plot-atchem2-numpy.py), but does
+    # NOT output them to any text file.  The gold values below are computed from
+    # the same Madronich 1993 formula.  This is NOT a true independent validation
+    # (both codes use identical equations) — it only verifies the implementation
+    # is bug-free, not that the formula itself is correct.
     solar_cols = ["cosx", "secx", "lha", "sinld", "cosld", "eqtime", "lat", "lon"]
 
     all_cols = j_cols + env_moose_names + solar_cols + species_cols
