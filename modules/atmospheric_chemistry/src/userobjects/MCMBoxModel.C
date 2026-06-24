@@ -616,6 +616,10 @@ MCMBoxModel::evaluateCoefficients()
     const Real roof_factor = _roof_open ? 1.0 : 0.0;
     Real cosx = calculateCosSZA(_t);
     Real secx = (cosx > 1.0e-10) ? (1.0 / cosx) : 1.0e2;
+
+    // Cache solar parameters for MCMSolarPostprocessor
+    _solar_cosx = cosx;
+    _solar_secx = secx;
     // Per.14: use pre-computed _j_photo_indices instead of string+map lookup.
     // Sentinel value (unsigned int)-1 means J number was not registered; skip it.
     for (size_t i = 0; i < _j_CL_vals.size() && i < _j_photo_indices.size(); ++i)
@@ -696,6 +700,13 @@ MCMBoxModel::calculateCosSZA(Real t) const
   Real lat_rad = _lat * pi / 180.0;
   Real lha = pi * ((current_frac_hour / 12.0) - (1.0 + _lon / 180.0)) + eqt;
   Real cosx = cos(lha) * cos(lat_rad) * cos(dec) + sin(lat_rad) * sin(dec);
+
+  // Cache all solar parameters for MCMSolarPostprocessor
+  _solar_lha = lha;
+  _solar_sinld = sin(lat_rad) * sin(dec);
+  _solar_cosld = cos(lat_rad) * cos(dec);
+  _solar_eqt = eqt;
+
   if (cosx <= 0.0) cosx = 0.0;
   return cosx;
 }

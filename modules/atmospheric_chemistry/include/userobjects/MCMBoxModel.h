@@ -222,6 +222,23 @@ public:
   /** Get the number of photolysis J variables. */
   unsigned int nJValues() const { return _n_j_vars; }
 
+  /** Get cached solar zenith angle cosine (computed during evaluateCoefficients). */
+  Real getSolarCosX() const { return _solar_cosx; }
+  /** Get cached solar secant (1/cosx). */
+  Real getSolarSecX() const { return _solar_secx; }
+  /** Get cached local hour angle (radians). */
+  Real getSolarLHA() const { return _solar_lha; }
+  /** Get sin(lat)*sin(dec). */
+  Real getSolarSinLD() const { return _solar_sinld; }
+  /** Get cos(lat)*cos(dec). */
+  Real getSolarCosLD() const { return _solar_cosld; }
+  /** Get equation of time. */
+  Real getSolarEQT() const { return _solar_eqt; }
+  /** Get latitude (degrees). */
+  Real getLatitude() const { return _lat; }
+  /** Get longitude (degrees). */
+  Real getLongitude() const { return _lon; }
+
   /**
    * Get dC/dt for a single species, caching the full computation.
    * On first call after markDirty(), computes the complete dC/dt vector
@@ -351,6 +368,10 @@ protected:
   // -- Solar cycle --
   Real _lat, _lon, _declination, _eot;
   int _day, _month, _year;
+
+  /// Cached solar parameters (computed once per evaluateCoefficients call)
+  mutable Real _solar_cosx, _solar_secx, _solar_lha;
+  mutable Real _solar_sinld, _solar_cosld, _solar_eqt;
 
   // -- Dilution --
   Real _kdil;

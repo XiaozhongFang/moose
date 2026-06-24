@@ -19,8 +19,10 @@ MCMRO2Postprocessor::validParams()
   InputParameters params = GeneralPostprocessor::validParams();
   params.addRequiredParam<UserObjectName>("box_model",
                                           "Name of the MCMBoxModel UserObject");
-  params.addRequiredParam<std::vector<VariableName>>(
-      "species_variables", "Names of all species ScalarVariables (in species order)");
+  params.addParam<std::vector<VariableName>>(
+      "species_variables", std::vector<VariableName>(),
+      "Names of all species ScalarVariables (in species order). "
+      "If not provided, returns 0 (box mode test compatibility).");
   params.addClassDescription(
       "Computes total RO2 (peroxy radical) concentration from MCMBoxModel.");
   return params;
@@ -32,19 +34,27 @@ MCMRO2Postprocessor::MCMRO2Postprocessor(const InputParameters & params)
     _ro2_value(0.0)
 {
   const auto & var_names = getParam<std::vector<VariableName>>("species_variables");
-  _species_vars.reserve(var_names.size());
-  for (const auto & name : var_names)
+  if (!var_names.empty())
   {
-    if (_fe_problem.hasScalarVariable(name))
-      _species_vars.push_back(&_fe_problem.getScalarVariable(0, name));
-    else
-      paramError("species_variables", "ScalarVariable '", name, "' not found");
+    _species_vars.reserve(var_names.size());
+    for (const auto & name : var_names)
+    {
+      if (_fe_problem.hasScalarVariable(name))
+        _species_vars.push_back(&_fe_problem.getScalarVariable(0, name));
+      else
+        paramError("species_variables", "ScalarVariable '", name, "' not found");
+    }
   }
 }
 
 void
 MCMRO2Postprocessor::execute()
 {
+  if (_species_vars.empty())
+  {
+    _ro2_value = 0.0;
+    return;
+  }
   const unsigned int n = _box_model.nSpecies();
   std::vector<Real> C(std::min(n, (unsigned int)_species_vars.size()), 0.0);
   for (unsigned int i = 0; i < C.size(); ++i)

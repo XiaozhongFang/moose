@@ -83,7 +83,17 @@
   [JFAC]      type = Receiver  default = 1.0        []
   [ROOF]      type = Receiver  default = 1.0        []
   [ASA]       type = Receiver  default = 0.0        []
-  [RO2_sum]   type = Receiver  default = 0.0  []
+  [RO2_sum]   type = MCMRO2Postprocessor  box_model = box_model  []
+
+  # ── Solar parameters (AtChem2 zenith_data_mod) ──
+  [cosx]   type = MCMSolarPostprocessor  box_model = box_model  solar_param = cosx    []
+  [secx]   type = MCMSolarPostprocessor  box_model = box_model  solar_param = secx    []
+  [lha]    type = MCMSolarPostprocessor  box_model = box_model  solar_param = lha     []
+  [sinld]  type = MCMSolarPostprocessor  box_model = box_model  solar_param = sinld   []
+  [cosld]  type = MCMSolarPostprocessor  box_model = box_model  solar_param = cosld   []
+  [eqtime] type = MCMSolarPostprocessor  box_model = box_model  solar_param = eqtime  []
+  [lat]    type = MCMSolarPostprocessor  box_model = box_model  solar_param = lat     []
+  [lon]    type = MCMSolarPostprocessor  box_model = box_model  solar_param = lon     []
 []
 
 [Executioner]
