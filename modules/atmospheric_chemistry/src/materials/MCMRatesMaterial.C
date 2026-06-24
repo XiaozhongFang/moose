@@ -261,6 +261,10 @@ MCMRatesMaterial::computeQpProperties()
     const auto & row = _reactant_matrix[i];
     for (size_t j = 0; j + 1 < row.size(); j += 2)
     {
+      // Defense against negative/corrupt indices in reactant_matrix
+      if (row[j] < 0.0 || row[j] >= (Real)_n_species)
+        mooseError("MCMRatesMaterial: invalid species index ", row[j],
+                   " in reaction ", i, " (nSpecies=", _n_species, ")");
       unsigned int sp_idx = static_cast<unsigned int>(row[j]);
       Real coeff = row[j + 1];
       rate *= std::pow(std::max((*_species_vals[sp_idx])[_qp], 0.0), coeff);

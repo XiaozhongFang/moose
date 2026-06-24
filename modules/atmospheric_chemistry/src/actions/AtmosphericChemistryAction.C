@@ -76,6 +76,13 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
     _mode(getParam<MooseEnum>("mode")),
     _include_transport(getParam<bool>("include_transport"))
 {
+  // Reject absolute paths — prevents reading arbitrary system files via
+  // malicious mechanism_file / photolysis_file parameters.
+  // Relative paths (including "..") are allowed — MOOSE test harnesses
+  // routinely use "../../../doc/..." to reference database files.
+  if (!_mechanism_file.empty() && _mechanism_file[0] == '/')
+    mooseError("AtmosphericChemistry: mechanism_file must be relative, got absolute: ", _mechanism_file);
+
   // Parse the .fac mechanism file via MCMFacsimileParser (shared with MCMBoxModel)
   MCMFacsimileParser parser;
 
@@ -83,6 +90,8 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   parser.setMCMVersion(mcm_ver);
 
   std::string photo_path = getParam<std::string>("mcm_photolysis_file");
+  if (!photo_path.empty() && photo_path[0] == '/')
+    mooseError("AtmosphericChemistry: mcm_photolysis_file must be relative, got absolute: ", photo_path);
   std::string peroxy_path =
       "doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_" + mcm_ver + ".dat";
   {

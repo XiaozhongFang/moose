@@ -15,6 +15,11 @@
 
 HybridJTableReader::HybridJTableReader(const std::string & dir)
 {
+  // Reject absolute paths (relative paths including ".." are legitimate
+  // for test harnesses referencing database directories from test subdirs).
+  if (!dir.empty() && dir[0] == '/')
+    mooseError("HybridJTableReader: directory path must be relative, got absolute: ", dir);
+
   // Read index
   std::string idx_path = dir + "/index.txt";
   std::ifstream idx(idx_path);
@@ -50,6 +55,10 @@ HybridJTableReader::HybridJTableReader(const std::string & dir)
     unsigned int n = _ns * _na * _no * _nh;
     tbl.resize(n);
     file.read(reinterpret_cast<char *>(tbl.data()), n * sizeof(Real));
+    // Verify we read the expected number of bytes (defense against truncated files)
+    if ((unsigned int)file.gcount() != n * sizeof(Real))
+      mooseError("HybridJTableReader: table file size mismatch for ", jname,
+                 " (expected ", n * sizeof(Real), " bytes, got ", file.gcount(), ")");
     file.close();
   }
 }
@@ -65,6 +74,9 @@ HybridJTableReader::loadAxis(std::vector<Real> & axis, const std::string & filep
   axis.resize(n);
   file.seekg(0);
   file.read(reinterpret_cast<char *>(axis.data()), n * sizeof(Real));
+  if ((unsigned int)file.gcount() != n * sizeof(Real))
+    mooseError("HybridJTableReader: axis file size mismatch for ", filepath,
+               " (expected ", n * sizeof(Real), " bytes, got ", file.gcount(), ")");
 }
 
 Real
