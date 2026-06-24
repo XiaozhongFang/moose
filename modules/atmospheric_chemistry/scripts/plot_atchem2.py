@@ -181,6 +181,27 @@ def plot_grid(t_moose, moose_data, moose_cols, atchem_var, atchem_df,
     plt.close(fig)
 
 
+def _load_solar_atchem2(base_dir):
+    """Load AtChem2 photolysisRatesParameters.output (solar params).
+
+    AtChem2 writes all solar parameters (cosx, secx, lha, sinld, cosld,
+    eqtime, lat, lon) to this file.  Returns (var, df) in AtChem2 format,
+    or (None, None) if the file is not found.
+    """
+    solar_file = Path(base_dir) / "photolysisRatesParameters.output"
+    if not solar_file.exists():
+        return None, None
+    var = np.genfromtxt(str(solar_file), max_rows=1, dtype=str)
+    df = np.genfromtxt(str(solar_file), skip_header=1)
+    if df.ndim == 1:
+        df = df.reshape(-1, 1)
+    # Rename "latitude" → "lat", "longitude" → "lon" to match MOOSE columns
+    rename = {"latitude": "lat", "longitude": "lon"}
+    var = np.array([rename.get(v, v) for v in var])
+    return var, df
+
+
+# Legacy helper kept for environments without photolysisRatesParameters.output.
 def _make_solar_atchem2(t_moose, sol_names):
     """Synthesise AtChem2-format solar data using Madronich (1993).
 
@@ -350,10 +371,12 @@ def main():
         if sol_names:
             sol_indices = [col_idx[s] for s in sol_names]
             sol_data = data[:, sol_indices]
-            # AtChem2 does not output solar parameters as text files, but they
-            # are computed identically (Madronich 1993).  Synthesize AtChem2
-            # reference data so the overlay is visible on the solar page.
-            sol_var, sol_df = _make_solar_atchem2(t, sol_names)
+            # Prefer AtChem2's own photolysisRatesParameters.output (exact
+            # solar parameters from the Fortran code).  Fall back to our
+            # Madronich-1993 calculation when the file is not available.
+            sol_var, sol_df = _load_solar_atchem2(args.atchem2)
+            if sol_var is None:
+                sol_var, sol_df = _make_solar_atchem2(t, sol_names)
             plot_grid(t, sol_data, sol_names, sol_var, sol_df, "Solar", pdf)
 
     n_types = (1 if sp_names else 0) + (1 if j_names else 0) + \
