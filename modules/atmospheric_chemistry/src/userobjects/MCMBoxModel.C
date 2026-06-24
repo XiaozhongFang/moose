@@ -702,6 +702,8 @@ MCMBoxModel::calculateCosSZA(Real t) const
   Real cosx = cos(lha) * cos(lat_rad) * cos(dec) + sin(lat_rad) * sin(dec);
 
   // Cache all solar parameters for MCMSolarPostprocessor
+  _declination = dec;  // store for DEC postprocessor
+  _eot = eqt;
   _solar_lha = lha;
   _solar_sinld = sin(lat_rad) * sin(dec);
   _solar_cosld = cos(lat_rad) * cos(dec);
@@ -932,11 +934,29 @@ MCMBoxModel::getRO2Sum(const std::vector<Real> & C) const
 Real
 MCMBoxModel::getJValue(unsigned int j_number) const
 {
-  // Look up J value from fparser parameter buffer using PHOTOJ<N> key
+  // First try the fparser parameter buffer (fast path for J numbers referenced
+  // in reaction/coefficient expressions — these are pre-computed).
   std::string jname = "PHOTOJ" + std::to_string(j_number);
   auto it = _name_to_index.find(jname);
   if (it != _name_to_index.end() && it->second < _func_params.size())
     return _func_params[it->second];
+
+  // Fallback: compute J directly from MCM SZA formula for J numbers that have
+  // photolysis parameters (CL/CMM/CNN) but aren't referenced in any reaction.
+  // These are in the photolysis-rates file and AtChem2 outputs them, but they
+  // don't participate in chemistry.
+  for (size_t i = 0; i < _j_numbers.size(); ++i)
+  {
+    if (_j_numbers[i] == j_number)
+    {
+      const Real roof_factor = _roof_open ? 1.0 : 0.0;
+      Real cosx = _solar_cosx;  // cached during evaluateCoefficients
+      if (cosx > 1.0e-10)
+        return _j_CL_vals[i] * std::pow(cosx, _j_CMM_vals[i])
+               * std::exp(-_j_CNN_vals[i] / cosx) * _jfac * roof_factor;
+      return 0.0;
+    }
+  }
   return 0.0;
 }
 

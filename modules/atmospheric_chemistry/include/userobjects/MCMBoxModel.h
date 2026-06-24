@@ -366,7 +366,8 @@ protected:
   std::vector<Real> _j_CL, _j_CMM, _j_CNN;
 
   // -- Solar cycle --
-  Real _lat, _lon, _declination, _eot;
+  Real _lat, _lon;
+  mutable Real _declination, _eot;
   int _day, _month, _year;
 
   /// Cached solar parameters (computed once per evaluateCoefficients call)

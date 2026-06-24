@@ -555,12 +555,13 @@ MCMFacsimileParser::loadPhotolysisParameters(const std::string & filename)
     if (iss >> jnum >> cl_val >> cmm_val >> cnn_val >> name >> tau)
     {
       std::string jkey = "J<" + std::to_string(jnum) + ">";
-      if (_photolysis_rates.count(jkey))
-      {
-        _j_CL[jkey] = cl_val;
-        _j_CMM[jkey] = cmm_val;
-        _j_CNN[jkey] = cnn_val;
-      }
+      // Store ALL photolysis parameters from the file — not just those
+      // referenced in reactions.  AtChem2's photolysisRates.output lists
+      // every J<N> in the photolysis-rates file, and getJValue() can
+      // compute any of them from the stored CL/CMM/CNN parameters.
+      _j_CL[jkey] = cl_val;
+      _j_CMM[jkey] = cmm_val;
+      _j_CNN[jkey] = cnn_val;
     }
   };
 
