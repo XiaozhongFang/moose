@@ -1,17 +1,34 @@
 #!/usr/bin/env python3
 """
-Plot MOOSE vs AtChem2 results — matching plot-atchem2-numpy.py format.
+Plot MOOSE vs AtChem2 atmospheric chemistry results.
 
-- 3×3 grid per page, each variable its own subplot
-- Time in seconds, scientific notation on Y axis
-- MOOSE data (black solid line) overlaid with AtChem2 reference (red dashed)
-- Column order matches AtChem2 output files:
-  Species: CH3NO3 ... SO3 (29 species)
-  Photolysis: J1, J2, J3, ... (AtChem2 order)
-  Environment: M, TEMP, PRESS, RH, H2O, DEC, BLHEIGHT, DILUTE, JFAC, ROOF, ASA, RO2
+Matches the layout of AtChem2's plot-atchem2-numpy.py:
+  - 3×3 grid per page, each variable its own subplot
+  - Time in seconds on X axis, scientific notation on Y axis
+  - MOOSE data (black solid) overlaid with AtChem2 reference (red dashed)
+
+Output: multi-page PDF with 4 sections:
+  Page 1 — Species concentrations (29 species)
+  Page 2 — Photolysis rates (35 J values: J1-J8, J11-J24, J31-J35, J41, J51-J56, J61)
+  Page 3 — Environment variables (M, TEMP, PRESS, RH, H2O, DEC, BLHEIGHT, DILUTE, JFAC, ROOF, ASA, RO2)
+  Page 4 — Solar parameters (cosx, secx, lha, sinld, cosld, eqtime, lat, lon)
+
+Arguments:
+  --moose, -m    Path to MOOSE CSV output (vs_AtChem2_inorg_box.csv).
+                 Default: modules/atmospheric_chemistry/test/tests/actions/vs_AtChem2_inorg_box.csv
+  --atchem2, -a  Directory containing AtChem2 output files:
+                   speciesConcentrations.output
+                   photolysisRates.output
+                   environmentVariables.output
+                 Also tries <dir>/model/output/ subdirectory.
+                 If files not found, plots MOOSE data only (no overlay).
+                 Default: .reasonix/docs/AtChem2/model/output/
+  --output, -o   Output PDF path.  Default: moose_vs_atchem2.pdf
 
 Usage:
-    python3 plot_atchem2.py [--moose CSV] [--atchem2 DIR] [--output PDF]
+    python3 plot_atchem2.py
+    python3 plot_atchem2.py --moose my_run.csv --output my_plot.pdf
+    python3 plot_atchem2.py --atchem2 ~/AtChem2/model/output
 """
 
 import argparse, csv, sys
@@ -62,7 +79,15 @@ def load_moose_csv(path):
     with open(path) as f:
         reader = csv.reader(f)
         header = next(reader)
-        rows = [[float(v) for v in r] for r in reader if r]
+        rows = []
+        for lineno, r in enumerate(reader, start=2):
+            if not r:
+                continue
+            try:
+                rows.append([float(v) for v in r])
+            except ValueError as exc:
+                raise ValueError(
+                    f"Non-numeric data in {path} at line {lineno}: {r}") from exc
     arr = np.array(rows)
     return arr[:, 0], header, arr[:, 1:]
 
@@ -102,16 +127,20 @@ def plot_grid(t_moose, moose_data, moose_cols, atchem_var, atchem_df,
         ax.legend(fontsize=6, frameon=False, loc="upper right")
         ax.set(title=name, xlabel="seconds", ylabel="")
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: "%.1e" % x))
-        if j == 8:
+        j = j + 1
+        if j == 9:
             fig.tight_layout()
             pdf.savefig(fig)
+            plt.close(fig)
             fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(11, 7))
             axs = axs.ravel()
             j = 0
-        else:
-            j = j + 1
-    fig.tight_layout()
-    pdf.savefig(fig)
+    if j > 0:
+        # Hide unused subplots on the last page
+        for k in range(j, 9):
+            axs[k].set_visible(False)
+        fig.tight_layout()
+        pdf.savefig(fig)
     plt.close(fig)
 
 
@@ -129,24 +158,54 @@ def main():
     # Build column name → index lookup
     col_idx = {c: i for i, c in enumerate(col_name)}
 
-    # Load AtChem2 reference
+    # Load AtChem2 reference — try the given directory, and if files are not
+    # found there, look in the standard model output location.
     atchem2 = Path(args.atchem2)
     sp_var, sp_df = None, None
     ph_var, ph_df = None, None
     ev_var, ev_df = None, None
+
+    def _try_load(base_dir):
+        """Try loading AtChem2 output files from base_dir; return True if any found."""
+        nonlocal sp_var, sp_df, ph_var, ph_df, ev_var, ev_df
+        sp_file = base_dir / "speciesConcentrations.output"
+        ph_file = base_dir / "photolysisRates.output"
+        ev_file = base_dir / "environmentVariables.output"
+        found = False
+        if sp_file.exists():
+            sp_var, sp_df = load_atchem2(str(sp_file))
+            found = True
+        if ph_file.exists():
+            ph_var, ph_df = load_atchem2(str(ph_file))
+            found = True
+        if ev_file.exists():
+            ev_var, ev_df = load_atchem2(str(ev_file))
+            found = True
+        return found
+
     if atchem2.is_dir():
-        if (atchem2 / "speciesConcentrations.output").exists():
-            sp_var, sp_df = load_atchem2(atchem2 / "speciesConcentrations.output")
-        if (atchem2 / "photolysisRates.output").exists():
-            ph_var, ph_df = load_atchem2(atchem2 / "photolysisRates.output")
-        if (atchem2 / "environmentVariables.output").exists():
-            ev_var, ev_df = load_atchem2(atchem2 / "environmentVariables.output")
+        if not _try_load(atchem2):
+            # Also try model/output/ subdirectory (common AtChem2 layout)
+            alt = atchem2 / "model" / "output"
+            if alt.is_dir():
+                _try_load(alt)
+
+    if sp_var is None and ph_var is None and ev_var is None:
+        print("Note: AtChem2 reference data not found — plotting MOOSE data only.\n"
+              "      Expected files: speciesConcentrations.output, photolysisRates.output,\n"
+              "      environmentVariables.output in a model/output/ directory.\n"
+              "      Run with --atchem2 <path-to-model-output> to add AtChem2 overlay.",
+              file=sys.stderr)
+
+    # Solar columns (separate from species)
+    SOLAR_ORDER = ["cosx", "secx", "lha", "sinld", "cosld", "eqtime", "lat", "lon"]
 
     # Species columns (MOOSE mechanism order)
     species_cols = [c for c in col_name
                     if c not in J_ORDER
                     and c not in ENV_MOOSE_TO_ATCHEM2
-                    and c not in ENV_ATCHEM2_ORDER]
+                    and c not in ENV_ATCHEM2_ORDER
+                    and c not in SOLAR_ORDER]
     sp_indices = [col_idx[c] for c in species_cols if c in col_idx]
     sp_names = [c for c in species_cols if c in col_idx]
 
@@ -164,23 +223,30 @@ def main():
             plot_grid(t, j_data, j_names, ph_var, ph_df, "Photolysis", pdf)
 
         # ── Page 3: Environment (AtChem2 order) ──
+        # Reverse mapping: AtChem2 name → MOOSE column name (built once)
+        atchem2_to_moose = {v: k for k, v in ENV_MOOSE_TO_ATCHEM2.items()}
         env_display = []
         env_indices = []
         for atchem_name in ENV_ATCHEM2_ORDER:
-            # Find MOOSE column that maps to this AtChem2 name
-            moose_name = None
-            for mk, mv in ENV_MOOSE_TO_ATCHEM2.items():
-                if mv == atchem_name and mk in col_idx:
-                    moose_name = mk
-                    break
-            if moose_name:
+            moose_name = atchem2_to_moose.get(atchem_name)
+            if moose_name and moose_name in col_idx:
                 env_display.append(atchem_name)
                 env_indices.append(col_idx[moose_name])
         if env_display:
             env_data = data[:, env_indices]
             plot_grid(t, env_data, env_display, ev_var, ev_df, "Environment", pdf)
 
-    print(f"Saved: {args.output}")
+        # ── Page 4: Solar parameters ──
+        sol_names = [s for s in SOLAR_ORDER if s in col_idx]
+        if sol_names:
+            sol_indices = [col_idx[s] for s in sol_names]
+            sol_data = data[:, sol_indices]
+            plot_grid(t, sol_data, sol_names, None, None, "Solar", pdf)
+
+    n_types = (1 if sp_names else 0) + (1 if j_names else 0) + \
+              (1 if env_display else 0) + (1 if sol_names else 0)
+    print(f"Saved: {args.output}  ({len(sp_names)} species, {len(j_names)} photolysis, "
+          f"{len(env_display)} env, {len(sol_names)} solar → {n_types} pages)")
 
 
 if __name__ == "__main__":
