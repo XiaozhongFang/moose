@@ -532,13 +532,21 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
     _name_to_index[jname] = _j_index_start + _name_to_index.size() - _j_index_start;
   }
 
-  // Pre-compute J photo indices into _func_params (Per.14 — avoids string+map in evaluateCoefficients)
+  // Pre-compute J photo indices into _func_params (Per.14 — avoids string+map in evaluateCoefficients).
+  // Only store indices for J numbers that were actually registered in _name_to_index.
+  // (The parser may detect J numbers in mech.j_numbers that don't appear in the
+  // coefficient/reaction expressions scanned by setupFparser, so we match the old
+  // defensive find()-based approach.)
   _j_photo_indices.clear();
   _j_photo_indices.reserve(_j_numbers.size());
   for (auto & jn : _j_numbers)
   {
     std::string jname = "PHOTOJ" + std::to_string(jn);
-    _j_photo_indices.push_back(_name_to_index.at(jname));
+    auto it = _name_to_index.find(jname);
+    if (it != _name_to_index.end())
+      _j_photo_indices.push_back(it->second);
+    else
+      _j_photo_indices.push_back((unsigned int)-1); // sentinel: skip in evaluateCoefficients
   }
 
   unsigned int n_j = j_numbers.size();
@@ -599,14 +607,17 @@ MCMBoxModel::evaluateCoefficients()
     const Real roof_factor = _roof_open ? 1.0 : 0.0;
     Real cosx = calculateCosSZA(_t);
     Real secx = (cosx > 1.0e-10) ? (1.0 / cosx) : 1.0e2;
-    // Per.14: use pre-computed _j_photo_indices instead of string+map lookup
-    for (size_t i = 0; i < _j_CL_vals.size(); ++i)
+    // Per.14: use pre-computed _j_photo_indices instead of string+map lookup.
+    // Sentinel value (unsigned int)-1 means J number was not registered; skip it.
+    for (size_t i = 0; i < _j_CL_vals.size() && i < _j_photo_indices.size(); ++i)
     {
+      unsigned int idx = _j_photo_indices[i];
+      if (idx == (unsigned int)-1) continue;
       if (cosx > 1.0e-10)
-        _func_params[_j_photo_indices[i]] = _j_CL_vals[i] * std::pow(cosx, _j_CMM_vals[i])
-                                         * std::exp(-_j_CNN_vals[i] * secx) * _jfac * roof_factor;
+        _func_params[idx] = _j_CL_vals[i] * std::pow(cosx, _j_CMM_vals[i])
+                          * std::exp(-_j_CNN_vals[i] * secx) * _jfac * roof_factor;
       else
-        _func_params[_j_photo_indices[i]] = 0.0;
+        _func_params[idx] = 0.0;
     }
   }
 
