@@ -86,6 +86,8 @@ struct StoichMatrix
    *
    * CSR: net_coefficient = product - reactant (stored directly).
    * COO: reactants (-coeff) then products (+coeff), matching AtChem2 resid().
+   *       NOTE: if a species appears on BOTH sides of a reaction, fn() is
+   *       called twice — once per occurrence.  The net effect sums correctly.
    *
    * The fn lambda is fully inlined — zero dispatch overhead.
    */
@@ -119,8 +121,13 @@ struct StoichMatrix
   }
 
   /// O(k) lookup — k = entries per row (typically 2-10).  Diagnostic use only.
+  /// Returns 0.0 for out-of-bounds indices or if species s does not participate
+  /// in reaction r.
   Real get(unsigned int r, unsigned int s) const
   {
+    if (r >= nReactions || s >= nSpecies)
+      return 0.0;
+
     switch (format)
     {
       case CSR:
@@ -134,7 +141,7 @@ struct StoichMatrix
           if ((unsigned int)rhs_species[k] == s) return rhs_coeff[k];
         return 0.0;
       case DENSE:
-        return (r < nReactions && s < nSpecies) ? dense[r][s] : 0.0;
+        return dense[r][s];
       case CSC:
         // Species-major: scan column s for reaction r
         for (size_t k = csc_col_ptr[s]; k < csc_col_ptr[s + 1]; ++k)

@@ -21,6 +21,14 @@ StoichMatrix::build(const ParsedMechanism & mech, Format fmt)
   nSpecies = mech.species.size();
   nReactions = mech.reactions.size();
 
+  // Clear all format vectors unconditionally — prevents stale data if build()
+  // is ever called more than once (e.g. mechanism reload with different format).
+  csr_cols.clear(); csr_vals.clear(); csr_row_ptr.clear();
+  lhs_species.clear(); lhs_coeff.clear(); lhs_row_ptr.clear();
+  rhs_species.clear(); rhs_coeff.clear(); rhs_row_ptr.clear();
+  dense.clear();
+  csc_rows.clear(); csc_c_vals.clear(); csc_col_ptr.clear();
+
   // Build name -> index map (needed by COO format for reactant/product lookup)
   std::unordered_map<std::string, unsigned int> name_to_idx;
   for (unsigned int i = 0; i < nSpecies; ++i)
@@ -756,7 +764,7 @@ MCMBoxModel::updatePhotolysis(Real sza, Real albedo, Real o3col, Real altitude)
     }
   }
   else
-    updatePhotolysisSZA(sza);
+    updatePhotolysisSZA(sza, _jfac);
 }
 
 void
