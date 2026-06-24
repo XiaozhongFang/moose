@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Generate F0AM tutorial gold CSV for MOOSE comparison.
+"""Generate tutorial gold CSV from analytical ODE solution.
 
-Solves the 5-species, 6-reaction tutorial system using scipy BDF
-(same algorithm as MATLAB ode15s used by F0AM).  Outputs CSV in
-MOOSE postprocessor format.
+Solves the 5-species, 6-reaction tutorial system using scipy BDF.
+Outputs CSV in MOOSE postprocessor format (matches vs_F0AM_tutorial5_coupled.csv).
 
 Usage:
     python3 gen_tutorial_gold.py [--output PATH] [--t-end T] [--dt DT]
@@ -14,8 +13,17 @@ from scipy.integrate import solve_ivp
 from pathlib import Path
 
 
-# Mechanism: 5 species, 6 reactions (F0AM LearnF0AM_ODE.mlx)
-# y[0]=ONE, y[1]=RO2, y[2]=A, y[3]=B, y[4]=C
+# Mechanism: 5 species, 6 reactions.
+# y[0]=ONE (constant=1), y[1]=RO2 (placeholder, always 0),
+# y[2]=A, y[3]=B, y[4]=C
+#
+# Reactions and rate coefficients:
+# R0: A + B → C + B,  k0 = 0.001
+# R1: B → loss,       k1 = 0.01
+# R2: A → loss,       k2 = 0.0001
+# R3: B + B → loss,   k3 = 0.1
+# R4: → A (zero-order),  k4 = 0.5
+# R5: C → loss,       k5 = 0.0001
 K = [0.001, 0.01, 1e-4, 0.1, 0.5, 1e-4]
 
 
@@ -52,9 +60,9 @@ def main():
 
     out = Path(args.output)
     with open(out, "w") as f:
-        f.write("time,A_avg,B_avg,C_avg\n")
+        f.write("time,A_avg,B_avg,C_avg,ONE,RO2_avg\n")
         for i in range(len(sol.t)):
-            f.write(f"{sol.t[i]:.10f},{sol.y[2,i]:.10e},{sol.y[3,i]:.10e},{sol.y[4,i]:.10e}\n")
+            f.write(f"{sol.t[i]:.10f},{sol.y[2,i]:.10e},{sol.y[3,i]:.10e},{sol.y[4,i]:.10e},1,0\n")
 
     print(f"Generated {len(sol.t)} steps to {out}")
     print(f"Final: A={sol.y[2,-1]:.6e}, B={sol.y[3,-1]:.6e}, C={sol.y[4,-1]:.6e}")
