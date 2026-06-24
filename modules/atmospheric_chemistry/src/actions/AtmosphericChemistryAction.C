@@ -61,6 +61,7 @@ AtmosphericChemistryAction::validParams()
   params.addParam<unsigned int>("month", 6, "Month for solar zenith angle calculation");
   params.addParam<unsigned int>("year", 2010, "Year for solar zenith angle calculation");
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
+  params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
 
   params.addClassDescription(
       "Unified atmospheric chemistry Action. Supports box mode (0-D ODE via "
@@ -352,6 +353,7 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   params.set<unsigned int>("month") = getParam<unsigned int>("month");
   params.set<unsigned int>("year") = getParam<unsigned int>("year");
   params.set<Real>("jfac") = getParam<Real>("jfac");
+  params.set<bool>("roof_open") = getParam<bool>("roof_open");
 
   _problem->addMaterial("MCMRatesMaterial", "mcm_rates_material", params);
   _console << "AtmosphericChemistry (coupled): Created MCMRatesMaterial with "

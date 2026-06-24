@@ -92,6 +92,8 @@ private:
   const unsigned int _month;
   const unsigned int _year;
   const Real _jfac;
+  /// Roof (chamber cover) open. false = CLOSED (all photolysis J=0).
+  const bool _roof_open;
 
   /// Compute day of year from day/month/year
   unsigned int computeDayOfYear() const;

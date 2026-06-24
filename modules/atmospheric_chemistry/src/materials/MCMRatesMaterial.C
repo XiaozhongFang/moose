@@ -55,6 +55,7 @@ MCMRatesMaterial::validParams()
   params.addParam<unsigned int>("month", 6, "Month for solar zenith angle calculation");
   params.addParam<unsigned int>("year", 2010, "Year for solar zenith angle calculation");
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
+  params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
 
   params.addClassDescription("Material that evaluates MCM reaction rates via sequential fparser evaluation");
   return params;
@@ -79,7 +80,8 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
     _day(getParam<unsigned int>("day")),
     _month(getParam<unsigned int>("month")),
     _year(getParam<unsigned int>("year")),
-    _jfac(getParam<Real>("jfac"))
+    _jfac(getParam<Real>("jfac")),
+    _roof_open(getParam<bool>("roof_open"))
 {
   // Couple to species variables
   _n_species = coupledComponents("species_variables");
@@ -230,6 +232,10 @@ MCMRatesMaterial::computeQpProperties()
       else
         _func_params[_j_index_start + i] = 0.0;
     }
+    // Roof (chamber cover) CLOSED: all J values forced to zero
+    if (!_roof_open)
+      for (unsigned int i = 0; i < _n_j_variables; ++i)
+        _func_params[_j_index_start + i] = 0.0;
   }
 
   // Step 3: Update species concentration variables (for RO2 = CH3O2 etc.)

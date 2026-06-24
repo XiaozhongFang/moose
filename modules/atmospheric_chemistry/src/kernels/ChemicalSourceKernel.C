@@ -32,9 +32,28 @@ ChemicalSourceKernel::ChemicalSourceKernel(const InputParameters & params)
     _reaction_rates(getMaterialProperty<std::vector<Real>>("reaction_rates")),
     _n_species(coupledComponents("all_species")),
     _coupled_vars(coupledIndices("all_species")),
-    _coupled_vals(coupledValues("all_species")),
-    _species_reactants(getParam<std::vector<std::vector<Real>>>("species_reactants"))
+    _coupled_vals(coupledValues("all_species"))
 {
+  // Build CSR reactant matrix from input [rxn_0,coeff_0, rxn_1,coeff_1, ...] per species.
+  // Per.16: single contiguous allocation, zero pointer-chasing vs vector<vector<Real>>.
+  const auto & sr_in = getParam<std::vector<std::vector<Real>>>("species_reactants");
+  _sr_row_ptr.resize(_n_species + 1);
+  _sr_row_ptr[0] = 0;
+  for (unsigned int k = 0; k < _n_species; ++k)
+  {
+    const auto & row = sr_in[k];
+    for (size_t j = 0; j + 1 < row.size(); j += 2)
+    {
+      // Validation: row[j] is a reaction index, validate against nReactions
+      if (row[j] < 0.0 || row[j] >= (Real)_stoichiometric_row.size())
+        mooseError("ChemicalSourceKernel: invalid reaction index ", row[j],
+                   " for species ", k, " (nReactions=", _stoichiometric_row.size(), ")");
+      _sr_cols.push_back((unsigned int)row[j]);
+      _sr_vals.push_back(row[j + 1]);
+    }
+    _sr_row_ptr[k + 1] = _sr_cols.size();
+  }
+
   // Build O(1) reverse index: jvar → species index (Per.14)
   for (unsigned int k = 0; k < _n_species; ++k)
     _coupled_var_to_idx[_coupled_vars[k]] = k;
@@ -90,13 +109,12 @@ ChemicalSourceKernel::computeQpOffDiagJacobian(unsigned int jvar)
     return 0.0;
 
   const auto & rates = _reaction_rates[_qp];
-  const auto & rxn_list = _species_reactants[k_idx];
 
   Real sum = 0.0;
-  for (size_t j = 0; j + 1 < rxn_list.size(); j += 2)
+  for (size_t j = _sr_row_ptr[k_idx]; j < _sr_row_ptr[k_idx + 1]; ++j)
   {
-    unsigned int rxn_idx = static_cast<unsigned int>(rxn_list[j]);
-    Real nu = rxn_list[j + 1];
+    unsigned int rxn_idx = _sr_cols[j];
+    Real nu = _sr_vals[j];
     sum += _stoichiometric_row[rxn_idx] * nu * rates[rxn_idx] / C_k;
   }
 

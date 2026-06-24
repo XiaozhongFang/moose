@@ -63,8 +63,8 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 - [`AtmosphericChemistryAction`](source/actions/AtmosphericChemistryAction.md) — Unified Action (box / coupled modes)
 - [`MCMBoxModel`](source/userobjects/MCMBoxModel.md) — 0-D chemical ODE engine with caching interface and pluggable sparse matrix backends (CSR/COO/DENSE/CSC)
 - [`ChemistryODEKernel`](source/kernels/ChemistryODEKernel.md) — Box mode ScalarKernel bridge to MCMBoxModel
-- [`ChemicalSourceKernel`](source/kernels/ChemicalSourceKernel.md) — FEM chemical source with analytical Jacobian
-- [`MCMRatesMaterial`](source/materials/MCMRatesMaterial.md) — Runtime rate evaluation (coupled mode)
+- [`ChemicalSourceKernel`](source/kernels/ChemicalSourceKernel.md) — FEM chemical source with analytical Jacobian + CSR sparse reactant matrix
+- [`MCMRatesMaterial`](source/materials/MCMRatesMaterial.md) — Runtime rate evaluation (coupled mode) with roof_open photolysis switch
 - [`MCMConstraintKernel`](source/kernels/MCMConstraintKernel.md) — Fixed-species constraint
 - [`MCMEmissionKernel`](source/kernels/MCMEmissionKernel.md) — Emission source
 - [`MCMDepositionKernel`](source/kernels/MCMDepositionKernel.md) — Dry deposition

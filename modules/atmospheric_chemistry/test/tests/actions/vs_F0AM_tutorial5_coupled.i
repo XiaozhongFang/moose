@@ -31,16 +31,18 @@
   [A_avg]  type = ElementAverageValue  variable = A  []
   [B_avg]  type = ElementAverageValue  variable = B  []
   [C_avg]  type = ElementAverageValue  variable = C  []
+  [RO2_avg]  type = ElementAverageValue  variable = RO2  []
+  [ONE]  type = ElementAverageValue  variable = ONE  []
 []
 
 [Executioner]
   type = Transient
   solve_type = NEWTON
   scheme = 'bdf2'
-  end_time = 10
+  end_time = 400
   dt = 0.1
-  nl_rel_tol = 1e-3
-  nl_abs_tol = 1e-6
+  nl_rel_tol = 1e-10
+  nl_abs_tol = 1e-12
   [TimeStepper]
     type = ConstantDT
     dt = 0.1
@@ -49,5 +51,7 @@
 
 [Outputs]
   csv = true
+  execute_on = 'timestep_end'
+  hide = 'A C RO2'
   file_base = 'vs_F0AM_tutorial5_coupled'
 []

@@ -46,9 +46,13 @@ private:
   /// Concentration values of all species
   std::vector<const VariableValue *> _coupled_vals;
 
-  /// _species_reactants[k] = [rxn_0, coeff_0, rxn_1, coeff_1, ...]
-  /// Reactions where species k is a reactant
-  const std::vector<std::vector<Real>> _species_reactants;
+  /// CSR-format reactant matrix: for species k, reactions span
+  /// _sr_row_ptr[k] .. _sr_row_ptr[k+1]-1 with (reaction, coeff) pairs.
+  /// Built from the input parameter in the constructor — eliminates
+  /// vector<vector<Real>> overhead and static_cast<unsigned int> on indices.
+  std::vector<unsigned int> _sr_cols;
+  std::vector<Real>        _sr_vals;
+  std::vector<size_t>      _sr_row_ptr;
 
   /// O(1) reverse index: jvar → species index (Per.14 — avoids O(nSpecies) scan)
   std::unordered_map<unsigned int, unsigned int> _coupled_var_to_idx;
