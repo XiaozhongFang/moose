@@ -270,8 +270,11 @@ def _make_solar_atchem2(t_moose, sol_names):
             elif name == "lon":
                 rows[k, j] = lon_deg
 
-    # Return AtChem2-style (header_vars, data_matrix_with_time_col0)
-    var = np.array(sol_names)
+    # Return AtChem2-style (header_vars, data_matrix_with_time_col0).
+    # The header MUST include the time column name so that column indices
+    # in the atchem_lookup built by plot_grid() stay aligned: row 0 = time,
+    # row 1 = first solar param, etc.
+    var = np.array(["time"] + list(sol_names))
     df = np.column_stack([t_moose, rows])
     return var, df
 
