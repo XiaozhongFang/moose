@@ -181,6 +181,78 @@ def plot_grid(t_moose, moose_data, moose_cols, atchem_var, atchem_df,
     plt.close(fig)
 
 
+def _make_solar_atchem2(t_moose, sol_names):
+    """Synthesise AtChem2-format solar data using Madronich (1993).
+
+    AtChem2 computes solar parameters identically in zenith_data_mod /
+    solar_functions_mod but does NOT write them to any text output file.
+    This function reproduces the values so the solar-page overlay is not
+    empty when AtChem2 reference data is available.
+    """
+    pi = 3.14159265358979323846
+    lat_deg, lon_deg = 51.51, 0.13
+    day, month, year = 21, 6, 2010
+    days_in_months = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if (year % 4 == 0 and year % 100 != 0) or year % 400 == 0:
+        days_in_months[1] = 29
+    doy = sum(days_in_months[:month - 1]) + day - 1  # 0-based
+    days_in_year = 366 if days_in_months[1] == 29 else 365
+    theta_day = 2.0 * pi * doy / days_in_year
+    dec = (0.006918 - 0.399912 * np.cos(theta_day) + 0.070257 * np.sin(theta_day)
+           - 0.006758 * np.cos(2 * theta_day) + 0.000907 * np.sin(2 * theta_day)
+           - 0.002697 * np.cos(3 * theta_day) + 0.001480 * np.sin(3 * theta_day))
+    eqt = (0.000075 + 0.001868 * np.cos(theta_day) - 0.032077 * np.sin(theta_day)
+           - 0.014615 * np.cos(2 * theta_day) - 0.040849 * np.sin(2 * theta_day))
+    lat_rad = lat_deg * pi / 180.0
+    sinld_val = np.sin(lat_rad) * np.sin(dec)
+    cosld_val = np.cos(lat_rad) * np.cos(dec)
+
+    n = len(t_moose)
+    cols = np.zeros((n, len(sol_names)))
+    for i, name in enumerate(sol_names):
+        if name == "lat":
+            cols[:, i] = lat_deg
+        elif name == "lon":
+            cols[:, i] = lon_deg
+        elif name in ("sinld", "cosld", "eqtime"):
+            # time-invariant
+            pass  # computed below per-row
+
+    # Build per-row solar data
+    rows = np.zeros((n, len(sol_names)))
+    for k, ts in enumerate(t_moose):
+        frac_hour = (ts / 3600.0) % 24.0
+        lha = pi * (frac_hour / 12.0 - (1.0 + lon_deg / 180.0)) + eqt
+        cosx = np.cos(lha) * cosld_val + sinld_val
+        if cosx <= 0.0:
+            cosx = 0.0
+            secx = 1e2
+        else:
+            secx = 1.0 / cosx
+        for j, name in enumerate(sol_names):
+            if name == "cosx":
+                rows[k, j] = cosx
+            elif name == "secx":
+                rows[k, j] = secx
+            elif name == "lha":
+                rows[k, j] = lha
+            elif name == "sinld":
+                rows[k, j] = sinld_val
+            elif name == "cosld":
+                rows[k, j] = cosld_val
+            elif name == "eqtime":
+                rows[k, j] = eqt
+            elif name == "lat":
+                rows[k, j] = lat_deg
+            elif name == "lon":
+                rows[k, j] = lon_deg
+
+    # Return AtChem2-style (header_vars, data_matrix_with_time_col0)
+    var = np.array(sol_names)
+    df = np.column_stack([t_moose, rows])
+    return var, df
+
+
 def main():
     parser = argparse.ArgumentParser(description="Plot MOOSE vs AtChem2")
     parser.add_argument("--moose", "-m",
@@ -278,7 +350,11 @@ def main():
         if sol_names:
             sol_indices = [col_idx[s] for s in sol_names]
             sol_data = data[:, sol_indices]
-            plot_grid(t, sol_data, sol_names, None, None, "Solar", pdf)
+            # AtChem2 does not output solar parameters as text files, but they
+            # are computed identically (Madronich 1993).  Synthesize AtChem2
+            # reference data so the overlay is visible on the solar page.
+            sol_var, sol_df = _make_solar_atchem2(t, sol_names)
+            plot_grid(t, sol_data, sol_names, sol_var, sol_df, "Solar", pdf)
 
     n_types = (1 if sp_names else 0) + (1 if j_names else 0) + \
               (1 if env_display else 0) + (1 if sol_names else 0)
