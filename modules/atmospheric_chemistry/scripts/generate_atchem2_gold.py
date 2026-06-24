@@ -26,7 +26,7 @@ def load_atchem2(path):
     return var, df
 
 
-def find_time_indices(t_ref, dt=900.0, end_time=43200.0):
+def find_time_indices(t_ref, dt=90.0, end_time=43200.0):
     t_moose = np.arange(dt, end_time + dt / 2, dt)
     indices = [np.argmin(np.abs(t_ref - tm)) for tm in t_moose]
     return indices, t_moose

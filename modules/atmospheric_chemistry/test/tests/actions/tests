@@ -16,7 +16,7 @@
     type = CSVDiff
     input = vs_AtChem2_inorg_box.i
     csvdiff = vs_AtChem2_inorg_box.csv
-    rel_err = 5.0e-1
+    rel_err = 1.0e-2
     abs_zero = 1.0e-8
     requirement = 'The box mode shall not crash and O3/NO2/NO/OH/HO2 main species shall qualitatively match AtChem2 CVODE reference (~30 species, 12h diurnal cycle).  Night-time reservoir species (N2O5, NO3, NA) and intermediate organics are tracked for trend agreement; quantitative convergence is work-in-progress.'
   [../]

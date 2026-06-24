@@ -104,7 +104,7 @@
   solve_type = NEWTON
   scheme = 'bdf2'
   end_time = 43200
-  dt = 900
+  dt = 90
   l_max_its = 50
   l_tol = 1e-5
   nl_max_its = 10
@@ -114,7 +114,7 @@
   nl_abs_tol = 1e-12
   [TimeStepper]
     type = ConstantDT
-    dt = 900
+    dt = 90
   []
 []
 
