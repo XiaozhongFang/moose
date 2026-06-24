@@ -229,12 +229,17 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
     return;
 
   // Step 1: compute reactant products G[i] = C[iG[i][0]] * C[iG[i][1]] * C[iG[i][2]]
-  // All indices are valid species indices (padded with ONE=0, conc=1).
+  // Sentinel -1 means "no reactant" → concentration = 1.0 (F0AM padding convention).
   // Per.14: _scratch_G / _scratch_rates are mutable members pre-allocated once,
   // avoiding heap allocation on every dC/dt call (~272 KiB per call for full MCM).
   _scratch_G.assign(_n_reactions, 0.0);
   for (unsigned int r = 0; r < _n_reactions; ++r)
-    _scratch_G[r] = C[_iG[r][0]] * C[_iG[r][1]] * C[_iG[r][2]];
+  {
+    Real c0 = (_iG[r][0] >= 0) ? C[_iG[r][0]] : 1.0;
+    Real c1 = (_iG[r][1] >= 0) ? C[_iG[r][1]] : 1.0;
+    Real c2 = (_iG[r][2] >= 0) ? C[_iG[r][2]] : 1.0;
+    _scratch_G[r] = c0 * c1 * c2;
+  }
 
   // Step 2: rates = k .* G
   _scratch_rates.assign(_n_reactions, 0.0);
@@ -271,7 +276,10 @@ MCMBoxModel::computeJacobianTriplets(
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
     const int i0 = _iG[r][0], i1 = _iG[r][1], i2 = _iG[r][2];
-    const Real c0 = C[i0], c1 = C[i1], c2 = C[i2];
+    // Sentinel -1 → concentration = 1.0, no derivative contribution
+    const Real c0 = (i0 >= 0) ? C[i0] : 1.0;
+    const Real c1 = (i1 >= 0) ? C[i1] : 1.0;
+    const Real c2 = (i2 >= 0) ? C[i2] : 1.0;
     const Real k = _k[r];
 
     // Helper: for reactant j with derivative drate, emit J(s,j) for every
@@ -284,11 +292,11 @@ MCMBoxModel::computeJacobianTriplets(
     };
 
     // Contribution from C[i0]: dr/dC[i0] = k * c1 * c2
-    emit_contrib((unsigned int)i0, k * c1 * c2);
+    if (i0 >= 0) emit_contrib((unsigned int)i0, k * c1 * c2);
     // Contribution from C[i1]: dr/dC[i1] = k * c0 * c2
-    if (i1 != i0) emit_contrib((unsigned int)i1, k * c0 * c2);
+    if (i1 >= 0 && i1 != i0) emit_contrib((unsigned int)i1, k * c0 * c2);
     // Contribution from C[i2]: dr/dC[i2] = k * c0 * c1
-    if (i2 != i0 && i2 != i1) emit_contrib((unsigned int)i2, k * c0 * c1);
+    if (i2 >= 0 && i2 != i0 && i2 != i1) emit_contrib((unsigned int)i2, k * c0 * c1);
   }
 }
 
@@ -347,7 +355,10 @@ MCMBoxModel::_buildJacobianCache() const
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
     const int i0 = _iG[r][0], i1 = _iG[r][1], i2 = _iG[r][2];
-    const Real c0 = _cached_C[i0], c1 = _cached_C[i1], c2 = _cached_C[i2];
+    // Sentinel -1 → concentration = 1.0
+    const Real c0 = (i0 >= 0) ? _cached_C[i0] : 1.0;
+    const Real c1 = (i1 >= 0) ? _cached_C[i1] : 1.0;
+    const Real c2 = (i2 >= 0) ? _cached_C[i2] : 1.0;
     const Real k = _k[r];
 
     // Helper: accumulate Jacobian contribution (s, j) += val
@@ -532,23 +543,6 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
     _name_to_index[jname] = _j_index_start + _name_to_index.size() - _j_index_start;
   }
 
-  // Pre-compute J photo indices into _func_params (Per.14 — avoids string+map in evaluateCoefficients).
-  // Only store indices for J numbers that were actually registered in _name_to_index.
-  // (The parser may detect J numbers in mech.j_numbers that don't appear in the
-  // coefficient/reaction expressions scanned by setupFparser, so we match the old
-  // defensive find()-based approach.)
-  _j_photo_indices.clear();
-  _j_photo_indices.reserve(_j_numbers.size());
-  for (auto & jn : _j_numbers)
-  {
-    std::string jname = "PHOTOJ" + std::to_string(jn);
-    auto it = _name_to_index.find(jname);
-    if (it != _name_to_index.end())
-      _j_photo_indices.push_back(it->second);
-    else
-      _j_photo_indices.push_back((unsigned int)-1); // sentinel: skip in evaluateCoefficients
-  }
-
   unsigned int n_j = j_numbers.size();
   _func_params.resize(5 + coeff_names.size() + _n_species + n_extra_vars + n_j, 0.0);
 
@@ -584,6 +578,21 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
   _j_CMM_vals = mech.j_CMM;
   _j_CNN_vals = mech.j_CNN;
   _n_j_vars = _j_numbers.size();
+
+  // Pre-compute J photo indices into _func_params (Per.14 — avoids string+map in evaluateCoefficients).
+  // MUST be after _j_numbers assignment above (built from mech.j_numbers, not the local j_numbers from
+  // expression scanning above, which may detect a different set).
+  _j_photo_indices.clear();
+  _j_photo_indices.reserve(_j_numbers.size());
+  for (auto & jn : _j_numbers)
+  {
+    std::string jname = "PHOTOJ" + std::to_string(jn);
+    auto it = _name_to_index.find(jname);
+    if (it != _name_to_index.end())
+      _j_photo_indices.push_back(it->second);
+    else
+      _j_photo_indices.push_back((unsigned int)-1); // sentinel: skip in evaluateCoefficients
+  }
   if (_n_j_vars > 0)
     _console << "MCMBoxModel: " << _n_j_vars << " photolysis J values loaded" << std::endl;
 }
@@ -724,7 +733,10 @@ Real
 MCMBoxModel::reactionRate(unsigned int r, const std::vector<Real> & C) const
 {
   if (r >= _n_reactions || C.size() != _n_species) return 0.0;
-  return _k[r] * C[_iG[r][0]] * C[_iG[r][1]] * C[_iG[r][2]];
+  Real c0 = (_iG[r][0] >= 0) ? C[_iG[r][0]] : 1.0;
+  Real c1 = (_iG[r][1] >= 0) ? C[_iG[r][1]] : 1.0;
+  Real c2 = (_iG[r][2] >= 0) ? C[_iG[r][2]] : 1.0;
+  return _k[r] * c0 * c1 * c2;
 }
 
 Real

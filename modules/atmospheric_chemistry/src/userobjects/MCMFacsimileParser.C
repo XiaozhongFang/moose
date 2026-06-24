@@ -86,7 +86,7 @@ MCMFacsimileParser::parse(const std::string & filename, const std::string & phot
     for (unsigned int s = 0; s < n_sp; ++s)
       mech.stoichiometry[s][r] = _stoichiometric[s][r];
 
-  mech.reactant_indices.assign(n_rxn, std::vector<int>(3, 0));
+  mech.reactant_indices.assign(n_rxn, std::vector<int>(3, -1));
   for (unsigned int r = 0; r < n_rxn; ++r)
     for (int k = 0; k < 3; ++k)
       mech.reactant_indices[r][k] = _reactant_indices[r][k];
@@ -606,8 +606,9 @@ void
 MCMFacsimileParser::buildReactantIndices()
 {
   unsigned int n_rx = _reactions.size();
-  // 3-column iG matching F0AM convention. Default to ONE index (0).
-  _reactant_indices.assign(n_rx, std::vector<int>(3, 0));
+  // 3-column iG matching F0AM convention. Sentinel -1 means "no reactant"
+  // (concentration = 1.0), replacing the old assumption that species 0 is ONE.
+  _reactant_indices.assign(n_rx, std::vector<int>(3, -1));
 
   for (unsigned int r = 0; r < n_rx; ++r)
   {
