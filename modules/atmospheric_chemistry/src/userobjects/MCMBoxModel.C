@@ -235,6 +235,21 @@ MCMBoxModel::initialize()
     _console << "MCMBoxModel: Loaded " << _n_species << " species, "
              << _n_reactions << " reactions from " << mech_file << std::endl;
 
+    // Pre-compute rate coefficients (_k) and time-invariant solar parameters
+    // (DEC, sinld, cosld, eqtime) so the first time step starts with correct
+    // thermal chemistry even if the solver skips the initial residual evaluation.
+    // Without this, _k stays at the default 1.0 until the first getDCdt() call,
+    // which may not happen in the expected order during the first nonlinear solve.
+    if (!_coeff_parsers.empty())
+    {
+      evaluateCoefficients();
+      // Reset time-varying solar params to safe defaults — per-timestep
+      // evaluateCoefficients() will overwrite them during the first solve.
+      _solar_cosx = 0.0;
+      _solar_secx = 1.0e2;
+      _solar_lha = 0.0;
+    }
+
     // Set up dilution if dilute > 0
     Real dilute = getParam<Real>("dilute");
     if (dilute > 0.0)
@@ -249,6 +264,12 @@ MCMBoxModel::initialize()
 void
 MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) const
 {
+  // Lazy initialization: the framework may call computeDCdt() (via getDCdt())
+  // before GeneralUserObject::initialize().  If the mechanism hasn't been
+  // loaded yet, force initialization now so chemistry runs on the first step.
+  if (_n_species == 0)
+    const_cast<MCMBoxModel*>(this)->initialize();
+
   dC.assign(_n_species, 0.0);
 
   if (_n_reactions == 0 || _n_species == 0)
@@ -672,11 +693,8 @@ MCMBoxModel::evaluateCoefficients()
   {
     const Real roof_factor = _roof_open ? 1.0 : 0.0;
     Real cosx = calculateCosSZA(_t);
-    Real secx = (cosx > 1.0e-10) ? (1.0 / cosx) : 1.0e2;
+    Real secx = _solar_secx;  // cached by calculateCosSZA
 
-    // Cache solar parameters for MCMSolarPostprocessor
-    _solar_cosx = cosx;
-    _solar_secx = secx;
     // Per.14: use pre-computed _j_photo_indices instead of string+map lookup.
     // Sentinel value (unsigned int)-1 means J number was not registered; skip it.
     for (size_t i = 0; i < _j_CL_vals.size() && i < _j_photo_indices.size(); ++i)
@@ -733,10 +751,13 @@ MCMBoxModel::computeDayOfYear() const
   unsigned int days_in_months[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   if ((_year % 4 == 0 && _year % 100 != 0) || _year % 400 == 0)
     days_in_months[1] = 29;
+  // AtChem2 convention: Jan 1 = 0, Jan 2 = 1, ... (0-based day of year).
+  // This matches AtChem2's date_mod::calcDayOfYear:
+  //   result = sum(monthList(1:month-1)) + day - 1
   unsigned int doy = 0;
   for (unsigned int m = 0; m < (unsigned int)(_month - 1); ++m)
     doy += days_in_months[m];
-  doy += _day;
+  doy += _day - 1;
   return doy;
 }
 
@@ -767,6 +788,9 @@ MCMBoxModel::calculateCosSZA(Real t) const
   _solar_eqt = eqt;
 
   if (cosx <= 0.0) cosx = 0.0;
+  Real secx = (cosx > 1.0e-10) ? (1.0 / cosx) : 1.0e2;
+  _solar_cosx = cosx;
+  _solar_secx = secx;
   return cosx;
 }
 

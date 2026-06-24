@@ -46,6 +46,8 @@ AtmosphericChemistryAction::validParams()
   params.addParam<Real>("air_density", 2.46e19, "Air number density (molecules/cm^3)");
   params.addParam<Real>("water_vapor", 2.46e17,
       "Background water vapor concentration (molecules/cm^3)");
+  params.addParam<Real>("press", 0.0,
+      "Pressure (mbar).  If >0, M computed dynamically via ideal gas law.");
   params.addParam<std::string>(
       "mcm_photolysis_file",
       "doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat",
@@ -255,6 +257,7 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<Real>("temperature") = getParam<Real>("temperature");
   params.set<Real>("air_density") = getParam<Real>("air_density");
   params.set<Real>("water_vapor") = getParam<Real>("water_vapor");
+  params.set<Real>("press") = getParam<Real>("press");
   params.set<Real>("latitude") = getParam<Real>("latitude");
   params.set<Real>("longitude") = getParam<Real>("longitude");
   params.set<unsigned int>("day") = getParam<unsigned int>("day");

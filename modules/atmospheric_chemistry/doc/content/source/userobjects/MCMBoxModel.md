@@ -97,6 +97,13 @@ $$ \frac{\mathrm{d}C_i}{\mathrm{d}t} \mathrel{-}= k_{\text{dil}} \cdot (C_i - C_
 This matches AtChem2's DILUTE parameter.  Background concentrations default
 to zero (clean air dilution).
 
+### Lazy Initialization
+
+`MCMBoxModel` supports lazy initialization: if the MOOSE framework calls
+`computeDCdt()` before `GeneralUserObject::initialize()`, the mechanism
+is loaded on first use.  This ensures correct chemistry from the very
+first time step regardless of framework initialization ordering.
+
 ### Key API Methods
 
 | Method | Description |

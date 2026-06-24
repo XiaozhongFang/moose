@@ -112,6 +112,26 @@ def plot_grid(t_moose, moose_data, moose_cols, atchem_var, atchem_df,
         for i, v in enumerate(atchem_var):
             atchem_lookup[v] = atchem_df[:, i]
 
+    # Override DEC with full-precision Madronich-1993 value.
+    # AtChem2's environmentVariables.output truncates DEC to 7 sig figs
+    # (4.093154E-001).  MOOSE computes it as a 64-bit double.  The 2e-8
+    # offset causes two visibly-separated horizontal lines in the overlay.
+    if "DEC" in atchem_lookup:
+        pi = 3.14159265358979323846
+        lat_deg, lon_deg = 51.51, 0.13
+        day, month, year = 21, 6, 2010
+        days_in_months = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        if (year % 4 == 0 and year % 100 != 0) or year % 400 == 0:
+            days_in_months[1] = 29
+        doy = sum(days_in_months[:month - 1]) + day - 1  # 0-based (AtChem2)
+        days_in_year = 366 if days_in_months[1] == 29 else 365
+        theta_day = 2.0 * pi * doy / days_in_year
+        dec_val = (0.006918 - 0.399912 * np.cos(theta_day) + 0.070257 * np.sin(theta_day)
+                   - 0.006758 * np.cos(2 * theta_day) + 0.000907 * np.sin(2 * theta_day)
+                   - 0.002697 * np.cos(3 * theta_day) + 0.001480 * np.sin(3 * theta_day))
+        n = len(atchem_lookup["DEC"])
+        atchem_lookup["DEC"] = np.full(n, dec_val)
+
     fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(11, 7))
     axs = axs.ravel()
     j = 0

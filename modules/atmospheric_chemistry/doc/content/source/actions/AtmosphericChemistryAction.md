@@ -52,7 +52,13 @@ Creates a FEM transport + chemistry system for spatially-resolved simulations
   temperature = 298.15
   air_density = 2.46e19
   water_vapor = 2.46e17
+  press = 1013.25
   mcm_photolysis_file = 'mcm_photolysis_rates_v3.3.1.dat'
+  latitude = 51.51
+  longitude = 0.13
+  day = 21
+  month = 6
+  year = 2010
 []
 
 [ICs]

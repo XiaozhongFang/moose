@@ -104,7 +104,8 @@ def generate_gold(atchem2_dir, output_path):
     days_in_months = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     if (year % 4 == 0 and year % 100 != 0) or year % 400 == 0:
         days_in_months[1] = 29
-    doy = sum(days_in_months[:month - 1]) + day
+    # AtChem2 convention: Jan 1 = 0, Jan 2 = 1, ... (0-based day of year)
+    doy = sum(days_in_months[:month - 1]) + day - 1
     days_in_year = 366 if days_in_months[1] == 29 else 365
     theta_day = 2.0 * pi * doy / days_in_year
     dec = (0.006918 - 0.399912 * np.cos(theta_day) + 0.070257 * np.sin(theta_day)
@@ -144,6 +145,11 @@ def generate_gold(atchem2_dir, output_path):
             src = ev_data.get(col)
             row.append(src[ev_aidx] if src is not None and ev_aidx < len(src) else 0.0)
 
+        # Override DEC with full-precision Madronich value (AtChem2 output
+        # truncates to 7 sig figs, causing visible offset in overlay plots).
+        # row layout: time + 35 J + 12 env → DEC is row[41] = row[-7]
+        row[-7] = dec
+
         # Solar params (computed from Madronich 1993 — same as MCMBoxModel)
         cosx, secx, lha, _sinld, _cosld, _eqt = solar_params(t_moose[step])
         row.extend([cosx, secx, lha, sinld, cosld, eqt, lat_deg, lon_deg])
@@ -158,7 +164,11 @@ def generate_gold(atchem2_dir, output_path):
     with open(output_path, "w") as f:
         f.write(",".join(header) + "\n")
         for row in rows:
-            f.write(",".join(f"{v:.15e}" for v in row) + "\n")
+            # Convert to Python float then repr() for full double precision;
+            # matches MOOSE CSV default format (fixed-point for moderate
+            # values, scientific for extreme).  Numpy float64.repr() would
+            # emit "np.float64(...)", which CSVDiff cannot parse.
+            f.write(",".join(repr(float(v)) for v in row) + "\n")
 
     n_ph = sum(1 for c in j_cols if c in ph_data)
     n_ev = sum(1 for c in env_cols if c in ev_data)

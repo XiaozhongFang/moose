@@ -40,6 +40,26 @@ files, use the included converter:
 python3 modules/atmospheric_chemistry/scripts/kpp_to_fac.py mechanism.kpp
 ```
 
+## Validation
+
+The box mode has been validated against AtChem2 (v1.2.1) for the MCM v3.3.1 inorganic
+subset (29 species, 71 reactions, 12 h diurnal cycle).  O$_3$, NO$_2$, and NO
+concentrations match to within 0.1--0.3 % relative error during daytime and
+< 0.05 % at night.  Solar parameters (declination, zenith angle) follow the
+Madronich (1993) formulation identically to AtChem2.
+
+To regenerate validation data:
+
+```bash
+python3 scripts/generate_atchem2_gold.py \
+    --atchem2 <path-to-AtChem2>/model/output \
+    --output test/tests/actions/gold/vs_AtChem2_inorg_box.csv
+
+python3 scripts/plot_atchem2.py \
+    --moose test/tests/actions/vs_AtChem2_inorg_box.csv \
+    --atchem2 <path-to-AtChem2>/model/output
+```
+
 ## Utility Scripts
 
 | Script | Purpose |
