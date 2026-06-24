@@ -55,6 +55,7 @@ ChemistryODEKernel::reinit()
   // Invalidate the BoxModel cache so the next getDCdt / getJacobian*
   // call triggers a fresh full-system computation.
   _box_model.markDirty();
+  _box_model.setCurrentTime(_t);
 }
 
 std::vector<Real>

@@ -46,11 +46,13 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _month((int)getParam<unsigned int>("month")),
     _year((int)getParam<unsigned int>("year")),
     _kdil(0.0),
+    _roof_open(true),
     _j_index_start(0),
     _temperature(getParam<Real>("temperature")),
     _air_density(getParam<Real>("air_density")),
     _water_vapor(getParam<Real>("water_vapor")),
     _jfac(getParam<Real>("jfac")),
+    _t(0.0),
     _dirty(true)
 {
 }
@@ -241,6 +243,15 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
   _species_names = mech.species;
   _reaction_names = mech.reaction_names;
 
+  // Build RO2 species index list from parser's explicit ro2_species
+  _ro2_indices.clear();
+  for (const auto & ro2_name : mech.ro2_species)
+  {
+    auto it = std::find(_species_names.begin(), _species_names.end(), ro2_name);
+    if (it != _species_names.end())
+      _ro2_indices.push_back((unsigned int)(it - _species_names.begin()));
+  }
+
   // Convert stoichiometry from [species][reaction] to [reaction][species] (F0AM convention)
   _f.assign(_n_reactions, std::vector<Real>(_n_species, 0.0));
   for (unsigned int r = 0; r < _n_reactions; ++r)
@@ -418,9 +429,12 @@ MCMBoxModel::evaluateCoefficients()
   _func_params[3] = 0.78 * _air_density;
   _func_params[4] = _water_vapor;
 
-  // Compute photolysis J values from solar zenith angle
+  // Compute photolysis J values from solar zenith angle (MCM formula)
+  // J = l * cosx^m * exp(-n * secx) * JFAC * ROOF
+  // ROOF = CLOSED (0) or OPEN (1); JFAC ∈ [0,1]
   if (!_j_CL_vals.empty())
   {
+    const Real roof_factor = _roof_open ? 1.0 : 0.0;
     Real cosx = calculateCosSZA(_t);
     Real secx = (cosx > 1.0e-10) ? (1.0 / cosx) : 1.0e2;
     for (size_t i = 0; i < _j_CL_vals.size(); ++i)
@@ -432,7 +446,7 @@ MCMBoxModel::evaluateCoefficients()
       {
         if (cosx > 1.0e-10)
           _func_params[it->second] = _j_CL_vals[i] * std::pow(cosx, _j_CMM_vals[i])
-                                     * std::exp(-_j_CNN_vals[i] * secx) * _jfac;
+                                     * std::exp(-_j_CNN_vals[i] * secx) * _jfac * roof_factor;
         else
           _func_params[it->second] = 0.0;
       }
@@ -456,18 +470,14 @@ MCMBoxModel::evaluateCoefficients()
       _func_params[it->second] = (_cached_C.empty() ? 0.0 :
           (s < _cached_C.size() ? _cached_C[s] : 0.0));
   }
-  // RO2 = sum of peroxy radicals
+  // RO2 = sum of peroxy radicals (using explicit species list from parser)
   auto it_ro2 = _name_to_index.find("RO2");
   if (it_ro2 != _name_to_index.end())
   {
     Real ro2_sum = 0.0;
-    for (unsigned int s = 0; s < _n_species; ++s)
-      if (_species_names[s].size() >= 3 &&
-          _species_names[s].substr(_species_names[s].size() - 2) == "O2" &&
-          _species_names[s] != "HO2" && _species_names[s] != "NO2" &&
-          _species_names[s] != "SO2" && _species_names[s] != "H2O2")
-        ro2_sum += (_cached_C.empty() ? 0.0 :
-            (s < _cached_C.size() ? _cached_C[s] : 0.0));
+    for (auto idx : _ro2_indices)
+      ro2_sum += (_cached_C.empty() ? 0.0 :
+          (idx < _cached_C.size() ? _cached_C[idx] : 0.0));
     _func_params[it_ro2->second] = ro2_sum;
   }
 
@@ -613,8 +623,57 @@ MCMBoxModel::updatePhotolysis(Real sza, Real albedo, Real o3col, Real altitude)
 }
 
 void
+MCMBoxModel::calcJFAC(const std::string & ref_j_name, Real constrained_val)
+{
+  if (constrained_val <= 0.0)
+  {
+    _jfac = 0.0;
+    return;
+  }
+
+  // Parse J number from name like "J4"
+  unsigned int ref_jn = 0;
+  if (ref_j_name.size() > 1 && ref_j_name[0] == 'J')
+    ref_jn = (unsigned int)std::stoi(ref_j_name.substr(1));
+
+  // Find the photolysis parameters for this reference J
+  Real cl_val = 0.0, cmm_val = 1.0, cnn_val = 0.0;
+  for (size_t i = 0; i < _j_numbers.size(); ++i)
+    if (_j_numbers[i] == ref_jn)
+    {
+      cl_val = _j_CL_vals[i];
+      cmm_val = _j_CMM_vals[i];
+      cnn_val = _j_CNN_vals[i];
+      break;
+    }
+
+  if (cl_val == 0.0)
+  {
+    mooseWarning("MCMBoxModel: JFAC reference ", ref_j_name, " has no photolysis parameters");
+    _jfac = 1.0;
+    return;
+  }
+
+  // Compute parameterized value at current SZA
+  Real cosx = calculateCosSZA(_t);
+  if (cosx <= 1.0e-10)
+  {
+    _jfac = 0.0;
+    return;
+  }
+  Real secx = 1.0 / cosx;
+  Real j_calc = cl_val * std::pow(cosx, cmm_val) * std::exp(-cnn_val * secx);
+
+  if (j_calc <= 0.0)
+    _jfac = 0.0;
+  else
+    _jfac = constrained_val / j_calc;  // JFAC = observed / calculated
+}
+
+void
 MCMBoxModel::updatePhotolysisSZA(Real sza, Real jfac)
 {
+  if (!_roof_open) return;  // ROOF CLOSED: J rates handled in evaluateCoefficients
   Real cosx = std::cos(sza * M_PI / 180.0);
   if (cosx <= 0.0) { cosx = 1e-10; }
   Real secx = 1.0 / cosx;
@@ -668,6 +727,27 @@ MCMBoxModel::advanceSolarCycle(Real s)
 void
 MCMBoxModel::setDilution(Real kdil, const std::vector<Real> & bg)
 { _kdil = kdil; _conc_bkgd = bg; }
+
+Real
+MCMBoxModel::getRO2Sum(const std::vector<Real> & C) const
+{
+  Real sum = 0.0;
+  for (auto idx : _ro2_indices)
+    if (idx < C.size())
+      sum += C[idx];
+  return sum;
+}
+
+Real
+MCMBoxModel::getJValue(unsigned int j_number) const
+{
+  // Look up J value from fparser parameter buffer using PHOTOJ<N> key
+  std::string jname = "PHOTOJ" + std::to_string(j_number);
+  auto it = _name_to_index.find(jname);
+  if (it != _name_to_index.end() && it->second < _func_params.size())
+    return _func_params[it->second];
+  return 0.0;
+}
 
 void
 MCMBoxModel::computeDCdtWithDilution(const std::vector<Real> & C, std::vector<Real> & dC) const

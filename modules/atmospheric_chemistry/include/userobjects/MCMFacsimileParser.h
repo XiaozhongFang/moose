@@ -70,9 +70,14 @@ public:
    * Parse a .fac file and return the complete mechanism.
    * @param filename Path to the .fac file
    * @param photolysis_file Optional path to photolysis parameter file
+   * @param peroxy_file Optional path to peroxy-radicals reference file for validation
    */
   ParsedMechanism parse(const std::string & filename,
-                        const std::string & photolysis_file = "");
+                        const std::string & photolysis_file = "",
+                        const std::string & peroxy_file = "");
+
+  /** Set MCM version for RO2 reference validation. */
+  void setMCMVersion(const std::string & ver) { _mcm_version = ver; }
 
 private:
   void parseFile(const std::string & filename);
@@ -87,6 +92,9 @@ private:
   void buildReactantIndices();
   void expandRateCoefficients();
 
+  /// Parse KPP format and populate internal structures (FAC-equivalent)
+  void parseKPP(const std::string & filename);
+
   std::vector<std::string> _species;
   std::vector<ParsedReaction> _reactions;
   std::map<std::string, std::string> _rate_coefficients;
@@ -96,6 +104,12 @@ private:
   std::set<std::string> _base_variables;
   std::vector<std::string> _eval_order;
   std::map<std::string, std::string> _converted_coefficients;
+
+  /// RO2 species names parsed from "Peroxy radicals" section (explicit list)
+  std::vector<std::string> _parsed_ro2_names;
+
+  /// MCM version (v3.1, v3.2, v3.3.1), used for RO2 reference validation
+  std::string _mcm_version;
 
   /// Transposed stoichiometric matrix: stoichiometry[species][reaction]
   std::vector<std::vector<Real>> _stoichiometric;

@@ -77,6 +77,18 @@ public:
    */
   void markDirty() const { _dirty = true; }
 
+  /** Set current simulation time (seconds since midnight) for photolysis calculation. */
+  void setCurrentTime(Real t) const { _t = t; }
+
+  /** Compute RO2 sum (peroxy radical total) from concentration vector. */
+  Real getRO2Sum(const std::vector<Real> & C) const;
+
+  /** Get a single photolysis J value by 1-based J number (e.g., 1 for J1). */
+  Real getJValue(unsigned int j_number) const;
+
+  /** Get the number of photolysis J variables. */
+  unsigned int nJValues() const { return _n_j_vars; }
+
   /**
    * Get dC/dt for a single species, caching the full computation.
    * On first call after markDirty(), computes the complete dC/dt vector
@@ -143,6 +155,18 @@ public:
   /** Update photolysis using SZA formula (default MCM method). */
   void updatePhotolysisSZA(Real sza, Real jfac = 1.0);
 
+  /** ROOF (chamber cover) switch. CLOSED = all photolysis rates forced to zero. */
+  void setRoofOpen(bool open) { _roof_open = open; }
+  bool isRoofOpen() const { return _roof_open; }
+
+  /**
+   * Auto-calculate JFAC from a reference species (e.g., J4=NO2).
+   * JFAC = constrained_value / parameterized_value.
+   * @param ref_j_name Reference J name (e.g. "J4"), must have constrained data
+   * @param constrained_val Reference species' measured (constrained) J value
+   */
+  void calcJFAC(const std::string & ref_j_name, Real constrained_val);
+
   // -- Solar cycle + convergence (F0AM nDays/Converge) --
   /** Set solar cycle params for multi-day simulation. */
   void setSolarCycle(Real lat, Real lon, int day, int month, int year);
@@ -197,6 +221,9 @@ protected:
   Real _kdil;
   std::vector<Real> _conc_bkgd;
 
+  /// ROOF chamber cover: false = CLOSED (all J=0), true = OPEN (normal)
+  bool _roof_open;
+
   // -- fparser for complex rate coefficients --
   std::vector<SymFunctionPtr> _coeff_parsers;
   std::vector<SymFunctionPtr> _reaction_parsers;
@@ -215,6 +242,9 @@ protected:
   unsigned int computeDayOfYear() const;
   Real calculateCosSZA(Real t) const;
 
+  /// Current simulation time (seconds since midnight), set before evaluateCoefficients
+  mutable Real _t;
+
   // -- Cache for single-species ODEKernel interface --
   /// Dirty flag: true when cache needs recomputation
   mutable bool _dirty;
@@ -226,6 +256,9 @@ protected:
   mutable std::vector<Real> _cached_diag_J;
   /// Cached off-diagonal Jacobian elements: key = (row << 32) | col
   mutable std::unordered_map<uint64_t, Real> _cached_offdiag_J;
+
+  /// RO2 species indices in the species vector (built from parser's ro2_species)
+  std::vector<unsigned int> _ro2_indices;
 
   /// Build the sparse Jacobian cache from the current _cached_C
   void _buildJacobianCache() const;

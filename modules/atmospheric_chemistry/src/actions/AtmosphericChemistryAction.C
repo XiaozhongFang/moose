@@ -50,6 +50,11 @@ AtmosphericChemistryAction::validParams()
       "mcm_photolysis_file",
       "doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat",
       "Path to the MCM photolysis-rates parameter file for SZA-based J calculation.");
+
+  MooseEnum mcm_version("v3.1 v3.2 v3.3.1", "v3.3.1");
+  params.addParam<MooseEnum>("mcm_version", mcm_version,
+      "Version of the Master Chemical Mechanism (v3.1, v3.2, v3.3.1)");
+
   params.addParam<Real>("latitude", 51.51, "Latitude in degrees (North positive)");
   params.addParam<Real>("longitude", 0.13, "Longitude in degrees (East positive)");
   params.addParam<unsigned int>("day", 21, "Day of month for solar zenith angle calculation");
@@ -74,7 +79,12 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   // Parse the .fac mechanism file via MCMFacsimileParser (shared with MCMBoxModel)
   MCMFacsimileParser parser;
 
+  std::string mcm_ver = getParam<MooseEnum>("mcm_version");
+  parser.setMCMVersion(mcm_ver);
+
   std::string photo_path = getParam<std::string>("mcm_photolysis_file");
+  std::string peroxy_path =
+      "doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_" + mcm_ver + ".dat";
   {
     std::ifstream test_file(photo_path);
     if (!test_file.good())
@@ -107,7 +117,7 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
     }
   }
 
-  ParsedMechanism mech = parser.parse(_mechanism_file, photo_path);
+  ParsedMechanism mech = parser.parse(_mechanism_file, photo_path, peroxy_path);
 
   _species = mech.species;
   for (auto & r : mech.reactions)
