@@ -33,15 +33,6 @@
   [NO2_ic]  type = ScalarConstantIC  variable = NO2  value = 2.4e11  []
 []
 
-[Postprocessors]
-  [O3_val]   type = ScalarVariable  variable = O3  []
-  [NO_val]   type = ScalarVariable  variable = NO  []
-  [NO2_val]  type = ScalarVariable  variable = NO2  []
-  [OH_val]   type = ScalarVariable  variable = OH  []
-  [HO2_val]  type = ScalarVariable  variable = HO2  []
-  [CH4_val]  type = ScalarVariable  variable = CH4  []
-[]
-
 [Executioner]
   type = Transient
   solve_type = NEWTON
