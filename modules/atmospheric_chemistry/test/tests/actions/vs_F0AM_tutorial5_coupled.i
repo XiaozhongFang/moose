@@ -28,10 +28,10 @@
 []
 
 [Postprocessors]
-  [A_avg]  type = ElementAverageValue  variable = A  []
-  [B_avg]  type = ElementAverageValue  variable = B  []
-  [C_avg]  type = ElementAverageValue  variable = C  []
-  [RO2_avg]  type = ElementAverageValue  variable = RO2  []
+  [A]  type = ElementAverageValue  variable = A  []
+  [B]  type = ElementAverageValue  variable = B  []
+  [C]  type = ElementAverageValue  variable = C  []
+  [RO2]  type = ElementAverageValue  variable = RO2  []
   [ONE]  type = ElementAverageValue  variable = ONE  []
 []
 
@@ -52,6 +52,5 @@
 [Outputs]
   csv = true
   execute_on = 'timestep_end'
-  hide = 'A C RO2'
   file_base = 'vs_F0AM_tutorial5_coupled'
 []
