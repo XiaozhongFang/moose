@@ -39,8 +39,12 @@ def generate_gold(atchem2_dir, output_path):
     ph_var, ph_df = load_atchem2(atchem2 / "photolysisRates.output")
     ev_var, ev_df = load_atchem2(atchem2 / "environmentVariables.output")
 
-    t_ref = sp_df[:, 0]
-    indices, t_moose = find_time_indices(t_ref)
+    # Build separate time indices for each source.
+    # speciesConcentrations.output has 49 rows (t=0..43200),
+    # photolysisRates.output and environmentVariables.output have 48 rows (t=900..43200).
+    sp_indices, t_moose = find_time_indices(sp_df[:, 0])
+    ph_indices, _ = find_time_indices(ph_df[:, 0])
+    ev_indices, _ = find_time_indices(ev_df[:, 0])
 
     # Build lookup dicts
     sp_data = {v: sp_df[:, i] for i, v in enumerate(sp_var)}
@@ -124,18 +128,21 @@ def generate_gold(atchem2_dir, output_path):
 
     # Build rows
     rows = []
-    for step, aidx in enumerate(indices):
+    for step in range(len(t_moose)):
         row = [t_moose[step]]
+        sp_aidx = sp_indices[step]
+        ph_aidx = ph_indices[step]
+        ev_aidx = ev_indices[step]
 
         # Photolysis
         for col in j_cols:
             src = ph_data.get(col)
-            row.append(src[aidx] if src is not None and aidx < len(src) else 0.0)
+            row.append(src[ph_aidx] if src is not None and ph_aidx < len(src) else 0.0)
 
         # Environment
         for col, _ in zip(env_cols, env_moose_names):
             src = ev_data.get(col)
-            row.append(src[aidx] if src is not None and aidx < len(src) else 0.0)
+            row.append(src[ev_aidx] if src is not None and ev_aidx < len(src) else 0.0)
 
         # Solar params (computed from Madronich 1993 — same as MCMBoxModel)
         cosx, secx, lha, _sinld, _cosld, _eqt = solar_params(t_moose[step])
@@ -144,7 +151,7 @@ def generate_gold(atchem2_dir, output_path):
         # Species
         for col in species_cols:
             src = sp_data.get(col)
-            row.append(src[aidx] if src is not None and aidx < len(src) else 0.0)
+            row.append(src[sp_aidx] if src is not None and sp_aidx < len(src) else 0.0)
 
         rows.append(row)
 

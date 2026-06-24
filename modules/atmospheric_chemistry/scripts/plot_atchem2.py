@@ -115,16 +115,31 @@ def plot_grid(t_moose, moose_data, moose_cols, atchem_var, atchem_df,
     fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(11, 7))
     axs = axs.ravel()
     j = 0
+    step = max(1, len(t_moose) // 8)
     for i in range(nc):
         ax = axs[j]
         name = moose_cols[i]
+
+        # MOOSE: black solid line + hollow ○ markers
         ax.plot(t_moose, moose_data[:, i], linestyle="-", color="black",
-                linewidth=0.8, label="MOOSE")
+                linewidth=1.0, label="MOOSE")
+        ax.plot(t_moose[::step], moose_data[::step, i],
+                linestyle="none", marker="o", color="black",
+                markersize=3.5, markerfacecolor="none", markeredgewidth=0.8)
+
+        # AtChem2: red dashed line + hollow □ markers
         if name in atchem_lookup:
-            ax.plot(atchem_df[:, 0], atchem_lookup[name],
-                    linestyle="--", color="red", linewidth=0.6,
-                    label="AtChem2")
-        ax.legend(fontsize=6, frameon=False, loc="upper right")
+            atchem_t = atchem_df[:, 0]
+            atchem_y = atchem_lookup[name]
+            ax.plot(atchem_t, atchem_y, linestyle="--", color="#d62728",
+                    linewidth=0.5, alpha=0.8, label="AtChem2")
+            ax.plot(atchem_t[::step], atchem_y[::step],
+                    linestyle="none", marker="s", color="#d62728",
+                    markersize=3.5, markerfacecolor="none", markeredgewidth=0.8)
+
+        ax.legend(fontsize=6, frameon=True, loc="best",
+                  fancybox=False, edgecolor="gray", facecolor="white",
+                  markerscale=0.8)
         ax.set(title=name, xlabel="seconds", ylabel="")
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: "%.1e" % x))
         j = j + 1
