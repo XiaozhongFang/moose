@@ -238,6 +238,8 @@ public:
   Real getLatitude() const { return _lat; }
   /** Get longitude (degrees). */
   Real getLongitude() const { return _lon; }
+  /** Get solar declination (radians). */
+  Real getDeclination() const { return _declination; }
 
   /**
    * Get dC/dt for a single species, caching the full computation.

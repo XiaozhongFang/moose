@@ -77,13 +77,15 @@
   [PRESS]     type = Receiver  default = 1.01325e5  []
   [RH]        type = Receiver  default = 0.0        []
   [H2O]       type = Receiver  default = 4.45e17    []
-  [DEC]       type = Receiver  default = 0.0        []
+  [DEC]       type = MCMSolarPostprocessor  box_model = box_model  solar_param = dec  []
   [BLHEIGHT]  type = Receiver  default = 0.0        []
   [DILUTE]    type = Receiver  default = 0.0        []
   [JFAC]      type = Receiver  default = 1.0        []
   [ROOF]      type = Receiver  default = 1.0        []
   [ASA]       type = Receiver  default = 0.0        []
-  [RO2_sum]   type = MCMRO2Postprocessor  box_model = box_model  []
+  [RO2_sum]   type = MCMRO2Postprocessor  box_model = box_model  
+    species_variables = 'HCHO CH3NO3 CH3OH O1D O3 HO2NO2 NO3 N2O5 H2O2 NO NA HO2 NO2 CH4 HSO3 CO CL O HNO3 SO3 SO2 CH3O OH H2 HONO CH3O2NO2 CH3OOH SA CH3O2'
+  []
 
   # ── Solar parameters (AtChem2 zenith_data_mod) ──
   [cosx]   type = MCMSolarPostprocessor  box_model = box_model  solar_param = cosx    []

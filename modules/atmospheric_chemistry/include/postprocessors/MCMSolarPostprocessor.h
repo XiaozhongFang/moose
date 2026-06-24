@@ -31,6 +31,6 @@ protected:
   const MCMBoxModel & _box_model;
 
   /// Which solar parameter to output
-  enum ParamType { COSX, SECX, LHA, SINLD, COSLD, EQTIME, LAT, LON } _param;
+  enum ParamType { COSX, SECX, LHA, SINLD, COSLD, EQTIME, LAT, LON, DEC } _param;
   Real _value;
 };

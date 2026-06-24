@@ -17,7 +17,7 @@ MCMSolarPostprocessor::validParams()
   InputParameters params = GeneralPostprocessor::validParams();
   params.addRequiredParam<UserObjectName>("box_model", "Name of the MCMBoxModel UserObject");
 
-  MooseEnum param_enum("cosx secx lha sinld cosld eqtime lat lon", "cosx");
+  MooseEnum param_enum("cosx secx lha sinld cosld eqtime lat lon dec", "cosx");
   params.addRequiredParam<MooseEnum>("solar_param", param_enum,
       "Solar parameter to output: cosx, secx, lha, sinld, cosld, eqtime, lat, lon");
   params.addClassDescription("Outputs solar parameters (cosx, secx, lha, etc.) from MCMBoxModel.");
@@ -38,6 +38,7 @@ MCMSolarPostprocessor::MCMSolarPostprocessor(const InputParameters & params)
   else if (p == "eqtime") _param = EQTIME;
   else if (p == "lat")    _param = LAT;
   else if (p == "lon")    _param = LON;
+  else if (p == "dec")    _param = DEC;
 }
 
 void
@@ -53,6 +54,7 @@ MCMSolarPostprocessor::execute()
     case EQTIME: _value = _box_model.getSolarEQT();    break;
     case LAT:    _value = _box_model.getLatitude();     break;
     case LON:    _value = _box_model.getLongitude();    break;
+    case DEC:    _value = _box_model.getDeclination();   break;
   }
 }
 
