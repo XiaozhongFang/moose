@@ -6,7 +6,9 @@
 box model simulations in MOOSE. It manages the chemical system matrices
 (stoichiometric coefficients, reactant indices, rate constants) and provides
 the core $\mathrm{d}C/\mathrm{d}t$ computation following F0AM's `dydt_eval.m`
-algorithm.
+algorithm. The stoichiometric matrix uses a pluggable `StoichMatrix` storage
+backend, selectable via the [!param](/UserObjects/MCMBoxModel/stoich_format) parameter
+(analogous to PETSc's `-mat_type`).
 
 ### Core Algorithm
 
@@ -18,9 +20,28 @@ The ODE system follows F0AM's matrix formulation:
 \end{equation}
 
 where:
-- $\mathbf{f}$ [nRx $\times$ nSp]: stoichiometric coefficient matrix
-- $\mathbf{iG}$ [nRx $\times$ 2]: reactant index pairs (-1 for pseudo-first-order)
+- $\mathbf{f}$ [nRx $\times$ nSp]: stoichiometric coefficient matrix (sparse, ~99.9% zeros for full MCM)
+- $\mathbf{iG}$ [nRx $\times$ 3]: reactant index triplets (padded with ONE=0 for pseudo-first-order)
 - $\mathbf{k}$ [nRx]: rate constant vector
+
+### Stoichiometric Matrix Storage (`stoich_format`)
+
+The stoichiometric matrix $\mathbf{f}$ is stored in a `StoichMatrix` backend that
+supports four formats, selected via [!param](/UserObjects/MCMBoxModel/stoich_format):
+
+| Format | Storage | Memory (full MCM) | Best For |
+|--------|---------|-------------------|----------|
+| `CSR` (default) | Compressed Sparse Row, net coefficients | ~3 MB | HPC large mechanisms, PETSc AIJ-compatible |
+| `COO` | AtChem2-style split reactant/product vectors | ~5 MB | Loss/production rate diagnostics |
+| `DENSE` | Dense 2D array `f[reaction][species]` | ~800 MB | Tiny mechanisms (< 50 species), zero indirection overhead |
+| `CSC` | Compressed Sparse Column + CSR forward index | ~6 MB | Column queries ("which reactions involve species X?") |
+
+All formats expose an identical `forEachInRow(r, fn)` iteration interface — compute
+methods (`computeDCdt`, Jacobian assembly) are format-agnostic. The compiler fully
+inlines the `switch`-based dispatch, so format selection has zero runtime overhead.
+
+The CSR format mirrors PETSc's internal AIJ storage and is the recommended choice for
+HPC production runs. COO mirrors AtChem2's `clhs`/`crhs` arrays.
 
 ### Photolysis Methods
 

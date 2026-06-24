@@ -20,6 +20,132 @@
 #include <map>
 
 /**
+ * Lightweight sparse stoichiometric matrix with pluggable storage format.
+ *
+ * Follows PETSc's parameter-driven format selection pattern (cf. -mat_type aij|dense):
+ * a MooseEnum parameter "stoich_format" selects the storage backend at construction
+ * time.  All compute methods use a single template iteration interface
+ * (forEachInRow) that the compiler fully inlines — zero virtual-call overhead
+ * regardless of the format chosen.
+ *
+ * Supported formats:
+ *   CSR   — Compressed Sparse Row, net stoichiometric coefficients.
+ *           PETSc AIJ-compatible, compact, optimal for HPC with large mechanisms.
+ *   COO   — AtChem2-style split reactant / product vectors (clhs/crhs).
+ *           Enables separate loss-rate / production-rate diagnostics.
+ *   DENSE — Dense 2D array.  Simple, cache-friendly, zero indirect-addressing
+ *           overhead.  Best for tiny mechanisms (< ~50 species) where memory is
+ *           irrelevant and instruction-level efficiency matters.
+ *   CSC   — Compressed Sparse Column: species-major storage.  Each column
+ *           lists (reaction, coeff) for all reactions involving that species.
+ *           Enables column queries ("which reactions involve species X?").
+ *           Row iteration builds a lightweight forward index at build() time.
+ *
+ * Adding a new format:
+ *   1. Add enum value to Format.
+ *   2. Add data members.
+ *   3. Add branches in forEachInRow(), get(), build().
+ */
+struct StoichMatrix
+{
+  enum Format { CSR, COO, DENSE, CSC };
+
+  Format format;
+
+  unsigned int nSpecies = 0, nReactions = 0;
+
+  // ---- CSR data ----
+  std::vector<int>    csr_cols;
+  std::vector<Real>   csr_vals;
+  std::vector<size_t> csr_row_ptr;
+
+  // ---- COO data (AtChem2-style clhs / crhs) ----
+  std::vector<int>    lhs_species, rhs_species;
+  std::vector<Real>   lhs_coeff,   rhs_coeff;
+  std::vector<size_t> lhs_row_ptr, rhs_row_ptr;
+
+  // ---- DENSE data ----
+  /// dense[r][s] = net stoichiometric coefficient (0.0 for non-participating)
+  std::vector<std::vector<Real>> dense;
+
+  // ---- CSC data (species-major, column queries) ----
+  /// Column s spans csc_col_ptr[s] .. csc_col_ptr[s+1]-1.
+  /// Element k: reaction = csc_rows[k], coefficient = csc_c_vals[k].
+  /// Row iteration uses the CSR fields (populated alongside CSC as a forward
+  /// index), so forEachInRow simply delegates to the CSR branch.
+  std::vector<int>    csc_rows;
+  std::vector<Real>   csc_c_vals;
+  std::vector<size_t> csc_col_ptr;
+
+  /// Build from parsed mechanism.
+  void build(const ParsedMechanism & mech, Format fmt);
+
+  /**
+   * Iterate non-zero stoichiometric entries for reaction r.
+   * Calls fn(species_index, net_coefficient) for each participating species.
+   *
+   * CSR: net_coefficient = product - reactant (stored directly).
+   * COO: reactants (-coeff) then products (+coeff), matching AtChem2 resid().
+   *
+   * The fn lambda is fully inlined — zero dispatch overhead.
+   */
+  template <typename F>
+  void forEachInRow(unsigned int r, F && fn) const
+  {
+    switch (format)
+    {
+      case CSR:
+        for (size_t k = csr_row_ptr[r]; k < csr_row_ptr[r + 1]; ++k)
+          fn(csr_cols[k], csr_vals[k]);
+        break;
+      case COO:
+        for (size_t k = lhs_row_ptr[r]; k < lhs_row_ptr[r + 1]; ++k)
+          fn(lhs_species[k], -lhs_coeff[k]);
+        for (size_t k = rhs_row_ptr[r]; k < rhs_row_ptr[r + 1]; ++k)
+          fn(rhs_species[k], rhs_coeff[k]);
+        break;
+      case DENSE:
+        for (unsigned int s = 0; s < nSpecies; ++s)
+          if (std::abs(dense[r][s]) > 1e-30)
+            fn((int)s, dense[r][s]);
+        break;
+      case CSC:
+        // CSC stores species-major; row iteration uses the CSR forward index
+        // populated during build().  Same performance as pure CSR.
+        for (size_t k = csr_row_ptr[r]; k < csr_row_ptr[r + 1]; ++k)
+          fn(csr_cols[k], csr_vals[k]);
+        break;
+    }
+  }
+
+  /// O(k) lookup — k = entries per row (typically 2-10).  Diagnostic use only.
+  Real get(unsigned int r, unsigned int s) const
+  {
+    switch (format)
+    {
+      case CSR:
+        for (size_t k = csr_row_ptr[r]; k < csr_row_ptr[r + 1]; ++k)
+          if ((unsigned int)csr_cols[k] == s) return csr_vals[k];
+        return 0.0;
+      case COO:
+        for (size_t k = lhs_row_ptr[r]; k < lhs_row_ptr[r + 1]; ++k)
+          if ((unsigned int)lhs_species[k] == s) return -lhs_coeff[k];
+        for (size_t k = rhs_row_ptr[r]; k < rhs_row_ptr[r + 1]; ++k)
+          if ((unsigned int)rhs_species[k] == s) return rhs_coeff[k];
+        return 0.0;
+      case DENSE:
+        return (r < nReactions && s < nSpecies) ? dense[r][s] : 0.0;
+      case CSC:
+        // Species-major: scan column s for reaction r
+        for (size_t k = csc_col_ptr[s]; k < csc_col_ptr[s + 1]; ++k)
+          if ((unsigned int)csc_rows[k] == r) return csc_c_vals[k];
+        return 0.0;
+    }
+    return 0.0;
+  }
+};
+
+/**
  * Centralized box model for atmospheric chemistry ODE systems.
  *
  * Manages the chemical system matrices (stoichiometric coefficients,
@@ -27,12 +153,12 @@
  * computation.  Designed to support arbitrary numbers of species and
  * reactions (tested up to full MCM v3.3.1: ~5832 species, ~17224 reactions).
  *
- * The matrix layout follows F0AM's convention:
- *   - _f[i][j] : stoichiometric coefficient for reaction i, species j
- *   - _iG[i][0..1] : reactant indices for reaction i (-1 for pseudo-first-order)
- *   - _k[i] : pre-computed rate constant for reaction i
+ * The stoichiometric matrix is stored in a swappable StoichMatrix backend
+ * (default: CSR for HPC; optional: COO for AtChem2-style diagnostics).
+ * The "stoich_format" parameter selects the backend at construction time —
+ * analogous to PETSc's -mat_type parameter for runtime format selection.
  *
- * Core computation (equivalent to F0AM dydt_eval.m):
+ * Core computation (equivalent to F0AM dydt_eval.m and AtChem2 resid()):
  *   dC/dt = f^T * (k .* prod(C[iG], 2))
  *
  * Usage:
@@ -194,8 +320,9 @@ protected:
   std::vector<std::string> _species_names;
   std::vector<std::string> _reaction_names;
 
-  /// Stoichiometric coefficients: _f[reaction][species]
-  std::vector<std::vector<Real>> _f;
+  /// Stoichiometric matrix with swappable storage backend.
+  /// Format selected via "stoich_format" parameter (CSR or COO).
+  StoichMatrix _stoich;
 
   /// Reactant indices: _iG[reaction][0..2], padded with ONE index (0)
   std::vector<std::vector<int>> _iG;

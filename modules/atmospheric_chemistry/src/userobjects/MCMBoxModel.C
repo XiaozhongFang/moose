@@ -12,6 +12,136 @@
 
 registerMooseObject("AtmosphericChemistryApp", MCMBoxModel);
 
+// ---- StoichMatrix::build ----------------------------------------------------
+
+void
+StoichMatrix::build(const ParsedMechanism & mech, Format fmt)
+{
+  format = fmt;
+  nSpecies = mech.species.size();
+  nReactions = mech.reactions.size();
+
+  // Build name -> index map (needed by COO format for reactant/product lookup)
+  std::unordered_map<std::string, unsigned int> name_to_idx;
+  for (unsigned int i = 0; i < nSpecies; ++i)
+    name_to_idx[mech.species[i]] = i;
+
+  switch (format)
+  {
+    case CSR:
+    {
+      csr_row_ptr.resize(nReactions + 1);
+      csr_row_ptr[0] = 0;
+      csr_cols.clear();
+      csr_vals.clear();
+      for (unsigned int r = 0; r < nReactions; ++r)
+      {
+        for (unsigned int s = 0; s < nSpecies; ++s)
+        {
+          Real val = mech.stoichiometry[s][r];
+          if (std::abs(val) > 1e-30)
+          {
+            csr_cols.push_back((int)s);
+            csr_vals.push_back(val);
+          }
+        }
+        csr_row_ptr[r + 1] = csr_cols.size();
+      }
+      break;
+    }
+    case COO:
+    {
+      lhs_row_ptr.resize(nReactions + 1);
+      rhs_row_ptr.resize(nReactions + 1);
+      lhs_row_ptr[0] = rhs_row_ptr[0] = 0;
+      lhs_species.clear(); lhs_coeff.clear();
+      rhs_species.clear(); rhs_coeff.clear();
+
+      for (unsigned int r = 0; r < nReactions; ++r)
+      {
+        const auto & rx = mech.reactions[r];
+        for (const auto & [coeff, name] : rx.reactants)
+        {
+          auto it = name_to_idx.find(name);
+          if (it != name_to_idx.end())
+          {
+            lhs_species.push_back((int)it->second);
+            lhs_coeff.push_back(coeff);
+          }
+        }
+        lhs_row_ptr[r + 1] = lhs_species.size();
+
+        for (const auto & [coeff, name] : rx.products)
+        {
+          auto it = name_to_idx.find(name);
+          if (it != name_to_idx.end())
+          {
+            rhs_species.push_back((int)it->second);
+            rhs_coeff.push_back(coeff);
+          }
+        }
+        rhs_row_ptr[r + 1] = rhs_species.size();
+      }
+      break;
+    }
+    case DENSE:
+    {
+      dense.assign(nReactions, std::vector<Real>(nSpecies, 0.0));
+      for (unsigned int s = 0; s < nSpecies; ++s)
+        for (unsigned int r = 0; r < nReactions; ++r)
+          dense[r][s] = mech.stoichiometry[s][r];
+      break;
+    }
+    case CSC:
+    {
+      // Build species-major (column) storage from dense stoichiometry.
+      // Simultaneously populate CSR fields as a row-iteration forward index.
+      csc_col_ptr.resize(nSpecies + 1);
+      csc_col_ptr[0] = 0;
+      csc_rows.clear();
+      csc_c_vals.clear();
+
+      csr_row_ptr.resize(nReactions + 1);
+      csr_row_ptr[0] = 0;
+      csr_cols.clear();
+      csr_vals.clear();
+
+      // Two-pass: first count nonzeros per species, then fill
+      for (unsigned int s = 0; s < nSpecies; ++s)
+      {
+        for (unsigned int r = 0; r < nReactions; ++r)
+        {
+          Real val = mech.stoichiometry[s][r];
+          if (std::abs(val) > 1e-30)
+          {
+            csc_rows.push_back((int)r);
+            csc_c_vals.push_back(val);
+          }
+        }
+        csc_col_ptr[s + 1] = csc_rows.size();
+      }
+
+      // Build CSR forward index for row iteration
+      for (unsigned int r = 0; r < nReactions; ++r)
+      {
+        for (unsigned int s = 0; s < nSpecies; ++s)
+        {
+          Real val = mech.stoichiometry[s][r];
+          if (std::abs(val) > 1e-30)
+          {
+            csr_cols.push_back((int)s);
+            csr_vals.push_back(val);
+          }
+        }
+        csr_row_ptr[r + 1] = csr_cols.size();
+      }
+      break;
+    }
+  }
+}
+
+// ---- MCMBoxModel ------------------------------------------------------------
+
 InputParameters
 MCMBoxModel::validParams()
 {
@@ -30,6 +160,13 @@ MCMBoxModel::validParams()
   params.addParam<unsigned int>("month", 6, "Month");
   params.addParam<unsigned int>("year", 2010, "Year");
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor");
+  MooseEnum stoich_fmt("CSR COO DENSE CSC", "CSR");
+  params.addParam<MooseEnum>(
+      "stoich_format", stoich_fmt,
+      "Stoichiometric matrix storage format.  CSR = compressed sparse row (PETSc AIJ-compatible, "
+      "HPC default).  COO = AtChem2-style split reactant/product.  DENSE = dense 2D array "
+      "(best for < ~50 species).  CSC = compressed sparse column (species-major; enables "
+      "column queries 'which reactions involve species X?').  Analogous to PETSc -mat_type.");
   params.addClassDescription(
       "Centralized box model UserObject for atmospheric chemistry ODE systems.");
   return params;
@@ -94,10 +231,16 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
   for (unsigned int r = 0; r < _n_reactions; ++r)
     rates[r] = _k[r] * G[r];
 
-  // Step 3: dC = f^T * rates (stoichiometric accumulation)
+  // Step 3: dC = f^T * rates  — format-agnostic iteration via StoichMatrix.
+  // forEachInRow dispatches based on _stoich.format (CSR or COO); the lambda
+  // is fully inlined, so there is zero virtual-call overhead.
   for (unsigned int r = 0; r < _n_reactions; ++r)
-    for (unsigned int s = 0; s < _n_species; ++s)
-      dC[s] += _f[r][s] * rates[r];
+  {
+    Real rate = rates[r];
+    _stoich.forEachInRow(r, [&](int s, Real coeff) {
+      dC[s] += coeff * rate;
+    });
+  }
 }
 
 void
@@ -110,7 +253,7 @@ MCMBoxModel::computeJacobianTriplets(
   if (_n_reactions == 0 || _n_species == 0)
     return;
 
-  // F0AM-style 3-term product Jacobian:
+  // F0AM-style 3-term product Jacobian — format-agnostic via StoichMatrix.
   //   rate_r = k_r * C[i0] * C[i1] * C[i2]
   //   d(rate_r)/dC[j] = k_r * sum_{k where iG[k]==j} prod_{m≠k} C[iG[m]]
   //   J[s][j] += f[r][s] * d(rate_r)/dC[j]
@@ -121,34 +264,21 @@ MCMBoxModel::computeJacobianTriplets(
     const Real c0 = C[i0], c1 = C[i1], c2 = C[i2];
     const Real k = _k[r];
 
+    // Helper: for reactant j with derivative drate, emit J(s,j) for every
+    // species s that participates in reaction r.
+    auto emit_contrib = [&](unsigned int j, Real drate) {
+      if (std::abs(drate) < 1e-30) return;
+      _stoich.forEachInRow(r, [&](int s, Real coeff) {
+        J.emplace_back((unsigned int)s, j, drate * coeff);
+      });
+    };
+
     // Contribution from C[i0]: dr/dC[i0] = k * c1 * c2
-    {
-      Real drate = k * c1 * c2;
-      // For self-reaction duplicates (i0==i1 or i0==i2), this is the ONLY contribution
-      // and the product rule automatically gives k*c1*c2 = k*C[i0]*C[i2] which is correct
-      if (std::abs(drate) > 1e-30)
-        for (unsigned int s = 0; s < _n_species; ++s)
-          if (std::abs(_f[r][s]) > 1e-30)
-            J.emplace_back(s, (unsigned int)i0, drate * _f[r][s]);
-    }
+    emit_contrib((unsigned int)i0, k * c1 * c2);
     // Contribution from C[i1]: dr/dC[i1] = k * c0 * c2
-    if (i1 != i0)  // skip if already accounted (self-reaction)
-    {
-      Real drate = k * c0 * c2;
-      if (std::abs(drate) > 1e-30)
-        for (unsigned int s = 0; s < _n_species; ++s)
-          if (std::abs(_f[r][s]) > 1e-30)
-            J.emplace_back(s, (unsigned int)i1, drate * _f[r][s]);
-    }
+    if (i1 != i0) emit_contrib((unsigned int)i1, k * c0 * c2);
     // Contribution from C[i2]: dr/dC[i2] = k * c0 * c1
-    if (i2 != i0 && i2 != i1)  // skip if already accounted
-    {
-      Real drate = k * c0 * c1;
-      if (std::abs(drate) > 1e-30)
-        for (unsigned int s = 0; s < _n_species; ++s)
-          if (std::abs(_f[r][s]) > 1e-30)
-            J.emplace_back(s, (unsigned int)i2, drate * _f[r][s]);
-    }
+    if (i2 != i0 && i2 != i1) emit_contrib((unsigned int)i2, k * c0 * c1);
   }
 }
 
@@ -212,18 +342,18 @@ MCMBoxModel::_buildJacobianCache() const
 
     // Helper: accumulate Jacobian contribution (s, j) += val
     auto accum = [&](unsigned int j, Real drate) {
-      for (unsigned int s = 0; s < _n_species; ++s)
-      {
-        Real val = drate * _f[r][s];
-        if (std::abs(val) < 1e-30) continue;
-        if (j == s)
-          _cached_diag_J[s] += val;
+      if (std::abs(drate) < 1e-30) return;
+      _stoich.forEachInRow(r, [&](int s, Real coeff) {
+        Real val = drate * coeff;
+        unsigned int us = (unsigned int)s;
+        if (j == us)
+          _cached_diag_J[us] += val;
         else
         {
-          uint64_t key = (static_cast<uint64_t>(s) << 32) | static_cast<uint64_t>(j);
+          uint64_t key = (static_cast<uint64_t>(us) << 32) | static_cast<uint64_t>(j);
           _cached_offdiag_J[key] += val;
         }
-      }
+      });
     };
 
     // dr/dC[i0] = k * c1 * c2
@@ -252,11 +382,18 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
       _ro2_indices.push_back((unsigned int)(it - _species_names.begin()));
   }
 
-  // Convert stoichiometry from [species][reaction] to [reaction][species] (F0AM convention)
-  _f.assign(_n_reactions, std::vector<Real>(_n_species, 0.0));
-  for (unsigned int r = 0; r < _n_reactions; ++r)
-    for (unsigned int s = 0; s < _n_species; ++s)
-      _f[r][s] = mech.stoichiometry[s][r];
+  // Build stoichiometric matrix in the selected format (parameter "stoich_format").
+  // CSR: compact, PETSc AIJ-compatible, optimal for HPC.
+  // COO: AtChem2-style split reactant/product — enables loss/production diagnostics.
+  StoichMatrix::Format fmt = StoichMatrix::CSR;
+  if (isParamValid("stoich_format"))
+  {
+    MooseEnum fmt_enum = getParam<MooseEnum>("stoich_format");
+    if (fmt_enum == "COO")        fmt = StoichMatrix::COO;
+    else if (fmt_enum == "DENSE") fmt = StoichMatrix::DENSE;
+    else if (fmt_enum == "CSC")   fmt = StoichMatrix::CSC;
+  }
+  _stoich.build(mech, fmt);
 
   // Copy reactant indices
   _iG = mech.reactant_indices;
@@ -562,7 +699,7 @@ MCMBoxModel::reactionRate(unsigned int r, const std::vector<Real> & C) const
 Real
 MCMBoxModel::speciesReactionRate(unsigned int s, unsigned int r, const std::vector<Real> & C) const
 {
-  return _f[r][s] * reactionRate(r, C);
+  return _stoich.get(r, s) * reactionRate(r, C);
 }
 
 void
