@@ -394,6 +394,9 @@ protected:
   Real _temperature;
   Real _air_density;
   Real _water_vapor;
+  Real _press;       // pressure (mbar), 0 = unused
+  Real _rh;          // relative humidity (%), -1 = unused
+  Real _blheight;    // boundary layer height (m)
   Real _jfac;
   // Photolysis J parameters (CL/CMM/CNN per J number)
   std::vector<unsigned int> _j_numbers;

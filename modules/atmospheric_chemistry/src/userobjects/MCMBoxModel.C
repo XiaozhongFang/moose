@@ -160,8 +160,22 @@ MCMBoxModel::validParams()
   params.addParam<std::string>(
       "photolysis_file", "", "Path to MCM photolysis-rates data file (e.g. mcm_photolysis_rates_v3.3.1.dat)");
   params.addParam<Real>("temperature", 298.15, "Ambient temperature (K)");
-  params.addParam<Real>("air_density", 2.46e19, "Air number density (molecules/cm^3)");
-  params.addParam<Real>("water_vapor", 2.46e17, "Background water vapor (molecules/cm^3)");
+  params.addParam<Real>("air_density", 2.46e19,
+      "Air number density (molecules/cm^3).  If press is set (>0), computed "
+      "dynamically from press/temp using ideal gas law (AtChem2 calcAirDensity).");
+  params.addParam<Real>("water_vapor", 2.46e17,
+      "Background water vapor (molecules/cm^3).  If rh is set (>=0), computed "
+      "dynamically from rh/temp/press using Vaisala 2013 formula (AtChem2 convertRHtoH2O).");
+  params.addParam<Real>("press", 0.0,
+      "Pressure (mbar).  If >0, air_density is computed via ideal gas law: "
+      "M = 1e-6 * NA/R * (press*100 / temp).  Default 0 = use air_density directly.");
+  params.addParam<Real>("rh", -1.0,
+      "Relative humidity (%).  If >=0, water_vapor is computed via Vaisala 2013. "
+      "Default -1 = use water_vapor directly (AtChem2 sentinel convention).");
+  params.addParam<Real>("dilute", 0.0,
+      "Dilution rate coefficient kdil (/s).  If >0, dC/dt -= kdil*(C-C_bkgd).");
+  params.addParam<Real>("blheight", 0.0,
+      "Boundary layer height (m) — informational, used with dilute.");
   params.addParam<Real>("latitude", 51.51, "Latitude (deg N)");
   params.addParam<Real>("longitude", 0.13, "Longitude (deg E)");
   params.addParam<unsigned int>("day", 21, "Day of month");
@@ -196,6 +210,9 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _temperature(getParam<Real>("temperature")),
     _air_density(getParam<Real>("air_density")),
     _water_vapor(getParam<Real>("water_vapor")),
+    _press(getParam<Real>("press")),
+    _rh(getParam<Real>("rh")),
+    _blheight(getParam<Real>("blheight")),
     _jfac(getParam<Real>("jfac")),
     _t(0.0),
     _dirty(true)
@@ -217,6 +234,15 @@ MCMBoxModel::initialize()
     loadMechanism(mech);
     _console << "MCMBoxModel: Loaded " << _n_species << " species, "
              << _n_reactions << " reactions from " << mech_file << std::endl;
+
+    // Set up dilution if dilute > 0
+    Real dilute = getParam<Real>("dilute");
+    if (dilute > 0.0)
+    {
+      _kdil = dilute;
+      _conc_bkgd.assign(_n_species, 0.0);
+      _console << "MCMBoxModel: Dilution enabled, kdil = " << dilute << " /s" << std::endl;
+    }
   }
 }
 
@@ -256,6 +282,11 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
       dC[s] += coeff * rate;
     });
   }
+
+  // Apply dilution if kdil > 0 (AtChem2 DILUTE parameter)
+  if (_kdil > 0.0 && !_conc_bkgd.empty())
+    for (unsigned int i = 0; i < _n_species; ++i)
+      dC[i] -= _kdil * (C[i] - _conc_bkgd[i]);
 }
 
 void
@@ -602,11 +633,37 @@ MCMBoxModel::evaluateCoefficients()
 {
   if (_coeff_parsers.empty()) return;
 
+  // Compute M (air density) dynamically from press/temp if press > 0
+  Real M_val = _air_density;
+  if (_press > 0.0)
+  {
+    // AtChem2 calcAirDensity: M = 1e-6 * NA/R * (press_pa / temp)
+    // press_mbar → press_pa: * 100
+    // NA = 6.02214129e23, R = 8.3144621
+    constexpr Real NA_over_R = 6.02214129e23 / 8.3144621;
+    M_val = 1.0e-6 * NA_over_R * (_press * 100.0 / _temperature);
+  }
+
+  // Compute H2O dynamically from rh/temp/press if rh >= 0
+  Real H2O_val = _water_vapor;
+  if (_rh >= 0.0)
+  {
+    // Vaisala 2013 convertRHtoH2O (AtChem2 atmosphereFunctions.f90)
+    Real temp_c = _temperature - 273.15;
+    // Eq.6: water vapour saturation pressure (mbar)
+    Real wvp = (_rh / 100.0) * 6.116441 * std::pow(10.0, (7.591386 * temp_c) / (temp_c + 240.7263));
+    // Eq.18: volume of water vapour per volume of dry air (parts per unit)
+    Real press_mbar = (_press > 0.0) ? _press : 1013.25;
+    Real h2o_ppu = wvp / (press_mbar - wvp);
+    // Convert ppu to molecule/cm³
+    H2O_val = h2o_ppu * M_val;
+  }
+
   _func_params[0] = _temperature;
-  _func_params[1] = _air_density;
-  _func_params[2] = 0.21 * _air_density;  // O2 volume fraction
-  _func_params[3] = 0.78 * _air_density;  // N2 volume fraction
-  _func_params[4] = _water_vapor;
+  _func_params[1] = M_val;
+  _func_params[2] = 0.21 * M_val;  // O2 volume fraction
+  _func_params[3] = 0.78 * M_val;  // N2 volume fraction
+  _func_params[4] = H2O_val;
 
   // Compute photolysis J values from solar zenith angle (MCM formula)
   // J = l * cosx^m * exp(-n * secx) * JFAC * ROOF
