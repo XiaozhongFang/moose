@@ -1,0 +1,3 @@
+app_name = atmospheric_chemistry
+allow_warnings = false
+allow_unused = false
