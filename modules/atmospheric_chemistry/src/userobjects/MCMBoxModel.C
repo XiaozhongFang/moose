@@ -723,11 +723,23 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
       _reaction_parsers[r]->Optimize();
   }
 
-  // Store photolysis parameters for SZA-based J calculation
-  _j_numbers = mech.j_numbers;
-  _j_CL_vals = mech.j_CL;
-  _j_CMM_vals = mech.j_CMM;
-  _j_CNN_vals = mech.j_CNN;
+  // Store photolysis parameters for SZA-based J calculation.
+  // When the photolysis file is empty (BOTTOMUP mode), use the locally-detected
+  // J numbers from expression scanning instead.
+  if (!mech.j_numbers.empty())
+  {
+    _j_numbers = mech.j_numbers;
+    _j_CL_vals = mech.j_CL;
+    _j_CMM_vals = mech.j_CMM;
+    _j_CNN_vals = mech.j_CNN;
+  }
+  else
+  {
+    _j_numbers.assign(j_numbers.begin(), j_numbers.end());
+    _j_CL_vals.assign(_j_numbers.size(), 0.0);
+    _j_CMM_vals.assign(_j_numbers.size(), 1.0);
+    _j_CNN_vals.assign(_j_numbers.size(), 0.0);
+  }
   _n_j_vars = _j_numbers.size();
 
   // Pre-compute J photo indices into _func_params (Per.14 — avoids string+map in evaluateCoefficients).
