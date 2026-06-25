@@ -30,8 +30,19 @@ def extract_ro2_from_fac(fac_file):
         sys.exit(1)
 
     var_block = m.group(1)
-    species = re.findall(r'\b(\w+O2)\b', var_block)
-    return sorted(set(species))
+    # Use same detection logic as MCMFacsimileParser (name-based heuristic):
+    # - Species ending in "O2" (excluding known false positives)
+    # - Species containing "RO2"
+    non_ro2 = {'HO2', 'NO2', 'SO2', 'H2O2', 'O2', 'N2O2',
+               'NO3', 'HNO3', 'CO2', 'CLO2', 'CL2O2', 'BRO2'}
+    all_species = re.findall(r'\b(\w+)\b', var_block)
+    ro2_set = set()
+    for sp in all_species:
+        if sp in non_ro2:
+            continue
+        if (len(sp) >= 3 and sp.endswith('O2')) or 'RO2' in sp:
+            ro2_set.add(sp)
+    return sorted(ro2_set)
 
 
 def main():
