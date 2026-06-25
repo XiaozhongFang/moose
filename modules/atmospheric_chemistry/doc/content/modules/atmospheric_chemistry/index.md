@@ -31,6 +31,26 @@ The module uses a unified `[AtmosphericChemistry]` Action with two modes:
 []
 ```
 
+## Photolysis Schemes
+
+Two photolysis calculation methods are supported via the `photolysis_scheme` parameter:
+
+| Scheme | Input | Dependencies | Use Case |
+|--------|-------|-------------|----------|
+| `MCM_SZA` (default) | SZA only (lat/lon/day/time) | MCM photolysis-rates file | AtChem2-compatible, fast |
+| `HYBRID` | SZA + albedo + O3col + altitude | F0AM TUV lookup tables | O3 column / albedo dependency |
+
+```moose
+# Hybrid scheme example
+[AtmosphericChemistry]
+  mode = coupled
+  mechanism_file = 'mechanism.fac'
+  photolysis_scheme = HYBRID
+  hybrid_table_dir = 'tuv_tables'
+  albedo = 0.1
+[]
+```
+
 ## Chemical Mechanism Files
 
 Mechanism files in FACSIMILE (`.fac`) format are supported directly. For MCM website-exported `.kpp`

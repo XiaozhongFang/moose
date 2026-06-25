@@ -8,6 +8,7 @@
 //* https://www.gnu.org/licenses/lgpl-2.1.html
 
 #include "MCMRatesMaterial.h"
+#include "HybridJTableReader.h"
 #include "pcrecpp.h"
 
 registerMooseObject("AtmosphericChemistryApp", MCMRatesMaterial);
@@ -42,6 +43,8 @@ MCMRatesMaterial::validParams()
       "coefficient_expressions",
       "Rate coefficient expressions in evaluation order (converted)");
 
+  params.addRequiredParam<std::vector<unsigned int>>(
+      "j_numbers", "J numbers (1-based) corresponding to each entry in j_cl/cmm/cnn_values");
   params.addRequiredParam<std::vector<Real>>(
       "j_cl_values", "MCM photolysis CL parameter per J<N>, sorted by J number.");
   params.addRequiredParam<std::vector<Real>>(
@@ -59,6 +62,17 @@ MCMRatesMaterial::validParams()
 
   params.addParam<std::vector<std::string>>("ro2_species", {}, "RO2 lumped-species component names (e.g. CH3O2). RO2 = sum of these species concentrations.");
 
+  MooseEnum photo_scheme("MCM_SZA HYBRID", "MCM_SZA");
+  params.addParam<MooseEnum>("photolysis_scheme", photo_scheme,
+      "Photolysis scheme: MCM_SZA or HYBRID (4D TUV lookup table)");
+
+  params.addParam<std::string>("hybrid_table_dir", "",
+      "Directory containing F0AM Hybrid J table files (required if HYBRID)");
+
+  params.addParam<Real>("albedo", 0.1, "Surface albedo (0-1), used by HYBRID scheme");
+  params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units, used by HYBRID scheme");
+  params.addParam<Real>("altitude", 0.0, "Altitude in meters, used by HYBRID scheme");
+
   params.addClassDescription("Material that evaluates MCM reaction rates via sequential fparser evaluation");
   return params;
 }
@@ -75,6 +89,14 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
     _reactant_matrix(getParam<std::vector<std::vector<Real>>>("reactant_matrix")),
     _reaction_rates(declareProperty<std::vector<Real>>("reaction_rates")),
     _j_values(declareProperty<std::vector<Real>>("photolysis_rates")),
+    _j_number_list(declareProperty<std::vector<unsigned int>>("photolysis_j_numbers")),
+    _solar_cosx(declareProperty<Real>("solar_cosx")),
+    _solar_secx(declareProperty<Real>("solar_secx")),
+    _solar_lha(declareProperty<Real>("solar_lha")),
+    _solar_sinld(declareProperty<Real>("solar_sinld")),
+    _solar_cosld(declareProperty<Real>("solar_cosld")),
+    _solar_eqt(declareProperty<Real>("solar_eqt")),
+    _solar_dec(declareProperty<Real>("solar_dec")),
     _j_CL(getParam<std::vector<Real>>("j_cl_values")),
     _j_CMM(getParam<std::vector<Real>>("j_cmm_values")),
     _j_CNN(getParam<std::vector<Real>>("j_cnn_values")),
@@ -84,8 +106,22 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
     _month(getParam<unsigned int>("month")),
     _year(getParam<unsigned int>("year")),
     _jfac(getParam<Real>("jfac")),
-    _roof_open(getParam<bool>("roof_open"))
+    _roof_open(getParam<bool>("roof_open")),
+    _photolysis_scheme(getParam<MooseEnum>("photolysis_scheme")),
+    _albedo(getParam<Real>("albedo")),
+    _o3column(getParam<Real>("o3column")),
+    _altitude(getParam<Real>("altitude"))
 {
+  // Hybrid scheme: create table reader on construction
+  if (_photolysis_scheme == "HYBRID")
+  {
+    std::string dir = getParam<std::string>("hybrid_table_dir");
+    if (dir.empty())
+      mooseError("MCMRatesMaterial: hybrid_table_dir is required when photolysis_scheme=HYBRID");
+    if (!dir.empty() && dir[0] == '/')
+      mooseError("MCMRatesMaterial: hybrid_table_dir must be relative, got absolute: ", dir);
+    _hybrid_reader = std::make_unique<HybridJTableReader>(dir);
+  }
   // Couple to species variables
   _n_species = coupledComponents("species_variables");
   _species_vals.resize(_n_species);
@@ -136,21 +172,10 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
   // Initialize species count (needed before J index calculation)
   _n_species_material = coupledComponents("species_variables");
 
-  // Detect PHOTOJ numbers from expressions
-  _j_index_start = 5 + _n_coefficients + _n_species_material;
-  pcrecpp::RE re_j("PHOTOJ([0-9]+)");
-  std::set<int> j_numbers;
-  for (auto & e : coeff_exprs)
-  {
-    int jnum; pcrecpp::StringPiece sp(e);
-    while (re_j.FindAndConsume(&sp, &jnum)) j_numbers.insert(jnum);
-  }
-  for (auto & e : rxn_exprs)
-  {
-    int jnum; pcrecpp::StringPiece sp(e);
-    while (re_j.FindAndConsume(&sp, &jnum)) j_numbers.insert(jnum);
-  }
-  _n_j_variables = j_numbers.size();
+  // Use ALL J numbers from photolysis file (for full postprocessor output)
+  // Not just those detected from mechanism expressions.
+  auto j_numbers_param = getParam<std::vector<unsigned int>>("j_numbers");
+  _n_j_variables = j_numbers_param.size();
   _j_names.clear();
 
   // Build master variable list with all variables
@@ -175,19 +200,29 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
     _species_vals_material[i] = &coupledValue("species_variables", i);
   }
 
-  // Add RO2 lumped variable if the mechanism uses it (e.g. atchem2_example.fac)
-  bool _has_ro2 = !_ro2_indices.empty();
-  if (_has_ro2)
+  // Add RO2 lumped variable if the mechanism uses it in rate expressions
+  // but it is NOT already a species variable (e.g. atchem2_example.fac has
+  // RO2 in rate expressions like '2*KCH3O2*RO2*...' but not in VARIABLE).
+  _has_ro2 = false;
+  if (!_ro2_indices.empty())
   {
-    vars += ",RO2";
-    _name_to_index["RO2"] = 5 + _n_coefficients + _n_species_material;
+    auto it = _species_name_to_index.find("RO2");
+    if (it == _species_name_to_index.end())
+    {
+      vars += ",RO2";
+      _name_to_index["RO2"] = 5 + _n_coefficients + _n_species_material;
+      _has_ro2 = true;
+    }
   }
   unsigned int _n_extra = _has_ro2 ? 1 : 0;
 
-  // Add PHOTOJ variables
-  for (auto & n : j_numbers)
+  // MUST be after RO2 is potentially added; J values go AFTER all other vars
+  _j_index_start = 5 + _n_coefficients + _n_species_material + _n_extra;
+
+  // Add PHOTOJ variables for ALL J numbers from photolysis file
+  for (auto jn : j_numbers_param)
   {
-    std::string jname = "PHOTOJ" + std::to_string(n);
+    std::string jname = "PHOTOJ" + std::to_string(jn);
     vars += "," + jname;
     _j_names.push_back(jname);
   }
@@ -247,20 +282,50 @@ MCMRatesMaterial::computeQpProperties()
   _func_params[3] = 0.78 * _M; // N2 volume fraction
   _func_params[4] = _H2O_val;
 
-  // Step 2: Calculate photolysis rates from solar zenith angle (MCM formula)
-  // J = CL * cos(theta)^CMM * exp(-CNN / cos(theta)) * JFAC
+  // Step 2: Calculate photolysis rates
+  // Cache solar parameters for Postprocessor access (MCMSolarPostprocessor)
+  Real cosx = calculateCosSZA(_t);
+  _cached_cosx = cosx;
+  _cached_secx = (cosx > 1.0e-10) ? (1.0 / cosx) : 1.0e2;
+
+  if (_photolysis_scheme == "MCM_SZA")
   {
-    Real cosx = calculateCosSZA(_t);
-    Real secx = (cosx > 1.0e-10) ? (1.0 / cosx) : 1.0e2;
+    // MCM SZA empirical formula:
+    //   J = CL * cos(theta)^CMM * exp(-CNN / cos(theta)) * JFAC
     for (unsigned int i = 0; i < _n_j_variables; ++i)
     {
       if (cosx > 1.0e-10)
         _func_params[_j_index_start + i] =
-            _j_CL[i] * std::pow(cosx, _j_CMM[i]) * std::exp(-_j_CNN[i] * secx) * _jfac;
+            _j_CL[i] * std::pow(cosx, _j_CMM[i]) * std::exp(-_j_CNN[i] * _cached_secx) * _jfac;
       else
         _func_params[_j_index_start + i] = 0.0;
     }
     // Roof (chamber cover) CLOSED: all J values forced to zero
+    if (!_roof_open)
+      for (unsigned int i = 0; i < _n_j_variables; ++i)
+        _func_params[_j_index_start + i] = 0.0;
+  }
+  else if (_photolysis_scheme == "HYBRID")
+  {
+    // F0AM Hybrid scheme: 4D TUV lookup table interpolation
+    // Table stores log10(J) values; SZA >= 90 → returns 0.0 (log10 scale).
+    // Convert back to linear J space: J = 10^log10J * JFAC.
+    if (cosx > 1.0e-10)
+    {
+      Real sza_deg = std::acos(cosx) * 180.0 / 3.14159265358979323846;
+      for (unsigned int i = 0; i < _n_j_variables; ++i)
+      {
+        // _j_names[i] = "PHOTOJ<N>" → extract N → "J<N>"
+        std::string jname = "J" + _j_names[i].substr(6);
+        Real log10J = _hybrid_reader->interpolate(jname, sza_deg, _albedo, _o3column, _altitude);
+        _func_params[_j_index_start + i] = std::pow(10.0, log10J) * _jfac;
+      }
+    }
+    else
+    {
+      for (unsigned int i = 0; i < _n_j_variables; ++i)
+        _func_params[_j_index_start + i] = 0.0;
+    }
     if (!_roof_open)
       for (unsigned int i = 0; i < _n_j_variables; ++i)
         _func_params[_j_index_start + i] = 0.0;
@@ -271,8 +336,8 @@ MCMRatesMaterial::computeQpProperties()
     _func_params[5 + _n_coefficients + i] = (*_species_vals_material[i])[_qp];
 
   // RO2 = Σ[peroxy radicals] (lumped species, e.g. RO2 = CH3O2 + ...).
-  // Some MCM mechanisms use RO2 directly in rate expressions.
-  if (!_ro2_indices.empty())
+  // Only needed when RO2 is an EXTRA fparser variable (not in species list).
+  if (_has_ro2)
   {
     Real ro2_sum = 0.0;
     for (auto idx : _ro2_indices)
@@ -282,8 +347,22 @@ MCMRatesMaterial::computeQpProperties()
 
   // Copy J values to material property for Postprocessor access
   _j_values[_qp].resize(_n_j_variables);
+  _j_number_list[_qp].resize(_n_j_variables);
   for (unsigned int i = 0; i < _n_j_variables; ++i)
+  {
     _j_values[_qp][i] = _func_params[_j_index_start + i];
+    // Extract J number from _j_names[i] ("PHOTOJ<N>" → N)
+    _j_number_list[_qp][i] = (unsigned int)std::stoul(_j_names[i].substr(6));
+  }
+
+  // Copy solar parameters to material properties for Postprocessor access
+  _solar_cosx[_qp] = _cached_cosx;
+  _solar_secx[_qp] = _cached_secx;
+  _solar_lha[_qp] = _cached_lha;
+  _solar_sinld[_qp] = _cached_sinld;
+  _solar_cosld[_qp] = _cached_cosld;
+  _solar_eqt[_qp] = _cached_eqt;
+  _solar_dec[_qp] = _cached_dec;
 
   // Step 4: Evaluate rate coefficients in topological order.
   for (unsigned int i = 0; i < _n_coefficients; ++i)
@@ -332,12 +411,12 @@ MCMRatesMaterial::computeDayOfYear() const
   unsigned int doy = 0;
   for (unsigned int m = 0; m < _month - 1; ++m)
     doy += days_in_months[m];
-  doy += _day;
+  doy += _day - 1;  // 0-based DOY (AtChem2 convention, matches MCMBoxModel)
   return doy;
 }
 
 Real
-MCMRatesMaterial::calculateCosSZA(Real t) const
+MCMRatesMaterial::calculateCosSZA(Real t)
 {
   constexpr Real pi = 3.14159265358979323846;
 
@@ -356,13 +435,19 @@ MCMRatesMaterial::calculateCosSZA(Real t) const
   Real eqt = 0.000075 + 0.001868 * cos(theta) - 0.032077 * sin(theta) -
              0.014615 * cos(2.0 * theta) - 0.040849 * sin(2.0 * theta);
 
+  // sin(lat)*sin(dec) and cos(lat)*cos(dec) — time-invariant, cached
+  Real lat_rad = _latitude * pi / 180.0;
+  _cached_sinld = sin(lat_rad) * sin(dec);
+  _cached_cosld = cos(lat_rad) * cos(dec);
+  _cached_eqt = eqt;
+  _cached_dec = dec;
+
   // Local hour angle (radians)
   Real current_frac_hour = std::fmod(t / 3600.0, 24.0);
-  Real lha = pi * ((current_frac_hour / 12.0) - (1.0 + _longitude / 180.0)) + eqt;
+  _cached_lha = pi * ((current_frac_hour / 12.0) - (1.0 + _longitude / 180.0)) + eqt;
 
   // Cosine of solar zenith angle
-  Real lat_rad = _latitude * pi / 180.0;
-  Real cosx = cos(lha) * cos(lat_rad) * cos(dec) + sin(lat_rad) * sin(dec);
+  Real cosx = cos(_cached_lha) * _cached_cosld + _cached_sinld;
 
   if (cosx <= 0.0)
     cosx = 0.0;

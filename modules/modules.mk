@@ -155,6 +155,7 @@ ifeq ($(ATMOSPHERIC_CHEMISTRY),yes)
   APPLICATION_NAME   := atmospheric_chemistry
   APPLICATION_DIR    := $(MOOSE_DIR)/modules/atmospheric_chemistry
   SUFFIX             := atmchem
+  DEPEND_MODULES     := navier_stokes
   include $(FRAMEWORK_DIR)/app.mk
 endif
 

@@ -1,7 +1,19 @@
 # vs F0AM — tutorial_5sp — FE NS lid-driven cavity + chemistry
 # Fully-coupled: INS FE flow + AtmosphericChemistry Action (mode=coupled)
-# All variables use LAGRANGE family — compatible with same nonlinear solve
-# Requires: combined-opt
+# SUPG+PSPG stabilization enables equal-order LAGRANGE elements
+# Runs on atmospheric_chemistry-opt (navier_stokes dependency registered)
+
+[GlobalParams]
+  gravity = '0 0 0'
+  laplace = true
+  integrate_p_by_parts = true
+  family = LAGRANGE
+  order = FIRST
+  # SUPG/PSPG 稳定化 — 允许等阶速度-压力插值 (LBB 条件回避)
+  supg = true
+  pspg = true
+  alpha = 1e-1
+[]
 
 [Mesh]
   [gen]
@@ -9,7 +21,6 @@
     dim = 2
     xmin = 0  xmax = 1.0  ymin = 0  ymax = 1.0
     nx = 8  ny = 8
-    elem_type = QUAD9
   []
   [corner_node]
     type = ExtraNodesetGenerator
@@ -20,13 +31,13 @@
 []
 
 [Variables]
-  [vel_x]  order = SECOND  family = LAGRANGE  []
-  [vel_y]  order = SECOND  family = LAGRANGE  []
-  [p]      order = FIRST   family = LAGRANGE  []
+  [vel_x]  []
+  [vel_y]  []
+  [p]      []
 []
 
 [Kernels]
-  [mass]             type = INSMass                   variable = p      u = vel_x  v = vel_y  pressure = p  []
+  [mass]             type = INSMass                variable = p      u = vel_x  v = vel_y  pressure = p  []
   [x_momentum_time]  type = INSMomentumTimeDerivative  variable = vel_x  []
   [x_momentum_space] type = INSMomentumLaplaceForm     variable = vel_x  u = vel_x  v = vel_y  pressure = p  component = 0  []
   [y_momentum_time]  type = INSMomentumTimeDerivative  variable = vel_y  []
@@ -45,7 +56,7 @@
 []
 
 [Materials]
-  [const]  type = GenericConstantMaterial  block = 0  prop_names = 'rho mu'  prop_values = '1  1'  []
+  [const]  type = GenericConstantMaterial  prop_names = 'rho mu'  prop_values = '1 1'  []
 []
 
 [AtmosphericChemistry]
@@ -75,14 +86,18 @@
 [Executioner]
   type = Transient
   num_steps = 5
-  dt = 0.01
-  petsc_options_iname = '-pc_type -pc_factor_shift_type'
-  petsc_options_value = 'lu NONZERO'
-  nl_rel_tol = 1e-8
-  nl_abs_tol = 1e-10
+  dt = 0.5
+  petsc_options_iname = '-pc_type -pc_asm_overlap -sub_pc_type -sub_pc_factor_levels'
+  petsc_options_value = 'asm      2               ilu          4'
+  line_search = 'none'
+  nl_rel_tol = 1e-12
+  nl_abs_tol = 1e-13
+  nl_max_its = 6
+  l_tol = 1e-6
+  l_max_its = 500
 []
 
 [Outputs]
-  csv = true
+  exodus = true
   file_base = 'vs_F0AM_tutorial5_ns_fe'
 []

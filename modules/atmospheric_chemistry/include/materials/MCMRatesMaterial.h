@@ -11,6 +11,9 @@
 
 #include "Material.h"
 #include "FunctionParserUtils.h"
+#include <memory>
+
+class HybridJTableReader;
 
 /**
  * Material that evaluates MCM reaction rate expressions at each quadrature
@@ -34,6 +37,17 @@ public:
   /// Get a single J value by 1-based J number (e.g. 1→J1).  Returns 0 if
   /// the J number isn't in the mechanism.  For Postprocessor use.
   Real getJValue(unsigned int j_number) const;
+
+  // ── Solar parameter getters (for MCMSolarPostprocessor coupled-mode) ──
+  Real getSolarCosX()   const { return _cached_cosx; }
+  Real getSolarSecX()   const { return _cached_secx; }
+  Real getSolarLHA()    const { return _cached_lha; }
+  Real getSolarSinLD()  const { return _cached_sinld; }
+  Real getSolarCosLD()  const { return _cached_cosld; }
+  Real getSolarEQT()    const { return _cached_eqt; }
+  Real getLatitude()    const { return _latitude; }
+  Real getLongitude()   const { return _longitude; }
+  Real getDeclination() const { return _cached_dec; }
 
 protected:
   virtual void computeQpProperties() override;
@@ -78,6 +92,16 @@ private:
   MaterialProperty<std::vector<Real>> & _reaction_rates;
   /// Computed photolysis J values (exposed for Postprocessor access)
   MaterialProperty<std::vector<Real>> & _j_values;
+  /// J numbers corresponding to _j_values entries (exposed for index mapping)
+  MaterialProperty<std::vector<unsigned int>> & _j_number_list;
+  /// Solar parameters (exposed for MCMSolarPostprocessor coupled-mode access)
+  MaterialProperty<Real> & _solar_cosx;
+  MaterialProperty<Real> & _solar_secx;
+  MaterialProperty<Real> & _solar_lha;
+  MaterialProperty<Real> & _solar_sinld;
+  MaterialProperty<Real> & _solar_cosld;
+  MaterialProperty<Real> & _solar_eqt;
+  MaterialProperty<Real> & _solar_dec;
 
   /// J<N> variable support (constructor-computed offsets)
   unsigned int _n_j_variables;
@@ -101,13 +125,30 @@ private:
   /// Roof (chamber cover) open. false = CLOSED (all photolysis J=0).
   const bool _roof_open;
 
+  /// Photolysis scheme: MCM_SZA or HYBRID
+  const MooseEnum _photolysis_scheme;
+  /// Optional Hybrid J-table reader (created if scheme=HYBRID)
+  std::unique_ptr<HybridJTableReader> _hybrid_reader;
+  /// Hybrid scheme: surface albedo [0,1]
+  const Real _albedo;
+  /// Hybrid scheme: O3 column [DU]
+  const Real _o3column;
+  /// Hybrid scheme: altitude [m]
+  const Real _altitude;
+
+  /// Cached solar parameters (computed in computeQpProperties for Postprocessor access)
+  Real _cached_cosx, _cached_secx, _cached_lha;
+  Real _cached_sinld, _cached_cosld, _cached_eqt, _cached_dec;
+
   /// Indices of species that constitute RO2 (peroxy radical sum)
   std::vector<unsigned int> _ro2_indices;
+  /// True if RO2 was added as an EXTRA fparser variable (not in species list)
+  bool _has_ro2;
 
   /// Compute day of year from day/month/year
   unsigned int computeDayOfYear() const;
   /// Calculate cosine of solar zenith angle at simulation time t
-  Real calculateCosSZA(Real t) const;
+  Real calculateCosSZA(Real t);
 
   /// fparser parameter buffer (TEMP, M, O2, N2, H2O, coeff0, coeff1, ...)
   using FunctionParserUtils<false>::_func_params;

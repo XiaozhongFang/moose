@@ -62,6 +62,15 @@ AtmosphericChemistryAction::validParams()
   params.addParam<unsigned int>("day", 21, "Day of month for solar zenith angle calculation");
   params.addParam<unsigned int>("month", 6, "Month for solar zenith angle calculation");
   params.addParam<unsigned int>("year", 2010, "Year for solar zenith angle calculation");
+  MooseEnum photo_scheme("MCM_SZA HYBRID", "MCM_SZA");
+  params.addParam<MooseEnum>("photolysis_scheme", photo_scheme,
+      "Photolysis scheme: MCM_SZA (empirical CL*cos^CMM*exp(-CNN*sec)), "
+      "HYBRID (4D TUV lookup table interpolation)");
+
+  params.addParam<std::string>("hybrid_table_dir", "",
+      "Directory containing F0AM Hybrid J-value table files "
+      "(table_J<N>.dat, axis_*.dat, index.txt). Required if photolysis_scheme=HYBRID.");
+
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
   params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
 
@@ -331,22 +340,58 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   params.set<std::vector<std::string>>("coefficient_expressions") = coeff_exprs;
 
   std::vector<Real> j_cl_vals, j_cmm_vals, j_cnn_vals;
+  std::vector<unsigned int> j_numbers_all;
   {
-    std::set<unsigned int> j_nums;
-    for (auto & [jname, _] : _photolysis_rates)
+    // Load ALL photolysis parameters from the MCM photolysis-rates file.
+    // The parser only transfers mechanism-referenced J<N>, but we need the
+    // full set for MCMPhotolysisPostprocessor output (e.g. J11-J61).
+    // Re-read the file here to get every J<N> entry.
+    std::string photo_path = getParam<std::string>("mcm_photolysis_file");
+    // Resolve relative paths (same logic as in the constructor)
     {
-      unsigned int num;
-      pcrecpp::RE("J<([0-9]+)>").FullMatch(jname, &num);
-      j_nums.insert(num);
+      std::ifstream test_file(photo_path);
+      if (!test_file.good())
+      {
+        auto input_files = _app.getInputFileNames();
+        for (auto & input_file : input_files)
+        {
+          auto pos = input_file.find_last_of("/\\");
+          if (pos != std::string::npos)
+          {
+            std::string resolved = input_file.substr(0, pos) + "/" + photo_path;
+            test_file.open(resolved);
+            if (test_file.good()) { photo_path = resolved; break; }
+          }
+        }
+      }
     }
-    for (auto & jn : j_nums)
+    std::ifstream pfile(photo_path);
+    if (pfile.good())
     {
-      std::string jkey = "J<" + std::to_string(jn) + ">";
-      j_cl_vals.push_back(_j_CL.count(jkey) ? _j_CL[jkey] : 0.0);
-      j_cmm_vals.push_back(_j_CMM.count(jkey) ? _j_CMM[jkey] : 0.0);
-      j_cnn_vals.push_back(_j_CNN.count(jkey) ? _j_CNN[jkey] : 0.0);
+      std::string line;
+      std::getline(pfile, line); // skip header
+      while (std::getline(pfile, line))
+      {
+        if (line.empty() || line[0] == '#') continue;
+        // Convert Fortran D-notation (6.073D-05) → E-notation (6.073E-05)
+        std::replace(line.begin(), line.end(), 'D', 'E');
+        std::replace(line.begin(), line.end(), 'd', 'e');
+        // Parse "j l m n name tau" columns (we only need first 4)
+        std::istringstream iss(line);
+        unsigned int jn;
+        double cl, cmm, cnn;
+        std::string unused1, unused2;
+        if (iss >> jn >> cl >> cmm >> cnn)
+        {
+          j_numbers_all.push_back(jn);
+          j_cl_vals.push_back(cl);
+          j_cmm_vals.push_back(cmm);
+          j_cnn_vals.push_back(cnn);
+        }
+      }
     }
   }
+  params.set<std::vector<unsigned int>>("j_numbers") = j_numbers_all;
   params.set<std::vector<Real>>("j_cl_values") = j_cl_vals;
   params.set<std::vector<Real>>("j_cmm_values") = j_cmm_vals;
   params.set<std::vector<Real>>("j_cnn_values") = j_cnn_vals;
@@ -363,6 +408,8 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   params.set<unsigned int>("year") = getParam<unsigned int>("year");
   params.set<Real>("jfac") = getParam<Real>("jfac");
   params.set<bool>("roof_open") = getParam<bool>("roof_open");
+  params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
+  params.set<std::string>("hybrid_table_dir") = getParam<std::string>("hybrid_table_dir");
 
   _problem->addMaterial("MCMRatesMaterial", "mcm_rates_material", params);
   _console << "AtmosphericChemistry (coupled): Created MCMRatesMaterial with "

@@ -12,13 +12,12 @@
 #include "GeneralPostprocessor.h"
 #include "MCMBoxModel.h"
 
+// Forward declaration for coupled-mode material support
+class MCMRatesMaterial;
+
 /**
- * Postprocessor that outputs photolysis rate values (J-values) from the
- * MCMBoxModel.  Equivalent to AtChem2's photolysisRates.output.
- *
- * Supports two modes:
- *   - output_all = true:  outputs ALL J values as a vector (for CSV column output)
- *   - output_all = false: outputs a SINGLE named J value (e.g., J1, J4)
+ * Postprocessor that outputs photolysis rate values (J-values).
+ * Supports both box mode (MCMBoxModel) and coupled mode (MCMRatesMaterial).
  */
 class MCMPhotolysisPostprocessor : public GeneralPostprocessor
 {
@@ -32,8 +31,14 @@ public:
   virtual Real getValue() const override;
 
 protected:
-  /// Reference to the MCMBoxModel UserObject
-  const MCMBoxModel & _box_model;
+  /// Box-mode: reference to the MCMBoxModel UserObject (null if coupled mode)
+  const MCMBoxModel * _box_model;
+
+  /// Coupled-mode: J-value material property (from MCMRatesMaterial)
+  const MaterialProperty<std::vector<Real>> * _j_material_prop;
+
+  /// Coupled-mode: J-number-to-index mapping (from MCMRatesMaterial)
+  const MaterialProperty<std::vector<unsigned int>> * _j_number_list_prop;
 
   /// If true, output all J values (this PP represents the first one)
   bool _output_all;

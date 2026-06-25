@@ -33,6 +33,46 @@ Creates a FEM transport + chemistry system for spatially-resolved simulations
    - [`ChemicalSourceKernel`](ChemicalSourceKernel.md) — chemical source with analytical Jacobian
    - Optional [`Diffusion`](Diffusion.md) (when `include_transport = true`)
 
+## Photolysis Schemes
+
+Two photolysis schemes are available via the `photolysis_scheme` parameter:
+
+### `MCM_SZA` (default)
+
+MCM empirical solar-zenith-angle parameterization, identical to AtChem2:
+
+$$J_N = \mathrm{CL}_N \cdot \cos^{\mathrm{CMM}_N}(\mathrm{SZA}) \cdot \exp(-\mathrm{CNN}_N \cdot \sec(\mathrm{SZA})) \cdot \mathrm{JFAC}$$
+
+Requires `mcm_photolysis_file` pointing to a CL/CMM/CNN parameter file
+(`mcm_photolysis_rates_v3.3.1.dat`).
+
+### `HYBRID`
+
+F0AM TUVv5.2 4D lookup table interpolation:
+
+$$J_N = 10^{\,\log_{10}J_N(\mathrm{SZA}, \alpha, \Omega, z)} \cdot \mathrm{JFAC}$$
+
+Where $\mathrm{SZA}$ is solar zenith angle, $\alpha$ is surface albedo,
+$\Omega$ is O$_3$ column (Dobson Units), and $z$ is altitude (meters).
+
+Requires `hybrid_table_dir` pointing to F0AM Hybrid table files. Uses
+[`HybridJTableReader`](/utils/HybridJTableReader.md) for table loading
+and 4D linear interpolation.
+
+### Usage
+
+```moose
+[AtmosphericChemistry]
+  mode = coupled
+  mechanism_file = 'mechanism.fac'
+  photolysis_scheme = HYBRID
+  hybrid_table_dir = 'tuv_tables'
+  albedo = 0.1
+  o3column = 350
+  altitude = 500
+[]
+```
+
 ## Example Input File Syntax
 
 ### Box Mode

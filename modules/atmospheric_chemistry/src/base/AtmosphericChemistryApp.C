@@ -12,6 +12,7 @@
 #include "AppFactory.h"
 #include "MooseSyntax.h"
 #include "Capabilities.h"
+#include "NavierStokesApp.h"
 
 InputParameters
 AtmosphericChemistryApp::validParams()
@@ -36,6 +37,9 @@ AtmosphericChemistryApp::~AtmosphericChemistryApp() {}
 void
 AtmosphericChemistryApp::registerAll(Factory & f, ActionFactory & af, Syntax & syntax)
 {
+  // Register navier_stokes dependency (transitively: fluid_properties, heat_transfer)
+  NavierStokesApp::registerAll(f, af, syntax);
+
   Registry::registerObjectsTo(f, {"AtmosphericChemistryApp"});
   Registry::registerActionsTo(af, {"AtmosphericChemistryApp"});
 
@@ -46,4 +50,5 @@ void
 AtmosphericChemistryApp::registerApps()
 {
   registerApp(AtmosphericChemistryApp);
+  NavierStokesApp::registerApps();
 }
