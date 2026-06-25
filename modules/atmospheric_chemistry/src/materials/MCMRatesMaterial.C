@@ -74,6 +74,7 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
     _n_reactions(getParam<std::vector<std::string>>("reaction_rate_expressions").size()),
     _reactant_matrix(getParam<std::vector<std::vector<Real>>>("reactant_matrix")),
     _reaction_rates(declareProperty<std::vector<Real>>("reaction_rates")),
+    _j_values(declareProperty<std::vector<Real>>("photolysis_rates")),
     _j_CL(getParam<std::vector<Real>>("j_cl_values")),
     _j_CMM(getParam<std::vector<Real>>("j_cmm_values")),
     _j_CNN(getParam<std::vector<Real>>("j_cnn_values")),
@@ -279,6 +280,11 @@ MCMRatesMaterial::computeQpProperties()
     _func_params[5 + _n_coefficients + _n_species_material] = ro2_sum;
   }
 
+  // Copy J values to material property for Postprocessor access
+  _j_values[_qp].resize(_n_j_variables);
+  for (unsigned int i = 0; i < _n_j_variables; ++i)
+    _j_values[_qp][i] = _func_params[_j_index_start + i];
+
   // Step 4: Evaluate rate coefficients in topological order.
   for (unsigned int i = 0; i < _n_coefficients; ++i)
   {
@@ -362,4 +368,28 @@ MCMRatesMaterial::calculateCosSZA(Real t) const
     cosx = 0.0;
 
   return cosx;
+}
+
+Real
+MCMRatesMaterial::getJValue(unsigned int j_number) const
+{
+  // _j_values is indexed 0.._n_j_variables-1 in the same order as the
+  // PHOTOJ variables added in the constructor.  The J numbers match the
+  // order in the mechanism expressions (sorted by j_number ascending).
+  // We search by name "PHOTOJ<N>" since the array order might differ from
+  // the numeric J number.
+  std::string jname = "PHOTOJ" + std::to_string(j_number);
+  auto it = _name_to_index.find(jname);
+  if (it == _name_to_index.end())
+    return 0.0;
+
+  unsigned int idx = it->second;
+  if (idx < _j_index_start || idx >= _j_index_start + _n_j_variables)
+    return 0.0;
+
+  // Return J value at quadrature point 0 (1-element mesh)
+  unsigned int j_idx = idx - _j_index_start;
+  if (!_j_values[0].empty() && j_idx < _j_values[0].size())
+    return _j_values[0][j_idx];
+  return 0.0;
 }

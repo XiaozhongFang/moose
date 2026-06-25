@@ -31,6 +31,10 @@ public:
 
   MCMRatesMaterial(const InputParameters & params);
 
+  /// Get a single J value by 1-based J number (e.g. 1→J1).  Returns 0 if
+  /// the J number isn't in the mechanism.  For Postprocessor use.
+  Real getJValue(unsigned int j_number) const;
+
 protected:
   virtual void computeQpProperties() override;
 
@@ -72,6 +76,8 @@ private:
 
   /// Computed reaction rates R_i
   MaterialProperty<std::vector<Real>> & _reaction_rates;
+  /// Computed photolysis J values (exposed for Postprocessor access)
+  MaterialProperty<std::vector<Real>> & _j_values;
 
   /// J<N> variable support (constructor-computed offsets)
   unsigned int _n_j_variables;
