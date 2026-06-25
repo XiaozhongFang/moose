@@ -69,4 +69,22 @@
     heavy = true
     skip = 'MultiApp + TransientMultiApp transfer setup WIP'
   [../]
+  [./vs_F0AM_chamber_box]
+    type = RunApp
+    input = vs_F0AM_chamber_box.i
+    requirement = 'The box mode with MCMv331_Inorg_Isoprene (610 species, 1974 reactions, BOTTOMUP photolysis) shall parse and converge for a 3h isoprene/NO2/H2O2 chamber simulation.'
+    heavy = true
+  [../]
+  [./vs_F0AM_dielcycle_box]
+    type = RunApp
+    input = vs_F0AM_dielcycle_box.i
+    requirement = 'The box mode with MCMv331_DielExampleChemistry (2908 species, 8797 reactions, MCM_SZA photolysis) shall parse successfully.'
+    heavy = true
+  [../]
+  [./vs_atchem2_transport_building]
+    type = RunApp
+    input = vs_atchem2_transport_building.i
+    requirement = 'The coupled mode with Diffusion + atchem2_example chemistry + CO emission plume shall converge.'
+    heavy = true
+  [../]
 []

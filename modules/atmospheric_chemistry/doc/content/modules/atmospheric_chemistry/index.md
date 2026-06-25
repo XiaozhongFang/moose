@@ -147,6 +147,19 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 | `MCMv331_DielExampleChemistry.fac` | 2908 | 8797 |
 | `SOAS_DielCycle.csv` | — | 24h × 61 fields (SOAS campaign observations) |
 
+## Test Suite
+
+| Test | Type | Species | Description |
+|------|------|---------|-------------|
+| `vs_F0AM_tutorial5_box` | CSVDiff | 5 | Box mode vs analytical solution |
+| `vs_F0AM_tutorial5_coupled` | CSVDiff | 5 | Coupled FEM vs F0AM reference |
+| `vs_AtChem2_inorg_box` | CSVDiff | 29 | Box mode vs AtChem2 CVODE |
+| `vs_AtChem2_inorg_coupled` | CSVDiff | 29 | Coupled FEM vs AtChem2 |
+| `vs_F0AM_tutorial5_ns_fe` | Exodiff | 5 | NS + chemistry fully coupled |
+| `vs_F0AM_chamber_box` | RunApp | 610 | Chamber: BOTTOMUP photolysis |
+| `vs_F0AM_dielcycle_box` | RunApp | 2908 | SOAS diel cycle: MCM_SZA |
+| `vs_atchem2_transport_building` | Exodiff | 29 | NS + chemistry + building emission |
+
 ## Objects
 
 - [`AtmosphericChemistryAction`](source/actions/AtmosphericChemistryAction.md) — Unified Action (box / coupled modes)
