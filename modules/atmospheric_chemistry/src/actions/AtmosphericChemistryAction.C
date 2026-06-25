@@ -71,6 +71,10 @@ AtmosphericChemistryAction::validParams()
       "Directory containing F0AM Hybrid J-value table files "
       "(table_J<N>.dat, axis_*.dat, index.txt). Required if photolysis_scheme=HYBRID.");
 
+  params.addParam<Real>("albedo", 0.1, "Surface albedo (0-1), used by HYBRID scheme");
+  params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units, used by HYBRID scheme");
+  params.addParam<Real>("altitude", 0.0, "Altitude in meters, used by HYBRID scheme");
+
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
   params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
 
