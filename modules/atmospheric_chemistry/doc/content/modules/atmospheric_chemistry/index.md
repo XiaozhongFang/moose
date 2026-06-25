@@ -39,6 +39,7 @@ Two photolysis calculation methods are supported via the `photolysis_scheme` par
 |--------|-------|-------------|----------|
 | `MCM_SZA` (default) | SZA only (lat/lon/day/time) | MCM photolysis-rates file | AtChem2-compatible, fast |
 | `HYBRID` | SZA + albedo + O3col + altitude | F0AM TUV lookup tables | O3 column / albedo dependency |
+| `BOTTOMUP` | Lamp flux + CS/QY data | Cross-section + quantum yield files | Lab chamber experiments |
 
 ```moose
 # Hybrid scheme example
@@ -49,6 +50,26 @@ Two photolysis calculation methods are supported via the `photolysis_scheme` par
   hybrid_table_dir = 'tuv_tables'
   albedo = 0.1
 []
+
+# BottomUp (chamber) scheme example
+[AtmosphericChemistry]
+  mode = box
+  mechanism_file = 'mechanism.fac'
+  temperature = 298.0
+  press = 1013.0
+  photolysis_scheme = BOTTOMUP
+  lamp_flux_file = 'ExampleLightFlux.txt'
+  bottomup_data_dir = 'database/photolysis/bottomup'
+[]
+```
+
+To generate the BottomUp data files from an F0AM installation:
+
+```bash
+python3 scripts/generate_bottomup_jmap.py \
+    --f0am-photolysis /path/to/F0AM/Chem/Photolysis \
+    --output-dir database/photolysis/bottomup \
+    --temperature 298.0
 ```
 
 ## Chemical Mechanism Files
@@ -90,6 +111,9 @@ python3 scripts/plot_atchem2.py \
 | `scripts/plot_atchem2.py` | Plot MOOSE vs AtChem2 comparison (3×3 grid PDF) |
 | `scripts/plot_vs_f0am.py` | Plot MOOSE vs analytical solution for F0AM tutorial |
 | `scripts/gen_tutorial_gold.py` | Generate F0AM tutorial gold CSV from scipy ODE |
+| `scripts/generate_bottomup_jmap.py` | Pre-compute BottomUp photolysis CS/QY data from F0AM installation |
+| `scripts/convert_soas_mat.py` | Convert SOAS campaign .mat observation files to CSV |
+| `scripts/extract_mcm_k.py` | Extract MCM standard rate constants from MCMv331_K.m and inject into .fac files |
 
 ## Database
 
@@ -101,6 +125,9 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 | `atchem2_example.fac` | 29 | 71 |
 | `mcm_export.fac` | 20 | 48 |
 | `mcm_export_all.fac` | 5832 | 17224 |
+| `MCMv331_Inorg_Isoprene.fac` | 610 | 1974 |
+| `MCMv331_DielExampleChemistry.fac` | 2908 | 8797 |
+| `SOAS_DielCycle.csv` | — | 24h × 61 fields (SOAS campaign observations) |
 
 ## Objects
 
@@ -114,6 +141,7 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 - [`MCMDepositionKernel`](source/kernels/MCMDepositionKernel.md) — Dry deposition
 - [`MCMFacsimileParser`](source/userobjects/MCMFacsimileParser.md) — Standalone `.fac` parser
 - [`HybridJTableReader`](source/utils/HybridJTableReader.md) — TUV photolysis 4D interpolation
+- [`BottomUpJIntegrator`](source/utils/BottomUpJIntegrator.md) — F0AM BottomUp photolysis: cross-section × QY × lamp-flux integration
 - [`MCMSolarPostprocessor`](source/postprocessors/MCMSolarPostprocessor.md) — Solar parameters (cosx, secx, lha, etc.)
 - [`MCMPhotolysisPostprocessor`](source/postprocessors/MCMPhotolysisPostprocessor.md) — Individual photolysis J-values
 - [`MCMRO2Postprocessor`](source/postprocessors/MCMRO2Postprocessor.md) — Total peroxy radical (RO2) concentration

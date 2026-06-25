@@ -62,14 +62,24 @@ AtmosphericChemistryAction::validParams()
   params.addParam<unsigned int>("day", 21, "Day of month for solar zenith angle calculation");
   params.addParam<unsigned int>("month", 6, "Month for solar zenith angle calculation");
   params.addParam<unsigned int>("year", 2010, "Year for solar zenith angle calculation");
-  MooseEnum photo_scheme("MCM_SZA HYBRID", "MCM_SZA");
+  MooseEnum photo_scheme("MCM_SZA HYBRID BOTTOMUP", "MCM_SZA");
   params.addParam<MooseEnum>("photolysis_scheme", photo_scheme,
       "Photolysis scheme: MCM_SZA (empirical CL*cos^CMM*exp(-CNN*sec)), "
-      "HYBRID (4D TUV lookup table interpolation)");
+      "HYBRID (4D TUV lookup table interpolation), or "
+      "BOTTOMUP (lab-chamber cross-section × quantum-yield × lamp-flux integration)");
 
   params.addParam<std::string>("hybrid_table_dir", "",
       "Directory containing F0AM Hybrid J-value table files "
       "(table_J<N>.dat, axis_*.dat, index.txt). Required if photolysis_scheme=HYBRID.");
+
+  params.addParam<std::string>("lamp_flux_file", "",
+      "Path to lamp/actinic flux file (relative to bottomup_data_dir). "
+      "Required if photolysis_scheme=BOTTOMUP.");
+
+  params.addParam<std::string>("bottomup_data_dir",
+      "../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup",
+      "Directory containing BottomUp photolysis data files "
+      "(CrossSections/, QuantumYields/, bottomup_jmap.dat).");
 
   params.addParam<Real>("albedo", 0.1, "Surface albedo (0-1), used by HYBRID scheme");
   params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units, used by HYBRID scheme");
@@ -281,6 +291,8 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<std::string>("photolysis_file") = getParam<std::string>("mcm_photolysis_file");
   params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
   params.set<std::string>("hybrid_table_dir") = getParam<std::string>("hybrid_table_dir");
+  params.set<std::string>("lamp_flux_file") = getParam<std::string>("lamp_flux_file");
+  params.set<std::string>("bottomup_data_dir") = getParam<std::string>("bottomup_data_dir");
   params.set<Real>("albedo") = getParam<Real>("albedo");
   params.set<Real>("o3column") = getParam<Real>("o3column");
   params.set<Real>("altitude") = getParam<Real>("altitude");
@@ -419,6 +431,8 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   params.set<bool>("roof_open") = getParam<bool>("roof_open");
   params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
   params.set<std::string>("hybrid_table_dir") = getParam<std::string>("hybrid_table_dir");
+  params.set<std::string>("lamp_flux_file") = getParam<std::string>("lamp_flux_file");
+  params.set<std::string>("bottomup_data_dir") = getParam<std::string>("bottomup_data_dir");
 
   _problem->addMaterial("MCMRatesMaterial", "mcm_rates_material", params);
   _console << "AtmosphericChemistry (coupled): Created MCMRatesMaterial with "

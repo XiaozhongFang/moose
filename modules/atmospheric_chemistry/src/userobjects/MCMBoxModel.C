@@ -9,6 +9,7 @@
 
 #include "MCMBoxModel.h"
 #include "pcrecpp.h"
+#include <sstream>
 
 registerMooseObject("AtmosphericChemistryApp", MCMBoxModel);
 
@@ -190,13 +191,23 @@ MCMBoxModel::validParams()
       "(best for < ~50 species).  CSC = compressed sparse column (species-major; enables "
       "column queries 'which reactions involve species X?').  Analogous to PETSc -mat_type.");
 
-  MooseEnum photo_scheme("MCM_SZA HYBRID", "MCM_SZA");
+  MooseEnum photo_scheme("MCM_SZA HYBRID BOTTOMUP", "MCM_SZA");
   params.addParam<MooseEnum>("photolysis_scheme", photo_scheme,
-      "Photolysis scheme: MCM_SZA (empirical SZA formula) or "
-      "HYBRID (F0AM TUV 4D lookup table interpolation)");
+      "Photolysis scheme: MCM_SZA (empirical SZA formula), "
+      "HYBRID (F0AM TUV 4D lookup table interpolation), or "
+      "BOTTOMUP (F0AM lab-chamber cross-section × quantum-yield × lamp-flux integration)");
 
   params.addParam<std::string>("hybrid_table_dir", "",
       "Directory containing F0AM Hybrid J table files. Required if photolysis_scheme=HYBRID.");
+
+  params.addParam<std::string>("lamp_flux_file", "",
+      "Path to lamp/actinic flux file (relative to bottomup_data_dir). "
+      "Required if photolysis_scheme=BOTTOMUP.");
+
+  params.addParam<std::string>("bottomup_data_dir",
+      "../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup",
+      "Directory containing BottomUp photolysis data files "
+      "(CrossSections/, QuantumYields/, bottomup_jmap.dat, lamp flux file).");
 
   params.addParam<Real>("albedo", 0.1, "Surface albedo (0-1), used by HYBRID scheme");
   params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units, used by HYBRID scheme");
@@ -240,6 +251,15 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     if (!dir.empty() && dir[0] == '/')
       mooseError("MCMBoxModel: hybrid_table_dir must be relative, got absolute: ", dir);
     enableHybridPhotolysis(dir);
+  }
+  else if (scheme == "BOTTOMUP")
+  {
+    _photolysis_method = BOTTOMUP;
+    std::string data_dir = getParam<std::string>("bottomup_data_dir");
+    std::string flux_file = getParam<std::string>("lamp_flux_file");
+    if (flux_file.empty())
+      mooseError("MCMBoxModel: lamp_flux_file is required when photolysis_scheme=BOTTOMUP");
+    loadBottomUpData(data_dir, flux_file);
   }
 }
 
@@ -583,67 +603,122 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
   for (auto & e : rxn_exprs)
   { int jnum; pcrecpp::StringPiece sp(e); while (re_j.FindAndConsume(&sp, &jnum)) j_numbers.insert(jnum); }
 
-  // Build variable list
-  std::string vars = "TEMP,M,O2,N2,H2O";
+  // Build name-to-index mapping for ALL possible variables.
+  // This is the authoritative index registry used by both evaluateCoefficients
+  // and the per-parser variable indirection arrays.
   _name_to_index["TEMP"] = 0; _name_to_index["M"] = 1;
   _name_to_index["O2"] = 2; _name_to_index["N2"] = 3;
   _name_to_index["H2O"] = 4;
 
   for (unsigned int i = 0; i < coeff_names.size(); ++i)
-  {
-    vars += "," + coeff_names[i];
     _name_to_index[coeff_names[i]] = 5 + i;
-  }
   for (unsigned int i = 0; i < _n_species; ++i)
-  {
-    vars += "," + _species_names[i];
     _name_to_index[_species_names[i]] = 5 + coeff_names.size() + i;
-  }
 
-  // RO2 is a derived/lumped species (RO2 = CH3O2 + ...), not in VARIABLE list.
-  // It may appear in rate expressions directly. Add it as a variable with value 0.
   bool has_ro2_in_species = false;
   for (auto & s : _species_names)
     if (s == "RO2") { has_ro2_in_species = true; break; }
   if (!has_ro2_in_species)
-  {
-    vars += ",RO2";
     _name_to_index["RO2"] = 5 + coeff_names.size() + _n_species;
-  }
   unsigned int n_extra_vars = has_ro2_in_species ? 0 : 1;
   _j_index_start = 5 + coeff_names.size() + _n_species + n_extra_vars;
+
   for (auto & n : j_numbers)
   {
     std::string jname = "PHOTOJ" + std::to_string(n);
-    vars += "," + jname;
     _name_to_index[jname] = _j_index_start + _name_to_index.size() - _j_index_start;
   }
 
   unsigned int n_j = j_numbers.size();
   _func_params.resize(5 + coeff_names.size() + _n_species + n_extra_vars + n_j, 0.0);
 
-  // Parse coefficients
+  // ── Parse coefficients using ParseAndDeduceVariables ──
+  // Each parser auto-discovers its own (small) variable list, avoiding the
+  // giant Vars string that breaks fparser for mechanisms with >~400 species.
   _coeff_parsers.resize(coeff_names.size());
+  _coeff_var_indices.resize(coeff_names.size());
+  _coeff_local_params.resize(coeff_names.size());
+
   for (unsigned int i = 0; i < coeff_names.size(); ++i)
   {
     _coeff_parsers[i] = std::make_shared<SymFunction>();
     setParserFeatureFlags(_coeff_parsers[i]);
-    if (_coeff_parsers[i]->Parse(coeff_exprs[i], vars) >= 0)
+
+    std::string discoveredVars;
+    int nFound = 0;
+    if (_coeff_parsers[i]->ParseAndDeduceVariables(coeff_exprs[i], discoveredVars, &nFound) >= 0)
       mooseError("MCMBoxModel: Bad coefficient '", coeff_names[i], "': ", coeff_exprs[i], "\n",
                  _coeff_parsers[i]->ErrorMsg());
+
+    // Build per-parser index into _func_params
+    auto & indices = _coeff_var_indices[i];
+    indices.reserve(nFound);
+    std::istringstream vstream(discoveredVars);
+    std::string vname;
+    while (std::getline(vstream, vname, ','))
+    {
+      auto it = _name_to_index.find(vname);
+      if (it != _name_to_index.end())
+        indices.push_back(it->second);
+      else
+      {
+        mooseWarning("MCMBoxModel: coefficient '", coeff_names[i],
+                     "' references undefined variable '", vname,
+                     "'. The .fac file may be missing MCM standard rate "
+                     "constant definitions. Use scripts/extract_mcm_k.py to "
+                     "inject them from MCMv331_K.m. Auto-registering with value 0.");
+        unsigned int idx = _func_params.size();
+        _func_params.push_back(0.0);
+        _name_to_index[vname] = idx;
+        indices.push_back(idx);
+      }
+    }
+    _coeff_local_params[i].resize(indices.size());
+
     if (!_disable_fpoptimizer)
       _coeff_parsers[i]->Optimize();
   }
 
-  // Parse reaction expressions
+  // ── Parse reaction expressions using ParseAndDeduceVariables ──
   _reaction_parsers.resize(_n_reactions);
+  _reaction_var_indices.resize(_n_reactions);
+  _reaction_local_params.resize(_n_reactions);
+
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
     _reaction_parsers[r] = std::make_shared<SymFunction>();
     setParserFeatureFlags(_reaction_parsers[r]);
-    if (_reaction_parsers[r]->Parse(rxn_exprs[r], vars) >= 0)
+
+    std::string discoveredVars;
+    int nFound = 0;
+    if (_reaction_parsers[r]->ParseAndDeduceVariables(rxn_exprs[r], discoveredVars, &nFound) >= 0)
       mooseError("MCMBoxModel: Bad reaction ", r, ": ", rxn_exprs[r], "\n",
                  _reaction_parsers[r]->ErrorMsg());
+
+    auto & indices = _reaction_var_indices[r];
+    indices.reserve(nFound);
+    std::istringstream vstream(discoveredVars);
+    std::string vname;
+    while (std::getline(vstream, vname, ','))
+    {
+      auto it = _name_to_index.find(vname);
+      if (it != _name_to_index.end())
+        indices.push_back(it->second);
+      else
+      {
+        mooseWarning("MCMBoxModel: reaction ", r,
+                     " references undefined variable '", vname,
+                     "'. The .fac file may be missing MCM standard rate "
+                     "constant definitions. Use scripts/extract_mcm_k.py to "
+                     "inject them from MCMv331_K.m. Auto-registering with value 0.");
+        unsigned int idx = _func_params.size();
+        _func_params.push_back(0.0);
+        _name_to_index[vname] = idx;
+        indices.push_back(idx);
+      }
+    }
+    _reaction_local_params[r].resize(indices.size());
+
     if (!_disable_fpoptimizer)
       _reaction_parsers[r]->Optimize();
   }
@@ -733,16 +808,10 @@ MCMBoxModel::evaluateCoefficients()
     }
   }
 
-  unsigned int n_coeff = _coeff_parsers.size();
-  // Evaluate coefficients in topological order
-  for (unsigned int i = 0; i < n_coeff; ++i)
-  {
-    Real val = evaluate(_coeff_parsers[i]);
-    if (std::isnan(val)) val = 0.0;
-    _func_params[5 + i] = val;
-  }
-
-  // Set species concentrations in fparser buffer
+  // Per.19: before evaluating any parser, populate ALL _func_params slots.
+  // Species and RO2 must be set before coefficient evaluation because some
+  // coefficient expressions reference species concentrations directly
+  // (e.g. "KMT06" references "C5H8").
   for (unsigned int s = 0; s < _n_species; ++s)
   {
     auto it = _name_to_index.find(_species_names[s]);
@@ -750,7 +819,6 @@ MCMBoxModel::evaluateCoefficients()
       _func_params[it->second] = (_cached_C.empty() ? 0.0 :
           (s < _cached_C.size() ? _cached_C[s] : 0.0));
   }
-  // RO2 = sum of peroxy radicals (using explicit species list from parser)
   auto it_ro2 = _name_to_index.find("RO2");
   if (it_ro2 != _name_to_index.end())
   {
@@ -761,10 +829,31 @@ MCMBoxModel::evaluateCoefficients()
     _func_params[it_ro2->second] = ro2_sum;
   }
 
+  // Evaluate coefficients in topological order.
+  // Each parser has its own variable subset → copy values from _func_params
+  // into the parser's pre-allocated local buffer, then evaluate.
+  unsigned int n_coeff = _coeff_parsers.size();
+  for (unsigned int i = 0; i < n_coeff; ++i)
+  {
+    const auto & indices = _coeff_var_indices[i];
+    auto & local = _coeff_local_params[i];
+    for (size_t j = 0; j < indices.size(); ++j)
+      local[j] = _func_params[indices[j]];
+
+    Real val = evaluate(_coeff_parsers[i], local);
+    if (std::isnan(val)) val = 0.0;
+    _func_params[5 + i] = val;
+  }
+
   // Evaluate reaction rate expressions → _k
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
-    Real val = evaluate(_reaction_parsers[r]);
+    const auto & indices = _reaction_var_indices[r];
+    auto & local = _reaction_local_params[r];
+    for (size_t j = 0; j < indices.size(); ++j)
+      local[j] = _func_params[indices[j]];
+
+    Real val = evaluate(_reaction_parsers[r], local);
     _k[r] = (std::isnan(val)) ? 1.0 : val;
   }
 }
@@ -916,6 +1005,8 @@ MCMBoxModel::updatePhotolysis(Real sza, Real albedo, Real o3col, Real altitude)
         _k[r] = _hybrid_reader->interpolate(jname, sza, albedo, o3col, altitude);
     }
   }
+  else if (_photolysis_method == BOTTOMUP && _bottomup_integrator)
+    updatePhotolysisBottomUp();
   else
     updatePhotolysisSZA(sza, _jfac);
 }
@@ -979,6 +1070,38 @@ MCMBoxModel::updatePhotolysisSZA(Real sza, Real jfac)
   {
     _k[_j_reaction_indices[i]] = _j_CL[i] * std::pow(cosx, _j_CMM[i])
                                * std::exp(-_j_CNN[i] * secx) * jfac;
+  }
+}
+
+// -- BottomUp photolysis (F0AM chamber mode) --
+void
+MCMBoxModel::loadBottomUpData(const std::string & data_dir, const std::string & flux_file)
+{
+  _bottomup_integrator = std::make_unique<BottomUpJIntegrator>(data_dir);
+  _bottomup_integrator->loadLampFlux(flux_file);
+  _bottomup_integrator->loadReactionMap("bottomup_jmap.dat");
+}
+
+void
+MCMBoxModel::updatePhotolysisBottomUp()
+{
+  if (!_roof_open || !_bottomup_integrator) return;
+
+  // Compute all J-values at current T, P once
+  auto allJ = _bottomup_integrator->computeAllJ(_temperature, _press > 0 ? _press : 1013.25);
+
+  // Write J-values into the _j_CL/_j_CMM/_j_CNN arrays for PHOTOJ<N> fparser variables
+  // BottomUp: CMM=1.0 (no SZA dependence), CNN=0.0, CL = J_value
+  for (unsigned int i = 0; i < _j_reaction_indices.size() && i < _j_CL.size(); ++i)
+  {
+    unsigned int jn = _j_numbers.size() > i ? _j_numbers[i] : (i + 1);
+    std::string jname = "J" + std::to_string(jn);
+    auto it = allJ.find(jname);
+    if (it != allJ.end())
+    {
+      // Set J value directly as the rate constant (SZA formula with CMM=1, CNN=0)
+      _k[_j_reaction_indices[i]] = it->second * _jfac;
+    }
   }
 }
 

@@ -10,6 +10,7 @@
 #include "MCMRatesMaterial.h"
 #include "HybridJTableReader.h"
 #include "pcrecpp.h"
+#include <sstream>
 
 registerMooseObject("AtmosphericChemistryApp", MCMRatesMaterial);
 
@@ -62,12 +63,19 @@ MCMRatesMaterial::validParams()
 
   params.addParam<std::vector<std::string>>("ro2_species", {}, "RO2 lumped-species component names (e.g. CH3O2). RO2 = sum of these species concentrations.");
 
-  MooseEnum photo_scheme("MCM_SZA HYBRID", "MCM_SZA");
+  MooseEnum photo_scheme("MCM_SZA HYBRID BOTTOMUP", "MCM_SZA");
   params.addParam<MooseEnum>("photolysis_scheme", photo_scheme,
-      "Photolysis scheme: MCM_SZA or HYBRID (4D TUV lookup table)");
+      "Photolysis scheme: MCM_SZA, HYBRID (4D TUV lookup table), or BOTTOMUP (cross-section × QY × lamp-flux)");
 
   params.addParam<std::string>("hybrid_table_dir", "",
       "Directory containing F0AM Hybrid J table files (required if HYBRID)");
+
+  params.addParam<std::string>("lamp_flux_file", "",
+      "Path to lamp/actinic flux file (relative to bottomup_data_dir). Required if BOTTOMUP.");
+
+  params.addParam<std::string>("bottomup_data_dir",
+      "../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup",
+      "Directory containing BottomUp photolysis data files.");
 
   params.addParam<Real>("albedo", 0.1, "Surface albedo (0-1), used by HYBRID scheme");
   params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units, used by HYBRID scheme");
@@ -180,38 +188,31 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
   _n_j_variables = j_numbers_param.size();
   _j_names.clear();
 
-  // Build master variable list with all variables
-  std::string vars = "TEMP,M,O2,N2,H2O";
+  // Build name-to-index mapping for ALL possible variables.
+  // This is the authoritative index registry — no giant Vars string needed.
   _name_to_index["TEMP"] = 0; _name_to_index["M"] = 1;
   _name_to_index["O2"] = 2; _name_to_index["N2"] = 3;
   _name_to_index["H2O"] = 4;
 
   for (unsigned int i = 0; i < _n_coefficients; ++i)
-  {
-    vars += "," + _coeff_names[i];
     _name_to_index[_coeff_names[i]] = 5 + i;
-  }
 
   // Add species names (for RO2 = CH3O2 etc.)
   _species_vals_material.resize(_n_species_material);
   auto species_list = getParam<std::vector<std::string>>("species_list");
   for (unsigned int i = 0; i < _n_species_material; ++i)
   {
-    vars += "," + species_list[i];
     _species_name_to_index[species_list[i]] = 5 + _n_coefficients + i;
     _species_vals_material[i] = &coupledValue("species_variables", i);
   }
 
   // Add RO2 lumped variable if the mechanism uses it in rate expressions
-  // but it is NOT already a species variable (e.g. atchem2_example.fac has
-  // RO2 in rate expressions like '2*KCH3O2*RO2*...' but not in VARIABLE).
   _has_ro2 = false;
   if (!_ro2_indices.empty())
   {
     auto it = _species_name_to_index.find("RO2");
     if (it == _species_name_to_index.end())
     {
-      vars += ",RO2";
       _name_to_index["RO2"] = 5 + _n_coefficients + _n_species_material;
       _has_ro2 = true;
     }
@@ -221,54 +222,108 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
   // MUST be after RO2 is potentially added; J values go AFTER all other vars
   _j_index_start = 5 + _n_coefficients + _n_species_material + _n_extra;
 
-  // Add PHOTOJ variables for ALL J numbers from photolysis file
+  // Register PHOTOJ variables for ALL J numbers from photolysis file
   for (auto jn : j_numbers_param)
   {
     std::string jname = "PHOTOJ" + std::to_string(jn);
-    vars += "," + jname;
+    _name_to_index[jname] = _j_index_start + _j_names.size();
     _j_names.push_back(jname);
   }
 
   // Resize parameter buffer
   _func_params.resize(5 + _n_coefficients + _n_species_material + _n_extra + _n_j_variables, 0.0);
 
-  // The photolysis-rates file contains ALL MCM J values (~35); the mechanism
-  // may only reference a subset.  Require at least as many entries as the
-  // mechanism uses — extra entries in the file are harmless.
   if (_j_CL.size() < _n_j_variables || _j_CMM.size() < _n_j_variables || _j_CNN.size() < _n_j_variables)
     mooseError("MCMRatesMaterial: MCM photolysis parameter vectors (j_cl/cmm/cnn_values) have size ",
                _j_CL.size(), "/", _j_CMM.size(), "/", _j_CNN.size(),
                " but the mechanism references ", _n_j_variables,
                " J<N> variables. The photolysis-rates file must contain at least that many entries.");
 
-  // Note: J values are not initialized here; they will be calculated from
-  // solar zenith angle in computeQpProperties().
-
-  // Parse coefficient expressions
+  // ── Parse coefficients using ParseAndDeduceVariables ──
   _coeff_parsers.resize(_n_coefficients);
+  _coeff_var_indices.resize(_n_coefficients);
+  _coeff_local_params.resize(_n_coefficients);
+
   for (unsigned int i = 0; i < _n_coefficients; ++i)
   {
     _coeff_parsers[i] = std::make_shared<SymFunction>();
     setParserFeatureFlags(_coeff_parsers[i]);
-    if (_coeff_parsers[i]->Parse(coeff_exprs[i], vars) >= 0)
+
+    std::string discoveredVars;
+    int nFound = 0;
+    if (_coeff_parsers[i]->ParseAndDeduceVariables(coeff_exprs[i], discoveredVars, &nFound) >= 0)
       mooseError("MCMRatesMaterial: Invalid coefficient expression for '",
                  _coeff_names[i], "':\n", coeff_exprs[i], "\n",
                  _coeff_parsers[i]->ErrorMsg());
+
+    auto & indices = _coeff_var_indices[i];
+    indices.reserve(nFound);
+    std::istringstream vstream(discoveredVars);
+    std::string vname;
+    while (std::getline(vstream, vname, ','))
+    {
+      auto it = _name_to_index.find(vname);
+      if (it != _name_to_index.end())
+        indices.push_back(it->second);
+      else
+      {
+        mooseWarning("MCMRatesMaterial: coefficient '", _coeff_names[i],
+                     "' references undefined variable '", vname,
+                     "'. Use scripts/extract_mcm_k.py to inject MCM K constants. "
+                     "Auto-registering with value 0.");
+        unsigned int idx = _func_params.size();
+        _func_params.push_back(0.0);
+        _name_to_index[vname] = idx;
+        indices.push_back(idx);
+      }
+    }
+    _coeff_local_params[i].resize(indices.size());
+
     if (!_disable_fpoptimizer)
       _coeff_parsers[i]->Optimize();
   }
 
-  // Parse reaction rate expressions
+  // ── Parse reaction expressions using ParseAndDeduceVariables ──
   _reaction_parsers.resize(_n_reactions);
+  _reaction_var_indices.resize(_n_reactions);
+  _reaction_local_params.resize(_n_reactions);
+
   for (unsigned int i = 0; i < _n_reactions; ++i)
   {
     _reaction_parsers[i] = std::make_shared<SymFunction>();
     setParserFeatureFlags(_reaction_parsers[i]);
+
     const std::string & rxn_expr = rxn_exprs[i];
-    if (_reaction_parsers[i]->Parse(rxn_expr, vars) >= 0)
+    std::string discoveredVars;
+    int nFound = 0;
+    if (_reaction_parsers[i]->ParseAndDeduceVariables(rxn_expr, discoveredVars, &nFound) >= 0)
       mooseError("MCMRatesMaterial: Invalid reaction expression for reaction ", i, ":\n",
                  rxn_exprs[i], "\n",
                  _reaction_parsers[i]->ErrorMsg());
+
+    auto & indices = _reaction_var_indices[i];
+    indices.reserve(nFound);
+    std::istringstream vstream(discoveredVars);
+    std::string vname;
+    while (std::getline(vstream, vname, ','))
+    {
+      auto it = _name_to_index.find(vname);
+      if (it != _name_to_index.end())
+        indices.push_back(it->second);
+      else
+      {
+        mooseWarning("MCMRatesMaterial: reaction ", i,
+                     " references undefined variable '", vname,
+                     "'. Use scripts/extract_mcm_k.py to inject MCM K constants. "
+                     "Auto-registering with value 0.");
+        unsigned int idx = _func_params.size();
+        _func_params.push_back(0.0);
+        _name_to_index[vname] = idx;
+        indices.push_back(idx);
+      }
+    }
+    _reaction_local_params[i].resize(indices.size());
+
     if (!_disable_fpoptimizer)
       _reaction_parsers[i]->Optimize();
   }
@@ -369,9 +424,15 @@ MCMRatesMaterial::computeQpProperties()
   _solar_lon[_qp] = _longitude;
 
   // Step 4: Evaluate rate coefficients in topological order.
+  // Each parser has its own variable subset → copy values from _func_params.
   for (unsigned int i = 0; i < _n_coefficients; ++i)
   {
-    Real val = evaluate(_coeff_parsers[i]);
+    const auto & indices = _coeff_var_indices[i];
+    auto & local = _coeff_local_params[i];
+    for (size_t j = 0; j < indices.size(); ++j)
+      local[j] = _func_params[indices[j]];
+
+    Real val = evaluate(_coeff_parsers[i], local);
     if (std::isnan(val))
       val = 0.0;
     _func_params[5 + i] = val;
@@ -381,7 +442,14 @@ MCMRatesMaterial::computeQpProperties()
   // _k_values is pre-allocated member buffer (Per.14 — no per-QP allocation).
   _k_values.assign(_n_reactions, 0.0);
   for (unsigned int i = 0; i < _n_reactions; ++i)
-    _k_values[i] = evaluate(_reaction_parsers[i]);
+  {
+    const auto & indices = _reaction_var_indices[i];
+    auto & local = _reaction_local_params[i];
+    for (size_t j = 0; j < indices.size(); ++j)
+      local[j] = _func_params[indices[j]];
+
+    _k_values[i] = evaluate(_reaction_parsers[i], local);
+  }
 
   // Step 6: Compute R_i = k_i * Π [C_reactant]^ν
   _reaction_rates[_qp].resize(_n_reactions);

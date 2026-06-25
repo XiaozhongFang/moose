@@ -12,6 +12,7 @@
 #include "GeneralUserObject.h"
 #include "MCMFacsimileParser.h"
 #include "HybridJTableReader.h"
+#include "BottomUpJIntegrator.h"
 #include "FunctionParserUtils.h"
 
 #include <string>
@@ -304,6 +305,12 @@ public:
   /** Update photolysis rates for current SZA/alt/albedo/O3. */
   void updatePhotolysis(Real sza, Real albedo, Real o3col, Real altitude);
 
+  /** Load BottomUp lamp flux and reaction map. */
+  void loadBottomUpData(const std::string & data_dir, const std::string & flux_file);
+
+  /** Update photolysis via BottomUp integration (constant T,P for chamber). */
+  void updatePhotolysisBottomUp();
+
   /** Update photolysis using SZA formula (default MCM method). */
   void updatePhotolysisSZA(Real sza, Real jfac = 1.0);
 
@@ -362,8 +369,9 @@ protected:
   std::vector<Real> _constrained_values;
 
   // -- Photolysis --
-  enum PhotolysisMethod { MCM_SZA, HYBRID } _photolysis_method;
+  enum PhotolysisMethod { MCM_SZA, HYBRID, BOTTOMUP } _photolysis_method;
   std::unique_ptr<HybridJTableReader> _hybrid_reader;
+  std::unique_ptr<BottomUpJIntegrator> _bottomup_integrator;
   std::vector<unsigned int> _j_reaction_indices;
   std::vector<Real> _j_CL, _j_CMM, _j_CNN;
 
@@ -428,6 +436,16 @@ protected:
 
   /// RO2 species indices in the species vector (built from parser's ro2_species)
   std::vector<unsigned int> _ro2_indices;
+
+  // ── Per-parser variable indirection (ParseAndDeduceVariables) ──
+  /// _func_params indices each coefficient parser actually references
+  std::vector<std::vector<unsigned int>> _coeff_var_indices;
+  /// Pre-allocated local param buffer per coefficient parser
+  std::vector<std::vector<Real>> _coeff_local_params;
+  /// _func_params indices each reaction parser actually references
+  std::vector<std::vector<unsigned int>> _reaction_var_indices;
+  /// Pre-allocated local param buffer per reaction parser
+  std::vector<std::vector<Real>> _reaction_local_params;
 
   /// Build the sparse Jacobian cache from the current _cached_C
   void _buildJacobianCache() const;

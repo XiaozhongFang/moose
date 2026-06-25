@@ -144,6 +144,16 @@ private:
 
   /// Indices of species that constitute RO2 (peroxy radical sum)
   std::vector<unsigned int> _ro2_indices;
+
+  // ── Per-parser variable indirection (ParseAndDeduceVariables) ──
+  /// _func_params indices each coefficient parser actually references
+  std::vector<std::vector<unsigned int>> _coeff_var_indices;
+  /// Pre-allocated local param buffer per coefficient parser
+  std::vector<std::vector<Real>> _coeff_local_params;
+  /// _func_params indices each reaction parser actually references
+  std::vector<std::vector<unsigned int>> _reaction_var_indices;
+  /// Pre-allocated local param buffer per reaction parser
+  std::vector<std::vector<Real>> _reaction_local_params;
   /// True if RO2 was added as an EXTRA fparser variable (not in species list)
   bool _has_ro2;
 

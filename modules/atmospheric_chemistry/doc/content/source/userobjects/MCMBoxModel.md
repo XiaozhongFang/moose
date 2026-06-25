@@ -51,6 +51,11 @@ Two photolysis rate calculation methods are supported:
 |--------|-------------|---------------|
 | `MCM_SZA` (default) | MCM parameterization $J = C_L \cos^C_{MM}(\theta) \exp(-C_{NN}/\cos\theta) \cdot F_{JFAC}$ | Solar zenith angle $\theta$ |
 | `HYBRID` | TUV-based 4D lookup table (F0AM Hybrid J) | SZA, albedo, O$_3$ column, altitude |
+| `BOTTOMUP` | Cross-section × quantum-yield × lamp-flux integration (F0AM Jmethod=1) | Lamp flux file, CS/QY data |
+
+BOTTOMUP is the standard method for laboratory chamber experiments.
+Data files are generated from an F0AM installation via `scripts/generate_bottomup_jmap.py`.
+See [BottomUpJIntegrator](/utils/BottomUpJIntegrator.md) for details.
 
 ### Constrained Species (AtChem2 Mode)
 
@@ -112,6 +117,8 @@ first time step regardless of framework initialization ordering.
 | `computeDCdt(C, dC)` | Compute $\mathrm{d}C/\mathrm{d}t$ |
 | `computeJacobianTriplets(C, J)` | Analytical Jacobian as triplets |
 | `enableHybridPhotolysis(dir)` | Switch to TUV lookup tables |
+| `loadBottomUpData(dir, flux)` | Load lamp flux + reaction map for BOTTOMUP scheme |
+| `updatePhotolysisBottomUp()` | Evaluate all J-values via CS×QY×Flux integration |
 | `updatePhotolysis(sza, alb, o3, alt)` | Update photolysis rates |
 | `setSolarCycle(lat, lon, d, m, y)` | Configure solar cycle |
 | `setConstrainedSpecies(names)` | Mark constrained species |

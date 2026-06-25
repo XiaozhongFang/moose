@@ -50,6 +50,18 @@ in log$_{10}$(J) space via [HybridJTableReader](/utils/HybridJTableReader.md).
 Requires `hybrid_table_dir` pointing to a directory containing F0AM table files
 (`table_J<N>.dat`, `axis_*.dat`, `index.txt`).
 
+### 3. `BOTTOMUP`
+
+Integrates cross-section × quantum-yield × lamp-flux over wavelength
+(F0AM Jmethod=1, standard for lab chamber experiments):
+
+$$J = \int QY(\lambda) \cdot CS(\lambda) \cdot F(\lambda) \, d\lambda$$
+
+Requires `lamp_flux_file` (lamp spectrum) and `bottomup_data_dir`
+(CS/QY data + reaction map). Data files are pre-computed from an F0AM
+installation via `scripts/generate_bottomup_jmap.py`.
+See [BottomUpJIntegrator](/utils/BottomUpJIntegrator.md) for details.
+
 !syntax parameters /Materials/MCMRatesMaterial
 
 !syntax inputs /Materials/MCMRatesMaterial
