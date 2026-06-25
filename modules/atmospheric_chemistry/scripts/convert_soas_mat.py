@@ -1,32 +1,35 @@
 #!/usr/bin/env python3
 """
-convert_soas_mat.py — 将 F0AM SOAS 观测 .mat 文件转换为 MOOSE 可读的 CSV 格式。
+convert_soas_mat.py — Convert F0AM SOAS observation .mat files to
+MOOSE-readable CSV format.
 
-用法:
+Usage:
     python3 convert_soas_mat.py <mat_file> [--output <csv_file>]
 
-参数:
-    mat_file        SOAS 观测 .mat 文件路径（必需）
-    --output, -o    输出 CSV 文件路径（默认: 与输入同目录下的 SOAS_DielCycle.csv）
-    --hour, -H      仅输出指定小时的初始条件（默认: 全部 24 小时）
+Arguments:
+    mat_file        Path to SOAS observation .mat file (required)
+    --output, -o    Output CSV file path (default: SOAS_DielCycle.csv in
+                    the same directory as the input file)
+    --hour, -H      Output only the initial condition for the given hour
+                    (default: all 24 hours)
 
-示例:
-    # 转换全部 24 小时数据
+Examples:
+    # Convert all 24 hours of data
     python3 convert_soas_mat.py Obs_SOAS_CampaignAvg_60min.mat
 
-    # 指定输出路径
+    # Specify output path
     python3 convert_soas_mat.py Obs_SOAS_CampaignAvg_60min.mat -o ../database/SOAS_DielCycle.csv
 
-    # 仅提取 hour 0 初始条件
+    # Extract only hour 0 initial condition
     python3 convert_soas_mat.py Obs_SOAS_CampaignAvg_60min.mat --hour 0
 
-输出 CSV 列:
+Output CSV columns:
     Time_h, T(K), P(mbar), RH(%), SZA(deg), M(molec/cm3), BLheight(m),
     NO, NO2, O3, OH, CO, H2O2, PAN, C2H5NO3, IC3H7NO3,
     C5H8, APINENE, BPINENE, LIMONENE, C2H4, C2H6, C3H8, ...
-    H2 (常数 550 ppb), CH4 (常数 1770 ppb)
+    H2 (constant 550 ppb), CH4 (constant 1770 ppb)
 
-依赖: scipy, numpy
+Dependencies: scipy, numpy
 """
 
 import scipy.io as sio
@@ -35,7 +38,7 @@ import argparse
 import os
 import sys
 
-# SOAS 结构体中包含的观测物种字段（单位: ppb）
+# Observed species fields in the SOAS struct (units: ppb)
 SPECIES_FIELDS = [
     'NO', 'NO2', 'O3', 'OH', 'CO', 'H2O2', 'PAN', 'C2H5NO3', 'IC3H7NO3',
     'C5H8', 'APINENE', 'BPINENE', 'LIMONENE',
@@ -46,15 +49,15 @@ SPECIES_FIELDS = [
     'C2H2', 'C3H6', 'NC4H10', 'DMS', 'HNO3', 'HO2', 'IEPOX', 'ISOPOOH', 'MEK', 'MPAN',
 ]
 
-# 环境变量字段（原始单位）
+# Environmental variable fields (raw units)
 ENV_FIELDS = ['T', 'P', 'RH', 'SZA', 'M', 'BLheight']
 
-# 常数物种（不在 SOAS 观测中，在 F0AM 脚本中手动设定）
+# Constant species (not in SOAS observations, set manually in F0AM scripts)
 CONSTANT_SPECIES = {'H2': 550.0, 'CH4': 1770.0}  # ppb
 
 
 def get_field_1d(soas, name):
-    """从 SOAS 结构体中提取一维 numpy 数组。"""
+    """Extract a 1-D numpy array from the SOAS struct."""
     val = soas[name]
     if val.ndim == 0:
         val = val[()]
@@ -63,54 +66,54 @@ def get_field_1d(soas, name):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='将 F0AM SOAS 观测 .mat 文件转换为 MOOSE CSV 格式',
+        description='Convert F0AM SOAS observation .mat files to MOOSE CSV format',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-示例:
+Examples:
   %(prog)s Obs_SOAS_CampaignAvg_60min.mat
   %(prog)s Obs_SOAS_CampaignAvg_60min.mat -o SOAS_DielCycle.csv
   %(prog)s Obs_SOAS_CampaignAvg_60min.mat --hour 0
         """
     )
-    parser.add_argument('mat_file', help='SOAS 观测 .mat 文件路径')
+    parser.add_argument('mat_file', help='Path to SOAS observation .mat file')
     parser.add_argument('--output', '-o', default=None,
-                        help='输出 CSV 文件路径（默认: 与输入同目录下的 SOAS_DielCycle.csv）')
+                        help='Output CSV file path (default: SOAS_DielCycle.csv in input dir)')
     parser.add_argument('--hour', '-H', type=int, default=None,
-                        help='仅输出指定小时的初始条件')
+                        help='Output only the initial condition for the given hour')
     args = parser.parse_args()
 
-    # 检查输入文件
+    # Check input file
     if not os.path.isfile(args.mat_file):
-        print(f"错误: 找不到文件 '{args.mat_file}'", file=sys.stderr)
+        print(f"Error: file not found '{args.mat_file}'", file=sys.stderr)
         sys.exit(1)
 
-    # 默认输出路径
+    # Default output path
     out_path = args.output
     if out_path is None:
         out_dir = os.path.dirname(os.path.abspath(args.mat_file)) or '.'
         out_path = os.path.join(out_dir, 'SOAS_DielCycle.csv')
 
-    # 读取 .mat 文件
+    # Read .mat file
     mat = sio.loadmat(args.mat_file, squeeze_me=True)
     if 'SOAS' not in mat:
-        print("错误: .mat 文件中未找到 'SOAS' 结构体", file=sys.stderr)
+        print("Error: 'SOAS' struct not found in .mat file", file=sys.stderr)
         sys.exit(1)
     soas = mat['SOAS']
 
     time_arr = get_field_1d(soas, 'Time')
     n = len(time_arr)
-    print(f"SOAS: {n} 个时间点, {len(soas.dtype.names)} 个字段")
+    print(f"SOAS: {n} time points, {len(soas.dtype.names)} fields")
 
-    # 确定输出行范围
+    # Determine output row range
     if args.hour is not None:
         hour_indices = [args.hour]
     else:
         hour_indices = range(n)
 
-    # 收集列名
+    # Collect column names
     all_cols = ['Time_h'] + ENV_FIELDS + SPECIES_FIELDS + list(CONSTANT_SPECIES.keys())
 
-    # 构建数据行
+    # Build data rows
     rows = []
     for i in hour_indices:
         row = {'Time_h': int(time_arr[i])}
@@ -127,24 +130,24 @@ def main():
             row[name] = val
         rows.append(row)
 
-    # 确保输出目录存在
+    # Ensure output directory exists
     os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
 
-    # 写 CSV
+    # Write CSV
     with open(out_path, 'w') as f:
         f.write(','.join(all_cols) + '\n')
         for row in rows:
             f.write(','.join(str(row[c]) for c in all_cols) + '\n')
 
-    print(f"已写入 {len(rows)} 行 × {len(all_cols)} 列 → {out_path}")
+    print(f"Written: {len(rows)} rows x {len(all_cols)} cols -> {out_path}")
 
-    # 打印初始条件摘要
+    # Print initial condition summary
     if rows:
-        print(f"\n初始条件 (hour {rows[0]['Time_h']}):")
+        print(f"\nInitial conditions (hour {rows[0]['Time_h']}):")
         for f in ENV_FIELDS:
             print(f"  {f}: {rows[0][f]:.6g}")
-        print(f"  常数 H2: {CONSTANT_SPECIES['H2']} ppb")
-        print(f"  常数 CH4: {CONSTANT_SPECIES['CH4']} ppb")
+        print(f"  Constant H2: {CONSTANT_SPECIES['H2']} ppb")
+        print(f"  Constant CH4: {CONSTANT_SPECIES['CH4']} ppb")
         for f in SPECIES_FIELDS[:8]:
             if f in rows[0]:
                 print(f"  {f}: {rows[0][f]:.6g} ppb")

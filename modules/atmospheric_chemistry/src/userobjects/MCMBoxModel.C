@@ -792,11 +792,13 @@ MCMBoxModel::evaluateCoefficients()
   {
     const Real roof_factor = _roof_open ? 1.0 : 0.0;
     auto allJ = _bottomup_integrator->computeAllJ(_temperature, _press > 0 ? _press : 1013.25);
-    for (size_t i = 0; i < _j_CL_vals.size() && i < _j_photo_indices.size(); ++i)
+    // Iterate over _j_photo_indices (built from mechanism J references),
+    // NOT _j_CL_vals (which is empty for BOTTOMUP — no photolysis file loaded).
+    for (size_t i = 0; i < _j_photo_indices.size(); ++i)
     {
       unsigned int idx = _j_photo_indices[i];
       if (idx == (unsigned int)-1) continue;
-      unsigned int jn = _j_numbers.size() > i ? _j_numbers[i] : (unsigned int)(i + 1);
+      unsigned int jn = (_j_numbers.size() > i) ? _j_numbers[i] : (unsigned int)(i + 1);
       std::string jname = "J" + std::to_string(jn);
       auto it = allJ.find(jname);
       _func_params[idx] = (it != allJ.end()) ? it->second * _jfac * roof_factor : 0.0;
