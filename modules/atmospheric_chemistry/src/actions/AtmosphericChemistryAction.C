@@ -288,7 +288,11 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<unsigned int>("month") = getParam<unsigned int>("month");
   params.set<unsigned int>("year") = getParam<unsigned int>("year");
   params.set<Real>("jfac") = getParam<Real>("jfac");
-  params.set<std::string>("photolysis_file") = getParam<std::string>("mcm_photolysis_file");
+  {
+    auto scheme = getParam<MooseEnum>("photolysis_scheme");
+    params.set<std::string>("photolysis_file") =
+        (scheme == "BOTTOMUP") ? "" : getParam<std::string>("mcm_photolysis_file");
+  }
   params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
   params.set<std::string>("hybrid_table_dir") = getParam<std::string>("hybrid_table_dir");
   params.set<std::string>("lamp_flux_file") = getParam<std::string>("lamp_flux_file");
@@ -363,6 +367,10 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   std::vector<Real> j_cl_vals, j_cmm_vals, j_cnn_vals;
   std::vector<unsigned int> j_numbers_all;
   {
+    // BOTTOMUP doesn't use MCM photolysis parameters — skip file loading.
+    auto scheme = getParam<MooseEnum>("photolysis_scheme");
+    if (scheme != "BOTTOMUP")
+    {
     // Load ALL photolysis parameters from the MCM photolysis-rates file.
     // The parser only transfers mechanism-referenced J<N>, but we need the
     // full set for MCMPhotolysisPostprocessor output (e.g. J11-J61).
@@ -411,6 +419,7 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
         }
       }
     }
+    } // if (scheme != "BOTTOMUP")
   }
   params.set<std::vector<unsigned int>>("j_numbers") = j_numbers_all;
   params.set<std::vector<Real>>("j_cl_values") = j_cl_vals;
@@ -430,6 +439,11 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   params.set<Real>("jfac") = getParam<Real>("jfac");
   params.set<bool>("roof_open") = getParam<bool>("roof_open");
   params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
+  {
+    auto scheme = getParam<MooseEnum>("photolysis_scheme");
+    params.set<std::string>("photolysis_file") =
+        (scheme == "BOTTOMUP") ? "" : getParam<std::string>("mcm_photolysis_file");
+  }
   params.set<std::string>("hybrid_table_dir") = getParam<std::string>("hybrid_table_dir");
   params.set<std::string>("lamp_flux_file") = getParam<std::string>("lamp_flux_file");
   params.set<std::string>("bottomup_data_dir") = getParam<std::string>("bottomup_data_dir");
