@@ -275,6 +275,11 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<unsigned int>("year") = getParam<unsigned int>("year");
   params.set<Real>("jfac") = getParam<Real>("jfac");
   params.set<std::string>("photolysis_file") = getParam<std::string>("mcm_photolysis_file");
+  params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
+  params.set<std::string>("hybrid_table_dir") = getParam<std::string>("hybrid_table_dir");
+  params.set<Real>("albedo") = getParam<Real>("albedo");
+  params.set<Real>("o3column") = getParam<Real>("o3column");
+  params.set<Real>("altitude") = getParam<Real>("altitude");
   _problem->addUserObject("MCMBoxModel", "box_model", params);
   _console << "AtmosphericChemistry (box): Created MCMBoxModel UserObject" << std::endl;
 }

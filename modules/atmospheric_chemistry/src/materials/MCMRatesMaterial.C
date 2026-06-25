@@ -97,6 +97,8 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
     _solar_cosld(declareProperty<Real>("solar_cosld")),
     _solar_eqt(declareProperty<Real>("solar_eqt")),
     _solar_dec(declareProperty<Real>("solar_dec")),
+    _solar_lat(declareProperty<Real>("solar_lat")),
+    _solar_lon(declareProperty<Real>("solar_lon")),
     _j_CL(getParam<std::vector<Real>>("j_cl_values")),
     _j_CMM(getParam<std::vector<Real>>("j_cmm_values")),
     _j_CNN(getParam<std::vector<Real>>("j_cnn_values")),
@@ -363,6 +365,8 @@ MCMRatesMaterial::computeQpProperties()
   _solar_cosld[_qp] = _cached_cosld;
   _solar_eqt[_qp] = _cached_eqt;
   _solar_dec[_qp] = _cached_dec;
+  _solar_lat[_qp] = _latitude;
+  _solar_lon[_qp] = _longitude;
 
   // Step 4: Evaluate rate coefficients in topological order.
   for (unsigned int i = 0; i < _n_coefficients; ++i)

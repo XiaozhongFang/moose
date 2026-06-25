@@ -102,6 +102,8 @@ private:
   MaterialProperty<Real> & _solar_cosld;
   MaterialProperty<Real> & _solar_eqt;
   MaterialProperty<Real> & _solar_dec;
+  MaterialProperty<Real> & _solar_lat;
+  MaterialProperty<Real> & _solar_lon;
 
   /// J<N> variable support (constructor-computed offsets)
   unsigned int _n_j_variables;

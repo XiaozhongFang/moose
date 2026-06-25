@@ -189,6 +189,19 @@ MCMBoxModel::validParams()
       "HPC default).  COO = AtChem2-style split reactant/product.  DENSE = dense 2D array "
       "(best for < ~50 species).  CSC = compressed sparse column (species-major; enables "
       "column queries 'which reactions involve species X?').  Analogous to PETSc -mat_type.");
+
+  MooseEnum photo_scheme("MCM_SZA HYBRID", "MCM_SZA");
+  params.addParam<MooseEnum>("photolysis_scheme", photo_scheme,
+      "Photolysis scheme: MCM_SZA (empirical SZA formula) or "
+      "HYBRID (F0AM TUV 4D lookup table interpolation)");
+
+  params.addParam<std::string>("hybrid_table_dir", "",
+      "Directory containing F0AM Hybrid J table files. Required if photolysis_scheme=HYBRID.");
+
+  params.addParam<Real>("albedo", 0.1, "Surface albedo (0-1), used by HYBRID scheme");
+  params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units, used by HYBRID scheme");
+  params.addParam<Real>("altitude", 0.0, "Altitude in meters, used by HYBRID scheme");
+
   params.addClassDescription(
       "Centralized box model UserObject for atmospheric chemistry ODE systems.");
   return params;
@@ -217,6 +230,17 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _t(0.0),
     _dirty(true)
 {
+  // Load Hybrid table reader if photolysis scheme is HYBRID
+  auto scheme = getParam<MooseEnum>("photolysis_scheme");
+  if (scheme == "HYBRID")
+  {
+    std::string dir = getParam<std::string>("hybrid_table_dir");
+    if (dir.empty())
+      mooseError("MCMBoxModel: hybrid_table_dir is required when photolysis_scheme=HYBRID");
+    if (!dir.empty() && dir[0] == '/')
+      mooseError("MCMBoxModel: hybrid_table_dir must be relative, got absolute: ", dir);
+    enableHybridPhotolysis(dir);
+  }
 }
 
 void

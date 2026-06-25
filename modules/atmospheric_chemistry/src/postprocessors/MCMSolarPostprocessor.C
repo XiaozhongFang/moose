@@ -63,8 +63,8 @@ MCMSolarPostprocessor::MCMSolarPostprocessor(const InputParameters & params)
       case COSLD:  _solar_prop = &getMaterialProperty<Real>("solar_cosld"); break;
       case EQTIME: _solar_prop = &getMaterialProperty<Real>("solar_eqt");   break;
       case DEC:    _solar_prop = &getMaterialProperty<Real>("solar_dec");    break;
-      case LAT:    _value = 51.51; break;
-      case LON:    _value = 0.13;  break;
+      case LAT:    _solar_prop = &getMaterialProperty<Real>("solar_lat"); break;
+      case LON:    _solar_prop = &getMaterialProperty<Real>("solar_lon"); break;
     }
   }
   else
@@ -83,8 +83,8 @@ MCMSolarPostprocessor::execute()
     case COSLD:  _value = _box_model ? _box_model->getSolarCosLD()  : (*_solar_prop)[0];   break;
     case EQTIME: _value = _box_model ? _box_model->getSolarEQT()    : (*_solar_prop)[0];   break;
     case DEC:    _value = _box_model ? _box_model->getDeclination()  : (*_solar_prop)[0];   break;
-    case LAT:    _value = _box_model ? _box_model->getLatitude()    : _value; break;
-    case LON:    _value = _box_model ? _box_model->getLongitude()   : _value; break;
+    case LAT:    _value = _box_model ? _box_model->getLatitude()    : (*_solar_prop)[0]; break;
+    case LON:    _value = _box_model ? _box_model->getLongitude()   : (*_solar_prop)[0]; break;
   }
 }
 
