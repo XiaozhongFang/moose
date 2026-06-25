@@ -26,6 +26,10 @@
 
 K14ISOM1 = 3e7*exp(-5300/TEMP) ;
 
+K298CH3O2 = 3.5e-13 ;
+
+KAPHO2 = 5.2e-13*exp(980/TEMP) ;
+
 KAPNO = 7.5e-12*exp(290/TEMP) ;
 
 KD0 = 1.10e-5*exp(-10100/TEMP)*M ;
@@ -35,6 +39,16 @@ FCD = 0.30 ;
 NCD = 0.75-1.27*(log10(FCD)) ;
 FD = 10^(log10(FCD)/(1+(log10(KRD)/NCD)^2)) ;
 KBPAN = (KD0*KDI)*FD/(KD0+KDI) ;
+
+KPPN0 = 1.7e-03*exp(-11280/TEMP)*M ;
+KPPNI = 8.3e+16*exp(-13940/TEMP) ;
+KRPPN = KPPN0/KPPNI ;
+FCPPN = 0.36 ;
+NCPPN = 0.75-1.27*(log10(FCPPN)) ;
+FPPN = 10^(log10(FCPPN)/(1.0+(log10(KRPPN)/NCPPN)^2)) ;
+KBPPN = (KPPN0*KPPNI*FPPN)/(KPPN0+KPPNI) ;
+
+KCH3O2 = 1.03e-13*exp(365/TEMP) ;
 
 KDEC = 1e6 ;
 
@@ -79,6 +93,8 @@ F4 = 10^(log10(FC4)/(1+(log10(KR4)/NC4)^2)) ;
 KMT04 = (K40*K4I)*F4/(K40+K4I) ;
 
 KMT05 = 1.44e-13*(1+(M/4.2e19)) ;
+
+KMT06 = 1 + (1.40e-21*exp(2200/TEMP)*H2O) ;
 
 K70 = 7.4e-31*M*(TEMP/300)^-2.4 ;
 K7I = 3.3e-11*(TEMP/300)^-0.3 ;
@@ -150,6 +166,24 @@ NC15 = 0.75-1.27*(log10(FC15)) ;
 F15 = 10^(log10(FC15)/(1+(log10(KR15)/NC15)^2)) ;
 KMT15 = (K150*K15I)*F15/(K150+K15I) ;
 
+K160 = 8e-27*M*(TEMP/300)^-3.5 ;
+K16I = 3.0e-11*(TEMP/300)^-1 ;
+KR16 = K160/K16I ;
+FC16 = 0.5 ;
+NC16 = 0.75-1.27*(log10(FC16)) ;
+F16 = 10^(log10(FC16)/(1+(log10(KR16)/NC16)^2)) ;
+KMT16 = (K160*K16I)*F16/(K160+K16I) ;
+
+K170 = 5.0e-30*M*(TEMP/300)^-1.5 ;
+K17I = 1.0e-12 ;
+KR17 = K170/K17I ;
+FC17 = 0.17*exp(-51/TEMP)+exp(-TEMP/204) ;
+NC17 = 0.75-1.27*(log10(FC17)) ;
+F17 = 10^(log10(FC17)/(1.0+(log10(KR17)/NC17)^2)) ;
+KMT17 = (K170*K17I*F17)/(K170+K17I) ;
+
+KMT18 = 9.5e-39*.21*M*exp(5270/TEMP)/(1+7.5e-29*.21*M*exp(5610/TEMP)) ;
+
 KNO3AL = 1.4e-12*exp(-1860/TEMP) ;
 
 KRO2HO2 = 2.91e-13*exp(1300/TEMP) ;
@@ -157,6 +191,10 @@ KRO2HO2 = 2.91e-13*exp(1300/TEMP) ;
 KRO2NO = 2.7e-12*exp(360/TEMP) ;
 
 KRO2NO3 = 2.3e-12 ;
+
+KROPRIM = 2.5e-14*exp(-300/TEMP) ;
+
+KROSEC = 2.5e-14*exp(-300/TEMP) ;
 
 
 VARIABLE

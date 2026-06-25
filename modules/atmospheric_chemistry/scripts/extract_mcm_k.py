@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 """
-从 F0AM MCMv331_K.m 提取 MCM 标准速率常数定义，转为 .fac 格式。
+Extract MCM standard rate constant definitions from F0AM MCMv331_K.m
+and inject them into a .fac mechanism file.
 
-用法:
+Usage:
   python3 extract_mcm_k.py <MCMv331_K.m> <mechanism.fac> [--output combined.fac]
 
-工作流:
-  1. 解析 MCMv331_K.m 中所有速率常数定义块
-  2. 提取每个常数的中间变量 + 最终表达式
-  3. 转换为 fparser 兼容格式（.*→*, .^→^, T→TEMP）
-  4. 扫描 mechanism.fac 中实际引用的 K 名
-  5. 只注入被引用的 K 定义
+Workflow:
+  1. Parse all rate constant definition blocks from MCMv331_K.m
+  2. Extract intermediate variables + final expression for each constant
+  3. Convert to fparser-compatible format (.* -> *, .^ -> ^, T -> TEMP)
+  4. Scan mechanism.fac for actually referenced K names
+  5. Inject only the referenced K definitions
+
+Examples:
+  # Inject K constants in-place (overwrites mechanism.fac)
+  python3 extract_mcm_k.py MCMv331_K.m my_mechanism.fac
+
+  # Write to a separate output file, keeping the original unchanged
+  python3 extract_mcm_k.py MCMv331_K.m my_mechanism.fac -o combined.fac
 """
 
 import re, sys, argparse
 from collections import OrderedDict
 
 def parse_mcm_k(k_file):
-    """解析 MCMv331_K.m，返回 {Kname: [definition_lines]} 字典。"""
+    """Parse MCMv331_K.m, return dict of {Kname: [definition_lines]}."""
     
     with open(k_file) as f:
         lines = f.readlines()
@@ -26,27 +34,27 @@ def parse_mcm_k(k_file):
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        # 检测 K 定义块起始: "Knames{i} = 'KXXX';"
+        # Detect K definition block start: "Knames{i} = 'KXXX';"
         m = re.match(r"Knames\{i\}\s*=\s*'(\w+)'\s*;", line)
         if m:
             kname = m.group(1)
             body_lines = []
             i += 1
-            # 收集中间变量定义直到 krx(:,i) = ...
+            # Collect intermediate variable definitions until krx(:,i) = ...
             while i < len(lines):
                 l = lines[i].strip()
                 if re.match(r'krx\(:,i\)\s*=', l):
-                    # 这是最终表达式行
+                    # This is the final expression line
                     final_match = re.search(r'krx\(:,i\)\s*=\s*(.+?)\s*;', l)
                     if final_match:
                         final_expr = final_match.group(1).strip()
-                        # 转换 MATLAB 语法
+                        # Convert MATLAB syntax
                         final_expr = convert_matlab_expr(final_expr)
                         body_lines.append(f"{kname} = {final_expr} ;")
                     break
-                # 跳过空行和纯注释行
+                # Skip blank lines and pure comment lines
                 if l and not l.startswith('%') and not l.startswith('%%'):
-                    # 中间变量定义: "VAR = EXPR ;"
+                    # Intermediate variable definition: "VAR = EXPR ;"
                     vm = re.match(r'(\w+)\s*=\s*(.+?)\s*;', l)
                     if vm:
                         vname = vm.group(1)
@@ -55,86 +63,84 @@ def parse_mcm_k(k_file):
                         body_lines.append(f"{vname} = {vexpr} ;")
                 i += 1
             if body_lines:
-                # Check if this is a simple or complex definition
-                # Simple: only one line (KNNN = EXPR)
-                # Complex: multiple intermediate lines + final
-                if len(body_lines) > 1:
-                    # For complex definitions with intermediates, prefix them
-                    # so they form a self-contained block
-                    result[kname] = body_lines
-                else:
-                    result[kname] = body_lines
+                result[kname] = body_lines
         i += 1
     
     return result
 
 
 def convert_matlab_expr(expr):
-    """将 MATLAB 表达式转为 fparser 兼容格式。"""
-    # .* → * , ./ → / , .^ → ^
+    """Convert MATLAB expression to fparser-compatible format."""
+    # .* -> * , ./ -> / , .^ -> ^
     expr = expr.replace('.*', '*').replace('./', '/').replace('.^', '^')
-    # T → TEMP (MCM .fac convention uses TEMP for temperature)
+    # T -> TEMP (MCM .fac convention uses TEMP for temperature)
     # Use word-boundary replacement to avoid matching T inside other names
     expr = re.sub(r'\bT\b', 'TEMP', expr)
     # M, H2O stay as-is (already in _func_params)
     return expr
 
 
-def find_referenced_k(fac_file):
-    """扫描 .fac 文件，找出所有引用的 MCM K 常数名。
+def find_referenced_k(fac_file, all_k_names):
+    """Detect K constants referenced in .fac, or return all if --all flag set.
     
-    检测来源:
-      1. 反应行: % KXXX : ...
-      2. 反应表达式: 等号右侧引用的 KXXX
-      3. 系数定义: KXXX = ...  
+    Args:
+        fac_file: Path to .fac mechanism file
+        all_k_names: If non-empty, return this set directly (--all mode)
     """
+    if all_k_names:
+        return all_k_names
+
     referenced = set()
     with open(fac_file) as f:
         content = f.read()
-    
-    # 1. 反应行: % KXXX : ...
-    for m in re.finditer(r'%\s+(\w+)\s*:', content):
-        referenced.add(m.group(1))
-    
-    # 2. 所有等号右侧的标识符引用（捕获系数表达式和反应表达式中的 K 引用）
-    for m in re.finditer(r'=\s*([^;]+)\s*;', content):
-        rhs = m.group(1)
-        # 提取所有可能是 K 常数的标识符
-        for token in re.findall(r'\b(K[A-Za-z0-9]+)\b', rhs):
+
+    # Reaction lines: % KXXX : or % EXPR*KXXX*... :
+    for m in re.finditer(r'%\s+([^:]+)\s*:', content):
+        for token in re.findall(r'\b(K[A-Za-z0-9]+)\b', m.group(1)):
             referenced.add(token)
-    
+
+    # Coefficient definitions and reaction expressions
+    for m in re.finditer(r'=\s*([^;]+)\s*;', content):
+        for token in re.findall(r'\b(K[A-Za-z0-9]+)\b', m.group(1)):
+            referenced.add(token)
+
     return referenced
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='从 MCMv331_K.m 提取 K 常数定义并注入 .fac 文件'
+        description='Extract K constant definitions from MCMv331_K.m and inject into .fac file'
     )
-    parser.add_argument('k_file', help='MCMv331_K.m 文件路径')
-    parser.add_argument('fac_file', help='目标 .fac 机理文件')
-    parser.add_argument('--output', '-o', help='输出文件（默认覆盖原 .fac）')
+    parser.add_argument('k_file', help='Path to MCMv331_K.m')
+    parser.add_argument('fac_file', help='Target .fac mechanism file')
+    parser.add_argument('--all', action='store_true',
+                        help='Inject ALL 33 MCM K constants (recommended for complete .fac files)')
+    parser.add_argument('--output', '-o', help='Output file (default: overwrite the .fac file)')
     args = parser.parse_args()
     
     k_defs = parse_mcm_k(args.k_file)
-    print(f"从 {args.k_file} 解析出 {len(k_defs)} 个 K 常数: {list(k_defs.keys())}")
+    print(f"Parsed {len(k_defs)} K constants from {args.k_file}")
     
-    referenced = find_referenced_k(args.fac_file)
-    print(f"机理引用的 K 常数: {sorted(referenced)}")
+    all_k = set(k_defs.keys()) if args.all else set()
+    referenced = find_referenced_k(args.fac_file, all_k)
     
     matched = referenced & set(k_defs.keys())
     missing = referenced - set(k_defs.keys())
     unused = set(k_defs.keys()) - referenced
     
-    print(f"已匹配: {len(matched)}")
+    if args.all:
+        print(f"Injecting ALL {len(matched)} K constants (--all)")
+    else:
+        print(f"Mechanism references: {sorted(referenced)}")
+        print(f"Matched: {len(matched)}, Unreferenced: {len(unused)}")
     if missing:
-        print(f"⚠ 未在 MCMv331_K.m 中找到: {sorted(missing)}")
-    print(f"未引用: {len(unused)}")
-    
+        print(f"WARNING: not found in MCMv331_K.m: {sorted(missing)}")
+
     if not matched:
-        print("无需注入 K 定义")
+        print("No K definitions to inject")
         return
     
-    # 生成 K 定义块
+    # Build the K definition block
     k_block_lines = ["", "* MCM v3.3.1 standard rate constants (from MCMv331_K.m) ;",
                      "* Auto-generated by extract_mcm_k.py ;", ""]
     
@@ -145,17 +151,17 @@ def main():
     
     k_block = '\n'.join(k_block_lines)
     
-    # 读取原 .fac，移除之前可能注入的旧 K 定义块
+    # Read the original .fac, remove any previously injected old K definition block
     with open(args.fac_file) as f:
         fac_content = f.read()
-    
-    # 移除旧的 auto-generated K 定义块
+
+    # Remove old auto-generated K definition block
     fac_content = re.sub(
         r'\n\*\s*MCM v3\.3\.1 standard rate constants.*?(?=\n\* MCMv3|$|\Z)',
         '', fac_content, flags=re.DOTALL
     )
-    
-    # 在 VARIABLE 行之前插入
+
+    # Insert before the VARIABLE line
     var_match = re.search(r'\nVARIABLE\b', fac_content)
     if var_match:
         insert_pos = var_match.start()
@@ -167,7 +173,7 @@ def main():
     with open(out_path, 'w') as f:
         f.write(out_content)
     
-    print(f"已写入: {out_path}")
+    print(f"Written: {out_path}")
 
 if __name__ == '__main__':
     main()
