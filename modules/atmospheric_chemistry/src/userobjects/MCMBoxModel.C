@@ -785,10 +785,24 @@ MCMBoxModel::evaluateCoefficients()
   _func_params[3] = 0.78 * M_val;  // N2 volume fraction
   _func_params[4] = H2O_val;
 
-  // Compute photolysis J values from solar zenith angle (MCM formula)
-  // J = l * cosx^m * exp(-n * secx) * JFAC * ROOF
-  // ROOF = CLOSED (0) or OPEN (1); JFAC ∈ [0,1]
-  if (!_j_CL_vals.empty())
+  // Compute photolysis J values into _func_params for fparser evaluation.
+  // MCM_SZA: J = l * cosx^m * exp(-n * secx) * JFAC * ROOF
+  // BOTTOMUP: J = ∫ QY*CS*Flux dλ  (pre-computed by BottomUpJIntegrator)
+  if (_photolysis_method == BOTTOMUP && _bottomup_integrator)
+  {
+    const Real roof_factor = _roof_open ? 1.0 : 0.0;
+    auto allJ = _bottomup_integrator->computeAllJ(_temperature, _press > 0 ? _press : 1013.25);
+    for (size_t i = 0; i < _j_CL_vals.size() && i < _j_photo_indices.size(); ++i)
+    {
+      unsigned int idx = _j_photo_indices[i];
+      if (idx == (unsigned int)-1) continue;
+      unsigned int jn = _j_numbers.size() > i ? _j_numbers[i] : (unsigned int)(i + 1);
+      std::string jname = "J" + std::to_string(jn);
+      auto it = allJ.find(jname);
+      _func_params[idx] = (it != allJ.end()) ? it->second * _jfac * roof_factor : 0.0;
+    }
+  }
+  else if (!_j_CL_vals.empty())
   {
     const Real roof_factor = _roof_open ? 1.0 : 0.0;
     Real cosx = calculateCosSZA(_t);
