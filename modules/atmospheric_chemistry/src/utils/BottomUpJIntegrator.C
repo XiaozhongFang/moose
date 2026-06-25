@@ -13,6 +13,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <limits>
 
 BottomUpJIntegrator::BottomUpJIntegrator(const std::string & data_dir) : _data_dir(data_dir)
@@ -233,12 +234,16 @@ BottomUpJIntegrator::computeJ(const std::string & jname, Real T, Real P) const
   // Defensive checks
   if (std::isnan(Jval))
   {
-    mooseWarning("BottomUpJIntegrator: NaN J-value for ", jname);
+    static std::set<std::string> warned_nan;
+    if (warned_nan.insert(jname).second)
+      mooseWarning("BottomUpJIntegrator: NaN J-value for ", jname, " (suppressing further warnings for this J)");
     return 0.0;
   }
   if (Jval < 0.0)
   {
-    mooseWarning("BottomUpJIntegrator: negative J-value for ", jname, " (", Jval, "), clamping to 0");
+    static std::set<std::string> warned;
+    if (warned.insert(jname).second)
+      mooseWarning("BottomUpJIntegrator: negative J-value for ", jname, " (", Jval, "), clamping to 0 (suppressing further warnings for this J)");
     return 0.0;
   }
 
