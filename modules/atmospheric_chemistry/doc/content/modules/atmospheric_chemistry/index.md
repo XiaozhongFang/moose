@@ -72,6 +72,24 @@ python3 scripts/generate_bottomup_jmap.py \
     --temperature 298.0
 ```
 
+## RO2 Species Extraction
+
+The parser detects peroxy radical (RO₂) species using the same logic as AtChem2:
+explicit `RO2 = CH3O2 + ...` section in `.kpp` files, or O₂-suffix heuristic (excluding
+known false positives: HO2, NO2, SO2, H2O2 etc.).
+
+Extract and validate the RO₂ list standalone:
+
+```bash
+# Extract RO2 from a .fac mechanism and compare against MCM reference
+python3 scripts/check_ro2.py \
+    doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_v3.3.1.dat \
+    --fac mechanism.fac \
+    -o ro2_detected.txt
+```
+
+Output: `ro2_detected.txt` (one species per line) + comparison summary (detected / missing / extra).
+
 ## Chemical Mechanism Files
 
 Mechanism files in FACSIMILE (`.fac`) format are supported directly. For MCM website-exported `.kpp`
@@ -106,7 +124,7 @@ python3 scripts/plot_atchem2.py \
 | Script | Purpose |
 |--------|---------|
 | `scripts/kpp_to_fac.py` | Convert `.kpp` → `.fac` |
-| `scripts/check_ro2.py` | Compare RO2 list against AtChem2 reference |
+| `scripts/check_ro2.py` | Extract / validate RO2 species list against MCM reference |
 | `scripts/generate_atchem2_gold.py` | Generate gold CSV from AtChem2 reference output |
 | `scripts/plot_atchem2.py` | Plot MOOSE vs AtChem2 comparison (3×3 grid PDF) |
 | `scripts/plot_vs_f0am.py` | Plot MOOSE vs analytical solution for F0AM tutorial |
