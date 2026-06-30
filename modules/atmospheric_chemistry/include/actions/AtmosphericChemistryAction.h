@@ -89,4 +89,9 @@ protected:
 
   /// Include transport in coupled mode
   const bool _include_transport;
+
+  /// Whether RO2 diagnostic variable should be created (computed once in constructor)
+  bool _ro2_diagnostic_enabled;
+  /// Whether the RO2 conflict warning has been printed
+  bool _ro2_warning_printed;
 };

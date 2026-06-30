@@ -16,7 +16,6 @@
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/tutorial_5sp.fac'
   mcm_photolysis_file = ''
   temperature = 298
-  output_ro2 = false
 []
 
 [ICs]

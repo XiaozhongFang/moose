@@ -92,9 +92,10 @@ AtmosphericChemistryAction::validParams()
       "Concentration units for input/output: 'molec_cm3' (default) or 'ppb'. "
       "When 'ppb', ICs are in ppb and ChemistryODEKernel converts internally.");
 
-  params.addParam<bool>("output_ro2", true,
-      "Add RO2 (peroxy radical sum) as a diagnostic ScalarVariable. "
-      "Set to false for simple test mechanisms where RO2 is not meaningful.");
+  params.addParam<bool>("output_ro2_sum", false,
+      "Create a diagnostic variable 'RO2' = sum of peroxy radical concentrations. "
+      "Only effective when no species named 'RO2' exists in the mechanism. "
+      "Recommended default: false (use Postprocessors for precise RO2 output).");
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
   params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
 
@@ -206,6 +207,32 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
            << _rate_coefficients.size() << " rate coefficients, " << _reactions.size()
            << " reactions, " << _photolysis_rates.size() << " photolysis J<N> references"
            << " from " << _mechanism_file << " (mode=" << _mode << ")" << std::endl;
+
+  // Compute RO2 diagnostic availability at construction time
+  _ro2_warning_printed = false;
+  bool want_ro2 = getParam<bool>("output_ro2_sum");
+  bool has_ro2 = std::find(_species.begin(), _species.end(), "RO2") != _species.end();
+  _ro2_diagnostic_enabled = want_ro2 && !has_ro2;
+  if (want_ro2 && has_ro2)
+    _console << "AtmosphericChemistry Warning: 'RO2' is already a species "
+             << "in the mechanism. Skipping automatic RO2 diagnostic variable.\n"
+             << "To output RO2 concentration manually:\n"
+             << (_mode == "box"
+                 ? "  [Postprocessors]\n"
+                   "    [ro2_sum]\n"
+                   "      type = MCMRO2Postprocessor\n"
+                   "      box_model = box_model\n"
+                   "      species_variables = '<all species in order>'\n"
+                   "    []\n"
+                   "  []\n"
+                 : "  [AuxKernels]\n"
+                   "    [ro2_aux]\n"
+                   "      type = MCMRO2Aux\n"
+                   "      variable = RO2_out\n"
+                   "      ro2_species = '<auto-detected peroxy radicals>'\n"
+                   "    []\n"
+                   "  []\n")
+             << std::endl;
 }
 
 const std::string &
@@ -280,8 +307,8 @@ AtmosphericChemistryAction::actBoxAddVariable()
   auto var_params = _factory.getValidParams("MooseVariableScalar");
   for (const auto & sp : _species)
     _problem->addVariable("MooseVariableScalar", sp, var_params);
-  // Add RO2 diagnostic variable (sum of peroxy radicals)
-  if (getParam<bool>("output_ro2"))
+  // RO2 diagnostic variable (sum of peroxy radicals)
+  if (_ro2_diagnostic_enabled)
   {
     _problem->addVariable("MooseVariableScalar", "RO2", var_params);
     _console << "AtmosphericChemistry (box): Created " << _species.size()
@@ -347,7 +374,7 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
   }
 
   // RO2 algebraic kernel: RO2 = sum(peroxy radicals), no time derivative
-  if (getParam<bool>("output_ro2"))
+  if (_ro2_diagnostic_enabled)
   {
     auto ro2_params = _factory.getValidParams("MCMRO2Kernel");
     ro2_params.set<NonlinearVariableName>("variable") = "RO2";
@@ -371,8 +398,8 @@ AtmosphericChemistryAction::actCoupledAddVariable()
   auto var_params = _factory.getValidParams(type);
   for (const auto & sp : _species)
     _problem->addVariable(type, sp, var_params);
-  // RO2 AuxVariable: constant monomial (only if not already a nonlinear variable)
-  if (getParam<bool>("output_ro2"))
+  // RO2 AuxVariable: constant monomial (only when no species conflict)
+  if (_ro2_diagnostic_enabled)
   {
     auto aux_params = _factory.getValidParams("MooseVariable");
     aux_params.set<MooseEnum>("family") = MooseEnum("LAGRANGE MONOMIAL", "MONOMIAL");
@@ -530,7 +557,7 @@ AtmosphericChemistryAction::actCoupledAddKernel()
            << _species.size() << " species" << std::endl;
 
   // RO2 AuxKernel: sum of peroxy radical species (coupled mode diagnostic)
-  if (getParam<bool>("output_ro2") && !_ro2_species.empty())
+  if (_ro2_diagnostic_enabled && !_ro2_species.empty())
   {
     std::vector<VariableName> ro2_coupled(_ro2_species.begin(), _ro2_species.end());
     auto ro2_params = _factory.getValidParams("MCMRO2Aux");
