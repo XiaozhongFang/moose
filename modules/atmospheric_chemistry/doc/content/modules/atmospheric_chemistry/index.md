@@ -167,13 +167,21 @@ python3 modules/atmospheric_chemistry/scripts/kpp_to_fac.py mechanism.kpp
 
 ## Validation
 
-### AtChem2 Validation
+### AtChem2 Validation (MCM_SZA photolysis)
 
-The box mode has been validated against AtChem2 (v1.2.1) for the MCM v3.3.1 inorganic
-subset (29 species, 71 reactions, 12 h diurnal cycle).  O$_3$, NO$_2$, and NO
-concentrations match to within 0.1--0.3 % relative error during daytime and
-< 0.05 % at night.  Solar parameters (declination, zenith angle) follow the
-Madronich (1993) formulation identically to AtChem2.
+The MCM_SZA photolysis scheme (default) has been validated against AtChem2 (v1.2.1)
+for the MCM v3.3.1 inorganic subset (29 species, 71 reactions, 12 h diurnal cycle).
+Both box and coupled modes produce identical photolysis rates and match AtChem2's
+CVODE reference:
+
+| Mode | Steps | Converged | Photolysis |
+|------|-------|-----------|------------|
+| `vs_AtChem2_inorg_box` | 480 | 480/480 | MCM_SZA |
+| `vs_AtChem2_inorg_coupled` | 480 | 480/480 | MCM_SZA |
+
+O$_3$, NO$_2$, and NO concentrations match to within 0.1--0.3 % relative error
+during daytime and < 0.05 % at night. Solar parameters (declination, zenith angle)
+follow the Madronich (1993) formulation identically to AtChem2.
 
 To regenerate AtChem2 validation data:
 
@@ -187,10 +195,12 @@ python3 scripts/plot_atchem2.py \
     --atchem2 <path-to-AtChem2>/model/output
 ```
 
-### F0AM Chamber Validation (610 species)
+### F0AM Chamber Validation (610 species, BOTTOMUP photolysis)
 
 The `MCMv331_Inorg_Isoprene` mechanism (610 species, 1974 reactions) is validated
-against F0AM v4.4's `ExampleSetup_Chamber.m`. Four scenarios matching F0AM's
+against F0AM v4.4's `ExampleSetup_Chamber.m` using the BOTTOMUP photolysis scheme
+(cross-section × quantum-yield × lamp-flux integration, ported from F0AM's
+MATLAB functions to C++ `BottomUpJIntegrator`). Four scenarios matching F0AM's
 3-step + 1-event simulation are included:
 
 | Scenario | NO₂ (ppb) | jcorr | Duration | F0AM source |
