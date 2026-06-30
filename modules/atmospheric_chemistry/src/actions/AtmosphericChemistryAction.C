@@ -92,6 +92,9 @@ AtmosphericChemistryAction::validParams()
       "Concentration units for input/output: 'molec_cm3' (default) or 'ppb'. "
       "When 'ppb', ICs are in ppb and ChemistryODEKernel converts internally.");
 
+  params.addParam<bool>("output_ro2", true,
+      "Add RO2 (peroxy radical sum) as a diagnostic ScalarVariable. "
+      "Set to false for simple test mechanisms where RO2 is not meaningful.");
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
   params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
 
@@ -278,9 +281,15 @@ AtmosphericChemistryAction::actBoxAddVariable()
   for (const auto & sp : _species)
     _problem->addVariable("MooseVariableScalar", sp, var_params);
   // Add RO2 diagnostic variable (sum of peroxy radicals)
-  _problem->addVariable("MooseVariableScalar", "RO2", var_params);
-  _console << "AtmosphericChemistry (box): Created " << _species.size()
-           << " ScalarVariable(s) + RO2" << std::endl;
+  if (getParam<bool>("output_ro2"))
+  {
+    _problem->addVariable("MooseVariableScalar", "RO2", var_params);
+    _console << "AtmosphericChemistry (box): Created " << _species.size()
+             << " ScalarVariable(s) + RO2" << std::endl;
+  }
+  else
+    _console << "AtmosphericChemistry (box): Created " << _species.size()
+             << " ScalarVariable(s)" << std::endl;
 }
 
 void
@@ -338,16 +347,19 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
   }
 
   // RO2 algebraic kernel: RO2 = sum(peroxy radicals), no time derivative
-  // This pins RO2 to the instantaneous RO2 sum at each timestep.
+  if (getParam<bool>("output_ro2"))
   {
     auto ro2_params = _factory.getValidParams("MCMRO2Kernel");
     ro2_params.set<NonlinearVariableName>("variable") = "RO2";
     ro2_params.set<UserObjectName>("box_model") = "box_model";
     ro2_params.set<std::vector<VariableName>>("species_variables") = species_vars;
     _problem->addScalarKernel("MCMRO2Kernel", "ro2_kernel", ro2_params);
+    _console << "AtmosphericChemistry (box): Created ODETimeDerivative + ChemistryODEKernel for "
+             << _species.size() << " species + RO2" << std::endl;
   }
-  _console << "AtmosphericChemistry (box): Created ODETimeDerivative + ChemistryODEKernel for "
-           << _species.size() << " species + RO2" << std::endl;
+  else
+    _console << "AtmosphericChemistry (box): Created ODETimeDerivative + ChemistryODEKernel for "
+             << _species.size() << " species" << std::endl;
 }
 
 // ===== Coupled mode tasks (equivalent to old MCMFacsimileAction) =====
@@ -359,7 +371,8 @@ AtmosphericChemistryAction::actCoupledAddVariable()
   auto var_params = _factory.getValidParams(type);
   for (const auto & sp : _species)
     _problem->addVariable(type, sp, var_params);
-  // RO2 AuxVariable: constant monomial
+  // RO2 AuxVariable: constant monomial (only if not already a nonlinear variable)
+  if (getParam<bool>("output_ro2"))
   {
     auto aux_params = _factory.getValidParams("MooseVariable");
     aux_params.set<MooseEnum>("family") = MooseEnum("LAGRANGE MONOMIAL", "MONOMIAL");
@@ -517,7 +530,7 @@ AtmosphericChemistryAction::actCoupledAddKernel()
            << _species.size() << " species" << std::endl;
 
   // RO2 AuxKernel: sum of peroxy radical species (coupled mode diagnostic)
-  if (!_ro2_species.empty())
+  if (getParam<bool>("output_ro2") && !_ro2_species.empty())
   {
     std::vector<VariableName> ro2_coupled(_ro2_species.begin(), _ro2_species.end());
     auto ro2_params = _factory.getValidParams("MCMRO2Aux");

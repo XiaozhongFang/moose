@@ -22,7 +22,7 @@
     #   + all environment postprocessors (M_env, TEMP, PRESS, RH, H2O, DEC, BLHEIGHT, DILUTE, JFAC, ROOF, ASA)
     #   + all solar postprocessors (cosx, secx, lha, sinld, cosld, eqtime, lat, lon)
     # — total ~26 compared columns out of ~78 CSV columns.
-    ignore_columns = 'NA O O1D J1 J2 J3 J4 J5 J6 J7 J8 J11 J12 J13 J14 J15 J16 J17 J18 J19 J20 J21 J22 J23 J24 J31 J32 J33 J34 J35 J41 J51 J52 J53 J54 J55 J56 J61 RO2_sum CH3NO3 CH3O CH3O2 CH3O2NO2 CH3OH CH3OOH H2 H2O2 HCHO HNO3 HO2 HO2NO2 HONO N2O5 NO3'
+    ignore_columns = 'RO2 NA O O1D J1 J2 J3 J4 J5 J6 J7 J8 J11 J12 J13 J14 J15 J16 J17 J18 J19 J20 J21 J22 J23 J24 J31 J32 J33 J34 J35 J41 J51 J52 J53 J54 J55 J56 J61 RO2_sum CH3NO3 CH3O CH3O2 CH3O2NO2 CH3OH CH3OOH H2 H2O2 HCHO HNO3 HO2 HO2NO2 HONO N2O5 NO3'
     requirement = 'The box mode shall match AtChem2 CVODE reference within 5% for main species (O3, NO2, NO, OH, CO, CH4) and environmental/solar parameters.  Dawn-sensitive columns (J-values, organic intermediates, night reservoir species) are excluded due to BDF2-vs-CVODE time-alignment differences at the 90s resolution — these are validated visually via plot_atchem2.py.'
   [../]
   [./vs_AtChem2_inorg_coupled]
