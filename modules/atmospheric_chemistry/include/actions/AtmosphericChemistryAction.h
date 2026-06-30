@@ -68,6 +68,8 @@ protected:
   void actCoupledAddVariable();
   void actCoupledAddMaterial();
   void actCoupledAddKernel();
+  void actCoupledAddAuxVariable();
+  void actCoupledAddAuxKernel();
 
   /// System configuration parsed from .fac
   const std::string _mechanism_file;

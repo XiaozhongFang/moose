@@ -22,6 +22,9 @@ registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_material");
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_kernel");
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_scalar_kernel");
+registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_aux_variable");
+registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_aux_kernel");
+
 
 InputParameters
 AtmosphericChemistryAction::validParams()
@@ -84,6 +87,11 @@ AtmosphericChemistryAction::validParams()
   params.addParam<Real>("albedo", 0.1, "Surface albedo (0-1), used by HYBRID scheme");
   params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units, used by HYBRID scheme");
   params.addParam<Real>("altitude", 0.0, "Altitude in meters, used by HYBRID scheme");
+
+  MooseEnum units_enum("molec_cm3 ppb", "molec_cm3");
+  params.addParam<MooseEnum>("units", units_enum,
+      "Concentration units for input/output: 'molec_cm3' (default) or 'ppb'. "
+      "When 'ppb', ICs are in ppb and ChemistryODEKernel converts internally.");
 
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
   params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
@@ -259,6 +267,17 @@ AtmosphericChemistryAction::act()
     if (_mode == "coupled")
       actCoupledAddKernel();
   }
+  else if (_current_task == "add_aux_variable")
+  {
+    if (_mode == "coupled")
+      actCoupledAddAuxVariable();
+  }
+  else if (_current_task == "add_aux_kernel")
+  {
+    if (_mode == "coupled")
+      actCoupledAddAuxKernel();
+  }
+
 }
 
 // ===== Box mode tasks =====
@@ -269,8 +288,10 @@ AtmosphericChemistryAction::actBoxAddVariable()
   auto var_params = _factory.getValidParams("MooseVariableScalar");
   for (const auto & sp : _species)
     _problem->addVariable("MooseVariableScalar", sp, var_params);
+  // Add RO2 diagnostic variable (sum of peroxy radicals)
+  _problem->addVariable("MooseVariableScalar", "RO2", var_params);
   _console << "AtmosphericChemistry (box): Created " << _species.size()
-           << " ScalarVariable(s)" << std::endl;
+           << " ScalarVariable(s) + RO2" << std::endl;
 }
 
 void
@@ -287,6 +308,7 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<unsigned int>("day") = getParam<unsigned int>("day");
   params.set<unsigned int>("month") = getParam<unsigned int>("month");
   params.set<unsigned int>("year") = getParam<unsigned int>("year");
+  params.set<MooseEnum>("units") = getParam<MooseEnum>("units");
   params.set<Real>("jfac") = getParam<Real>("jfac");
   {
     auto scheme = getParam<MooseEnum>("photolysis_scheme");
@@ -307,7 +329,7 @@ AtmosphericChemistryAction::actBoxAddUserObject()
 void
 AtmosphericChemistryAction::actBoxAddScalarKernel()
 {
-  // Build the species_variables list for ChemistryODEKernel
+  // Build the species_variables list for ChemistryODEKernel (includes RO2 for coupling)
   std::vector<VariableName> species_vars(_species.begin(), _species.end());
 
   for (unsigned int j = 0; j < _species.size(); ++j)
@@ -325,8 +347,18 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
     chem_params.set<std::vector<VariableName>>("species_variables") = species_vars;
     _problem->addScalarKernel("ChemistryODEKernel", "chem_" + _species[j], chem_params);
   }
+
+  // RO2 algebraic kernel: RO2 = sum(peroxy radicals), no time derivative
+  // This pins RO2 to the instantaneous RO2 sum at each timestep.
+  {
+    auto ro2_params = _factory.getValidParams("MCMRO2Kernel");
+    ro2_params.set<NonlinearVariableName>("variable") = "RO2";
+    ro2_params.set<UserObjectName>("box_model") = "box_model";
+    ro2_params.set<std::vector<VariableName>>("species_variables") = species_vars;
+    _problem->addScalarKernel("MCMRO2Kernel", "ro2_kernel", ro2_params);
+  }
   _console << "AtmosphericChemistry (box): Created ODETimeDerivative + ChemistryODEKernel for "
-           << _species.size() << " species" << std::endl;
+           << _species.size() << " species + RO2" << std::endl;
 }
 
 // ===== Coupled mode tasks (equivalent to old MCMFacsimileAction) =====
@@ -437,6 +469,7 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   params.set<unsigned int>("month") = getParam<unsigned int>("month");
   params.set<unsigned int>("year") = getParam<unsigned int>("year");
   params.set<Real>("jfac") = getParam<Real>("jfac");
+  params.set<MooseEnum>("units") = getParam<MooseEnum>("units");
   params.set<bool>("roof_open") = getParam<bool>("roof_open");
   params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
   params.set<std::string>("hybrid_table_dir") = getParam<std::string>("hybrid_table_dir");
@@ -476,23 +509,49 @@ AtmosphericChemistryAction::actCoupledAddKernel()
     src_params.set<std::vector<VariableName>>("all_species") =
         std::vector<VariableName>(_species.begin(), _species.end());
     src_params.set<std::vector<std::vector<Real>>>("species_reactants") = species_reactants;
+    // Pass unit conversion factor for ppb support
+    {
+      auto u = getParam<MooseEnum>("units");
+      Real M = getParam<Real>("air_density");
+      src_params.set<Real>("unit_conversion") = (u == "ppb") ? M / 1.0e9 : 1.0;
+    }
     _problem->addKernel("ChemicalSourceKernel", "src_" + _species[j], src_params);
   }
   _console << "AtmosphericChemistry (coupled): Created TimeDerivative + ChemicalSourceKernel for "
            << _species.size() << " species" << std::endl;
-
-  if (_include_transport)
-  {
-    for (unsigned int j = 0; j < _species.size(); ++j)
-    {
-      bool is_placeholder = true;
-      for (unsigned int r = 0; r < _reactions.size(); ++r)
-        if (std::abs(_stoichiometric_matrix[j][r]) > 1e-30)
-        { is_placeholder = false; break; }
-      if (is_placeholder) continue;
-      auto diff = _factory.getValidParams("Diffusion");
-      diff.set<NonlinearVariableName>("variable") = _species[j];
-      _problem->addKernel("Diffusion", "diff_" + _species[j], diff);
-    }
-  }
 }
+
+void
+AtmosphericChemistryAction::actCoupledAddAuxVariable()
+{
+  auto var_params = _factory.getValidParams("MooseVariable");
+  var_params.set<MooseEnum>("fe_family") = "MONOMIAL";
+  var_params.set<unsigned int>("fe_order") = 0;
+  _problem->addAuxVariable("MooseVariable", "RO2", var_params);
+  _console << "AtmosphericChemistry (coupled): Created RO2 AuxVariable" << std::endl;
+}
+
+void
+AtmosphericChemistryAction::actCoupledAddAuxKernel()
+{
+  // Build list of RO2 species variable names
+  std::vector<VariableName> ro2_coupled;
+  for (const auto & name : _ro2_species)
+    ro2_coupled.push_back(name);
+
+  if (ro2_coupled.empty())
+  {
+    _console << "AtmosphericChemistry (coupled): No RO2 species, skipping RO2 AuxKernel"
+             << std::endl;
+    return;
+  }
+
+  auto params = _factory.getValidParams("MCMRO2Aux");
+  params.set<AuxVariableName>("variable") = "RO2";
+  params.set<std::vector<VariableName>>("ro2_species") = ro2_coupled;
+  _problem->addAuxKernel("MCMRO2Aux", "ro2_aux", params);
+  _console << "AtmosphericChemistry (coupled): Created MCMRO2Aux with "
+           << ro2_coupled.size() << " RO2 species" << std::endl;
+}
+
+

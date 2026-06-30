@@ -22,6 +22,9 @@ ChemicalSourceKernel::validParams()
   params.addRequiredParam<std::vector<std::vector<Real>>>(
       "species_reactants",
       "species_reactants[k] = [rxn_0, coeff_0, rxn_1, coeff_1, ...]");
+  params.addParam<Real>("unit_conversion", 1.0,
+      "ppb→molec/cm³ conversion factor (M/1e9). When 1.0, assume molec/cm³. "
+      "When < 1.0, residual is scaled by 1/factor for ppb output.");
   params.addClassDescription("Chemical source term with analytical Jacobian");
   return params;
 }
@@ -30,6 +33,7 @@ ChemicalSourceKernel::ChemicalSourceKernel(const InputParameters & params)
   : Kernel(params),
     _stoichiometric_row(getParam<std::vector<Real>>("stoichiometric_row")),
     _reaction_rates(getMaterialProperty<std::vector<Real>>("reaction_rates")),
+    _unit_conversion(getParam<Real>("unit_conversion")),
     _n_species(coupledComponents("all_species")),
     _coupled_vars(coupledIndices("all_species")),
     _coupled_vals(coupledValues("all_species"))
@@ -66,6 +70,9 @@ ChemicalSourceKernel::computeQpResidual()
   const auto & rates = _reaction_rates[_qp];
   for (size_t i = 0; i < _stoichiometric_row.size(); ++i)
     sum += _stoichiometric_row[i] * rates[i];
+  // If variable stores ppb, convert residual from molec/cm³/s to ppb/s
+  if (_unit_conversion != 1.0)
+    sum /= _unit_conversion;
   return -_test[_i][_qp] * sum;
 }
 

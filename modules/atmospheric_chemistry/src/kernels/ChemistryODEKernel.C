@@ -32,7 +32,8 @@ ChemistryODEKernel::validParams()
 ChemistryODEKernel::ChemistryODEKernel(const InputParameters & params)
   : ODEKernel(params),
     _box_model(getUserObject<MCMBoxModel>("box_model")),
-    _species_idx(getParam<unsigned int>("species_index"))
+    _species_idx(getParam<unsigned int>("species_index")),
+    _ppb_to_molec(_box_model.ppbToMolec())
 {
   // Access scalar variables directly from the FEProblemBase, bypassing the
   // ScalarCoupleable framework since species names are dynamic (not known
@@ -62,8 +63,18 @@ const std::vector<Real> &
 ChemistryODEKernel::_buildC() const
 {
   _C_buffer.assign(_species_vars.size(), 0.0);
-  for (unsigned int i = 0; i < _species_vars.size(); ++i)
-    _C_buffer[i] = _species_vars[i]->sln()[0];
+  if (_ppb_to_molec != 1.0)
+  {
+    // User variable stores ppb → convert to molec/cm³ for internal computation
+    for (unsigned int i = 0; i < _species_vars.size(); ++i)
+      _C_buffer[i] = _species_vars[i]->sln()[0] * _ppb_to_molec;
+  }
+  else
+  {
+    // User variable is already in molec/cm³ — no conversion
+    for (unsigned int i = 0; i < _species_vars.size(); ++i)
+      _C_buffer[i] = _species_vars[i]->sln()[0];
+  }
   return _C_buffer;
 }
 
@@ -71,7 +82,11 @@ Real
 ChemistryODEKernel::computeQpResidual()
 {
   // R = -dC/dt  (ODEKernel convention: R = du/dt - f, chemical source is f)
-  return -_box_model.getDCdt(_species_idx, _buildC());
+  Real dCdt = _box_model.getDCdt(_species_idx, _buildC());
+  // If user variable stores ppb, convert dC/dt from molec/cm³/s back to ppb/s
+  if (_ppb_to_molec != 1.0)
+    dCdt /= _ppb_to_molec;
+  return -dCdt;
 }
 
 Real

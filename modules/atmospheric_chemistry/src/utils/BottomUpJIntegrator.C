@@ -243,7 +243,8 @@ BottomUpJIntegrator::computeJ(const std::string & jname, Real T, Real P) const
   {
     static std::set<std::string> warned;
     if (warned.insert(jname).second)
-      mooseWarning("BottomUpJIntegrator: negative J-value for ", jname, " (", Jval, "), clamping to 0 (suppressing further warnings for this J)");
+      Moose::out << "BottomUpJIntegrator: negative J-value for " << jname
+                 << " (" << Jval << "), clamping to 0" << std::endl;
     return 0.0;
   }
 

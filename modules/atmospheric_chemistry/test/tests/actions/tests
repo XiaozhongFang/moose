@@ -69,11 +69,42 @@
     heavy = true
     skip = 'MultiApp + TransientMultiApp transfer setup WIP'
   [../]
-  [./vs_F0AM_chamber_box]
-    type = RunApp
-    input = vs_F0AM_chamber_box.i
-    requirement = 'The box mode with MCMv331_Inorg_Isoprene (610 species, 1974 reactions, BOTTOMUP photolysis) shall parse and converge for a 3h isoprene/NO2/H2O2 chamber simulation.'
+  [./vs_F0AM_chamber_S1_box]
+    type = CSVDiff
+    input = vs_F0AM_chamber_S1_box.i
+    csvdiff = vs_F0AM_chamber_S1_box.csv
+    rel_err = 5.0e-2
+    abs_zero = 1.0e-6
     heavy = true
+    requirement = 'S1 (NO₂=0.1ppb): The box mode with MCMv331_Inorg_Isoprene shall match F0AM within 5% for the 3h chamber simulation.'
+  [../]
+  [./vs_F0AM_chamber_S2_box]
+    type = CSVDiff
+    input = vs_F0AM_chamber_S2_box.i
+    csvdiff = vs_F0AM_chamber_S2_box.csv
+    rel_err = 5.0e-2
+    abs_zero = 1.0e-6
+    heavy = true
+    requirement = 'S2 (NO₂=1ppb): The box mode with MCMv331_Inorg_Isoprene shall match F0AM within 5% for the 3h chamber simulation.'
+  [../]
+  [./vs_F0AM_chamber_S3_box]
+    type = CSVDiff
+    input = vs_F0AM_chamber_S3_box.i
+    csvdiff = vs_F0AM_chamber_S3_box.csv
+    rel_err = 5.0e-2
+    abs_zero = 1.0e-6
+    heavy = true
+    requirement = 'S3 (NO₂=10ppb): The box mode with MCMv331_Inorg_Isoprene shall match F0AM within 5% for the 3h chamber simulation.'
+  [../]
+  [./vs_F0AM_chamber_S2b_box]
+    type = CSVDiff
+    prereq = vs_F0AM_chamber_S2_box
+    input = vs_F0AM_chamber_S2b_box.i
+    csvdiff = vs_F0AM_chamber_S2b_box.csv
+    rel_err = 5.0e-2
+    abs_zero = 1.0e-6
+    heavy = true
+    requirement = 'S2b (restart from S2, jcorr=10): The box mode with MCMv331_Inorg_Isoprene shall match F0AM within 5%.'
   [../]
   [./vs_F0AM_dielcycle_box]
     type = RunApp

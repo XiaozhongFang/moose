@@ -35,29 +35,21 @@ class ChemistryODEKernel : public ODEKernel
 {
 public:
   static InputParameters validParams();
-
   ChemistryODEKernel(const InputParameters & params);
 
   virtual void reinit() override;
-
-protected:
   virtual Real computeQpResidual() override;
   virtual Real computeQpJacobian() override;
   virtual Real computeQpOffDiagJacobianScalar(unsigned int jvar) override;
 
-  /// Reference to the centralized box model
+protected:
   const MCMBoxModel & _box_model;
-
-  /// Index of this species in the mechanism (0..nSpecies-1)
   const unsigned int _species_idx;
-
-  /// Pointers to all species' ScalarVariable objects (index = species index)
-  std::vector<MooseVariableScalar *> _species_vars;
-
-  /// Build the full concentration vector from scalar variable values.
-  /// Returns reference to pre-allocated _C_buffer (Per.14 — no allocation per call).
-  const std::vector<Real> & _buildC() const;
-
-  /// Pre-allocated concentration buffer; reused across all residual/Jacobian calls.
+  /// ppb → molec/cm³ conversion factor (M/1e9), valid when box_model uses ppb units
+  const Real _ppb_to_molec;
+  std::vector<const MooseVariableScalar *> _species_vars;
   mutable std::vector<Real> _C_buffer;
+  const std::vector<Real> & _buildC() const;
 };
+
+

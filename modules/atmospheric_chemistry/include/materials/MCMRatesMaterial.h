@@ -64,6 +64,9 @@ private:
   const Real _M;
   const Real _H2O_val;
 
+  /// ppb→molec/cm³ conversion factor (M/1e9); 1.0 when using molec_cm3
+  Real _ppb_to_molec;
+
   /// Coefficient names and expressions in evaluation order
   std::vector<std::string> _coeff_names;
   unsigned int _n_coefficients;
@@ -127,6 +130,7 @@ private:
   /// Roof (chamber cover) open. false = CLOSED (all photolysis J=0).
   const bool _roof_open;
 
+  /// ppb→molec/cm³ conversion factor (M/1e9); 1.0 when using molec_cm3
   /// Photolysis scheme: MCM_SZA or HYBRID
   const MooseEnum _photolysis_scheme;
   /// Optional Hybrid J-table reader (created if scheme=HYBRID)

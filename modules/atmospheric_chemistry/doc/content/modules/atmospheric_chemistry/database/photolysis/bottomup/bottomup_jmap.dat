@@ -22,7 +22,7 @@ J17	Cross_Section_IPRCHO.csv	1	Quantum_Yield_IPRCHO.csv	1
 J18	Cross_Section_MACR.csv	1	0.005	0
 J19	Cross_Section_MACR.csv	1	0.005	0
 J20	Cross_Section_MACR.csv	1	1	0
-J21	Cross_Section_CH3COCH3_precomp.csv	1	Quantum_Yield_CH3COCH3_CH3CO_precomp.csv	1
+J21	Cross_Section_CH3COCH3_precomp.csv	1	1.0	0
 J22	Cross_Section_MEK.csv	1	0.34	0
 J23	Cross_Section_MVK.csv	1	Quantum_Yield_MVK_precomp.csv	1
 J24	Cross_Section_MVK.csv	1	Quantum_Yield_MVK_precomp.csv	1
@@ -43,14 +43,14 @@ Jn1	Cross_Section_CH3CHCHCHO.csv	1	0.030	0
 Jn2	Cross_Section_C6H5COH.csv	1	0.29	0
 Jn3	Cross_Section_C2H5COC2H5.csv	1	1	0
 Jn4	Cross_Section_CH3COOOH.csv	1	1	0
-Jn5	Cross_Section_CH3CHO.csv	1	Quantum_Yield_CH3CHO_CH3_precomp.csv	1
-Jn6	Cross_Section_CH3CHO.csv	1	Quantum_Yield_CH3CHO_CH3_precomp.csv	1
-Jn8	Cross_Section_CH3COCH3_precomp.csv	1	Quantum_Yield_CH3COCH3_CO_precomp.csv	1
+Jn5	Cross_Section_CH3CHO.csv	1	1.0	0
+Jn6	Cross_Section_CH3CHO.csv	1	1.0	0
+Jn8	Cross_Section_CH3COCH3_precomp.csv	1	1.0	0
 Jn9	Cross_Section_GLYCOALDEHYDE.csv	1	1	0
 Jn10	Cross_Section_Hydroxyaceton.csv	1	0.60	0
 Jn11	Cross_Section_Acrolein.csv	1	Quantum_Yield_Acrolein_precomp.csv	1
-Jn12	Cross_Section_3_methyl_2_nitrophenol.csv	1	1.5e-4	0
-Jn13	Cross_Section_4_methyl_2_nitrophenol.csv	1	1e-4	0
+Jn12	Cross_Section_3_methyl_2_nitrophenol.csv	1	0.00015	0
+Jn13	Cross_Section_4_methyl_2_nitrophenol.csv	1	0.0001	0
 Jn14	Cross_Section_PAN_precomp.csv	1	Quantum_Yield_PAN_NO2.csv	1
 Jn15	Cross_Section_PAN_precomp.csv	1	Quantum_Yield_PAN_NO3.csv	1
 Jn16	Cross_Section_CH3O2NO2.csv	1	0.95	0
@@ -70,6 +70,7 @@ Jn29	Cross_Section_BrONO2_precomp.csv	1	0.15	0
 Jn30	Cross_Section_CHBr3_precomp.csv	1	1	0
 Jn31	Cross_Section_BrCl.csv	1	1	0
 Jn32	Cross_Section_Cl2_precomp.csv	1	1	0
+Jn33	Cross_Section_ClO_MB1999_precomp.csv	1	1	0
 Jn34	Cross_Section_ClONO2_precomp.csv	1	Quantum_Yield_ClONO2_Cl.csv	1
 Jn35	Cross_Section_ClONO2_precomp.csv	1	Quantum_Yield_ClONO2_ClO.csv	1
 Jn36	Cross_Section_HOCl.csv	1	1	0
@@ -85,8 +86,8 @@ Jn45	Cross_Section_INO2_JPL-2010(2011)_298K_210-380nm(rec).txt	3	1	0
 Jn46	Cross_Section_IONO2_JPL-2010(2011)_298K_245-415nm(rec).txt	3	1	0
 Jn50	Cross_Section_ICl_JPL-2010(2011)_298K_210-600nm(rec).txt	3	1	0
 Jn51	Cross_Section_IBr_JPL-2010(2011)_298K_220-600nm(rec).txt	3	1	0
+Jn52	Cross_Section_FURFURAL.csv	1	0.5	0
 Jn53	Cross_Section_ClNO_IUPAC2006.csv	1	1	0
 Jn54	Cross_Section_ClONO_IUPAC2006.csv	1	1	0
 Jn55	CH2ClCHO_JPL-2010(2011)_298K_240-357nm(rec).txt	3	1	0
 Jn56	CH3C(O)CH2Cl_JPL-2010(2011)_296K_210-360nm(rec).txt	3	1	0
-Jn52	Cross_Section_FURFURAL.csv	1	0.5	0

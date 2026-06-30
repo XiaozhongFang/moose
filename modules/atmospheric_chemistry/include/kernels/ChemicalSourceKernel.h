@@ -37,6 +37,9 @@ private:
   /// Reaction rates R_i
   const MaterialProperty<std::vector<Real>> & _reaction_rates;
 
+  /// ppb→molec/cm³ conversion factor (M/1e9). Residual scaled by 1/factor when ppb.
+  const Real _unit_conversion;
+
   /// Number of coupled species
   const unsigned int _n_species;
 

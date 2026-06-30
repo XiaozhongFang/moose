@@ -182,6 +182,12 @@ MCMBoxModel::validParams()
   params.addParam<unsigned int>("day", 21, "Day of month");
   params.addParam<unsigned int>("month", 6, "Month");
   params.addParam<unsigned int>("year", 2010, "Year");
+  MooseEnum units_enum("molec_cm3 ppb", "molec_cm3");
+  params.addParam<MooseEnum>("units", units_enum,
+      "Concentration units for input/output: 'molec_cm3' (molecules/cm³, default) "
+      "or 'ppb' (parts per billion by volume). When 'ppb', the ChemistryODEKernel "
+      "automatically converts between ppb and molec/cm³ using the air density.");
+
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor");
   MooseEnum stoich_fmt("CSR COO DENSE CSC", "CSR");
   params.addParam<MooseEnum>(
@@ -223,6 +229,8 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     FunctionParserUtils<false>(params),
     _n_species(0), _n_reactions(0),
     _photolysis_method(MCM_SZA),
+    _units_ppb(getParam<MooseEnum>("units") == "ppb"),
+    _ppb_to_molec(1.0),  // default 1.0 (no conversion); set dynamically in evaluateCoefficients
     _lat(getParam<Real>("latitude")),
     _lon(getParam<Real>("longitude")),
     _day((int)getParam<unsigned int>("day")),
@@ -775,6 +783,9 @@ MCMBoxModel::evaluateCoefficients()
     constexpr Real NA_over_R = 6.02214129e23 / 8.3144621;
     M_val = 1.0e-6 * NA_over_R * (_press * 100.0 / _temperature);
   }
+
+  // Update ppb conversion factor from the actual air density used
+  _ppb_to_molec = (_units_ppb) ? M_val / 1.0e9 : 1.0;
 
   // Compute H2O dynamically from rh/temp/press if rh >= 0
   Real H2O_val = _water_vapor;

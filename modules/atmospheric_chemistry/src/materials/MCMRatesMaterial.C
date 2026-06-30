@@ -58,6 +58,11 @@ MCMRatesMaterial::validParams()
   params.addParam<unsigned int>("day", 21, "Day of month for solar zenith angle calculation");
   params.addParam<unsigned int>("month", 6, "Month for solar zenith angle calculation");
   params.addParam<unsigned int>("year", 2010, "Year for solar zenith angle calculation");
+  MooseEnum units_enum("molec_cm3 ppb", "molec_cm3");
+  params.addParam<MooseEnum>("units", units_enum,
+      "Concentration units: 'molec_cm3' (default) or 'ppb'. When 'ppb', species "
+      "concentrations are converted to molec/cm³ before rate computation.");
+
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
   params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
 
@@ -91,6 +96,7 @@ MCMRatesMaterial::MCMRatesMaterial(const InputParameters & params)
     _TEMP(getParam<Real>("temperature")),
     _M(getParam<Real>("air_density")),
     _H2O_val(getParam<Real>("water_vapor")),
+    _ppb_to_molec(getParam<MooseEnum>("units") == "ppb" ? _M / 1.0e9 : 1.0),
     _coeff_names(getParam<std::vector<std::string>>("coefficient_names")),
     _n_coefficients(_coeff_names.size()),
     _n_reactions(getParam<std::vector<std::string>>("reaction_rate_expressions").size()),
@@ -338,6 +344,11 @@ MCMRatesMaterial::computeQpProperties()
   _func_params[2] = 0.21 * _M; // O2 volume fraction
   _func_params[3] = 0.78 * _M; // N2 volume fraction
   _func_params[4] = _H2O_val;
+  // Update ppb→molec/cm³ conversion from the current air density.
+  // For constant T/P this is the same as the constructor value;
+  // for dynamic T/P (future feature) this tracks M changes at each QP.
+  if (_ppb_to_molec != 1.0)
+    _ppb_to_molec = _M / 1.0e9;
 
   // Step 2: Calculate photolysis rates
   // Cache solar parameters for Postprocessor access (MCMSolarPostprocessor)
@@ -389,17 +400,19 @@ MCMRatesMaterial::computeQpProperties()
   }
 
   // Step 3: Update species concentration variables
+  // If units=ppb, convert from ppb to molec/cm³ for rate computation.
   for (unsigned int i = 0; i < _n_species_material; ++i)
-    _func_params[5 + _n_coefficients + i] = (*_species_vals_material[i])[_qp];
+    _func_params[5 + _n_coefficients + i] = (*_species_vals_material[i])[_qp] * _ppb_to_molec;
 
   // RO2 = Σ[peroxy radicals] (lumped species, e.g. RO2 = CH3O2 + ...).
   // Only needed when RO2 is an EXTRA fparser variable (not in species list).
+  // If units=ppb, RO2 sum is in ppb → convert to molec/cm³.
   if (_has_ro2)
   {
     Real ro2_sum = 0.0;
     for (auto idx : _ro2_indices)
       ro2_sum += (*_species_vals[idx])[_qp];
-    _func_params[5 + _n_coefficients + _n_species_material] = ro2_sum;
+    _func_params[5 + _n_coefficients + _n_species_material] = ro2_sum * _ppb_to_molec;
   }
 
   // Copy J values to material property for Postprocessor access

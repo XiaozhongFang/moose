@@ -264,6 +264,11 @@ public:
   Real getJacobianOffDiagonal(unsigned int i, unsigned int j, const std::vector<Real> & C) const;
 
   // -- Query interface --
+  /// Whether the model uses ppb units for input/output (vs molec/cm³)
+  bool unitsPPB() const { return _units_ppb; }
+  /// ppb → molec/cm³ conversion factor
+  Real ppbToMolec() const { return _ppb_to_molec; }
+
   unsigned int nSpecies() const { return _n_species; }
   unsigned int nReactions() const { return _n_reactions; }
   const std::vector<std::string> & speciesNames() const { return _species_names; }
@@ -374,6 +379,11 @@ protected:
   std::unique_ptr<BottomUpJIntegrator> _bottomup_integrator;
   std::vector<unsigned int> _j_reaction_indices;
   std::vector<Real> _j_CL, _j_CMM, _j_CNN;
+
+  /// Units: true = ppb, false = molec/cm³
+  bool _units_ppb;
+  /// ppb → molec/cm³ conversion factor, set during evaluateCoefficients
+  Real _ppb_to_molec;
 
   // -- Solar cycle --
   Real _lat, _lon;
