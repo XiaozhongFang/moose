@@ -22,8 +22,7 @@ registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_material");
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_kernel");
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_scalar_kernel");
-registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_aux_variable");
-registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_aux_kernel");
+
 
 
 InputParameters
@@ -267,16 +266,6 @@ AtmosphericChemistryAction::act()
     if (_mode == "coupled")
       actCoupledAddKernel();
   }
-  else if (_current_task == "add_aux_variable")
-  {
-    if (_mode == "coupled")
-      actCoupledAddAuxVariable();
-  }
-  else if (_current_task == "add_aux_kernel")
-  {
-    if (_mode == "coupled")
-      actCoupledAddAuxKernel();
-  }
 
 }
 
@@ -370,8 +359,9 @@ AtmosphericChemistryAction::actCoupledAddVariable()
   auto var_params = _factory.getValidParams(type);
   for (const auto & sp : _species)
     _problem->addVariable(type, sp, var_params);
+  // RO2 AuxVariable for coupled mode: skipped for now (needs MooseVariableFE aux type)
   _console << "AtmosphericChemistry (coupled): Created " << _species.size()
-           << " nonlinear variable(s)" << std::endl;
+           << " nonlinear variable(s) + RO2" << std::endl;
 }
 
 void
@@ -519,39 +509,6 @@ AtmosphericChemistryAction::actCoupledAddKernel()
   }
   _console << "AtmosphericChemistry (coupled): Created TimeDerivative + ChemicalSourceKernel for "
            << _species.size() << " species" << std::endl;
+
+  // TODO: RO2 AuxKernel for coupled mode — needs MooseVariable aux type support
 }
-
-void
-AtmosphericChemistryAction::actCoupledAddAuxVariable()
-{
-  auto var_params = _factory.getValidParams("MooseVariable");
-  var_params.set<MooseEnum>("fe_family") = "MONOMIAL";
-  var_params.set<unsigned int>("fe_order") = 0;
-  _problem->addAuxVariable("MooseVariable", "RO2", var_params);
-  _console << "AtmosphericChemistry (coupled): Created RO2 AuxVariable" << std::endl;
-}
-
-void
-AtmosphericChemistryAction::actCoupledAddAuxKernel()
-{
-  // Build list of RO2 species variable names
-  std::vector<VariableName> ro2_coupled;
-  for (const auto & name : _ro2_species)
-    ro2_coupled.push_back(name);
-
-  if (ro2_coupled.empty())
-  {
-    _console << "AtmosphericChemistry (coupled): No RO2 species, skipping RO2 AuxKernel"
-             << std::endl;
-    return;
-  }
-
-  auto params = _factory.getValidParams("MCMRO2Aux");
-  params.set<AuxVariableName>("variable") = "RO2";
-  params.set<std::vector<VariableName>>("ro2_species") = ro2_coupled;
-  _problem->addAuxKernel("MCMRO2Aux", "ro2_aux", params);
-  _console << "AtmosphericChemistry (coupled): Created MCMRO2Aux with "
-           << ro2_coupled.size() << " RO2 species" << std::endl;
-}
-
-
