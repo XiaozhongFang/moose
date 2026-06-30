@@ -7,6 +7,22 @@
     design = "CutCellQuadratureUserObject.md"
     # Output verified: "area=0.115790, weights=0.115790, diff=0.000000"
   []
+  [diagonal_cut]
+    type = RunApp
+    input = 'test_diagonal_cut.i'
+    requirement = "CutCellQuadratureUserObject shall handle diagonal interfaces (y=x) including saddle cases"
+    issues = "#0"
+    design = "CutCellQuadratureUserObject.md"
+    # Expected: 10 cut elements, 13 sub-triangles on 4x4 grid
+  []
+  [boundary_tangent]
+    type = RunApp
+    input = 'test_boundary_tangent.i'
+    requirement = "CutCellQuadratureUserObject shall handle interfaces passing through element midlines (phi=0 at nodes)"
+    issues = "#0"
+    design = "CutCellQuadratureUserObject.md"
+    # Expected: 8 cut elements, 8 sub-triangles on 4x4 grid
+  []
   [cut_detection_basic]
     type = RunApp
     input = 'test_cut_detection.i'
