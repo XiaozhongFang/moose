@@ -323,6 +323,11 @@ public:
   void setRoofOpen(bool open) { _roof_open = open; }
   bool isRoofOpen() const { return _roof_open; }
 
+  /** Invalidate BottomUp J-value cache. Call when photolysis-relevant
+   *  parameters (T, P, lamp flux, reaction map) change during a simulation.
+   *  Next evaluateCoefficients() will recompute all J-values. */
+  void invalidatePhotolysisCache() { _bottomup_j_valid = false; }
+
   /**
    * Auto-calculate JFAC from a reference species (e.g., J4=NO2).
    * JFAC = constrained_value / parameterized_value.
@@ -446,6 +451,12 @@ protected:
 
   /// RO2 species indices in the species vector (built from parser's ro2_species)
   std::vector<unsigned int> _ro2_indices;
+
+  /// Cached BottomUp J-values (recomputed only on T/P change)
+  mutable std::map<std::string, Real> _cached_bottomup_j;
+  mutable Real _cached_bottomup_T;
+  mutable Real _cached_bottomup_P;
+  mutable bool _bottomup_j_valid;
 
   // ── Per-parser variable indirection (ParseAndDeduceVariables) ──
   /// _func_params indices each coefficient parser actually references

@@ -247,7 +247,10 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _blheight(getParam<Real>("blheight")),
     _jfac(getParam<Real>("jfac")),
     _t(0.0),
-    _dirty(true)
+    _dirty(true),
+    _cached_bottomup_T(0.0),
+    _cached_bottomup_P(0.0),
+    _bottomup_j_valid(false)
 {
   // Load Hybrid table reader if photolysis scheme is HYBRID
   auto scheme = getParam<MooseEnum>("photolysis_scheme");
@@ -813,18 +816,29 @@ MCMBoxModel::evaluateCoefficients()
   // BOTTOMUP: J = ∫ QY*CS*Flux dλ  (pre-computed by BottomUpJIntegrator)
   if (_photolysis_method == BOTTOMUP && _bottomup_integrator)
   {
+    // BottomUp J-values depend only on T and P (constant for chamber).
+    // Cache to avoid recomputing full numerical integration at every Newton iteration
+    // — matches F0AM behavior where J-values are computed once at startup.
+    const Real T_cur = _temperature;
+    const Real P_cur = _press > 0 ? _press : 1013.25;
+    if (!_bottomup_j_valid ||
+        std::abs(T_cur - _cached_bottomup_T) > 1.0e-6 ||
+        std::abs(P_cur - _cached_bottomup_P) > 1.0e-6)
+    {
+      _cached_bottomup_j = _bottomup_integrator->computeAllJ(T_cur, P_cur);
+      _cached_bottomup_T = T_cur;
+      _cached_bottomup_P = P_cur;
+      _bottomup_j_valid = true;
+    }
     const Real roof_factor = _roof_open ? 1.0 : 0.0;
-    auto allJ = _bottomup_integrator->computeAllJ(_temperature, _press > 0 ? _press : 1013.25);
-    // Iterate over _j_photo_indices (built from mechanism J references),
-    // NOT _j_CL_vals (which is empty for BOTTOMUP — no photolysis file loaded).
     for (size_t i = 0; i < _j_photo_indices.size(); ++i)
     {
       unsigned int idx = _j_photo_indices[i];
       if (idx == (unsigned int)-1) continue;
       unsigned int jn = (_j_numbers.size() > i) ? _j_numbers[i] : (unsigned int)(i + 1);
       std::string jname = "J" + std::to_string(jn);
-      auto it = allJ.find(jname);
-      _func_params[idx] = (it != allJ.end()) ? it->second * _jfac * roof_factor : 0.0;
+      auto it = _cached_bottomup_j.find(jname);
+      _func_params[idx] = (it != _cached_bottomup_j.end()) ? it->second * _jfac * roof_factor : 0.0;
     }
   }
   else if (!_j_CL_vals.empty())
