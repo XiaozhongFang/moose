@@ -72,6 +72,10 @@ protected:
   std::set<dof_id_type> _cut_elements;
   std::map<dof_id_type, ElementType> _element_type_map;
   unsigned int _total_cut_elements = 0;
+  unsigned int _total_sub_elements = 0;
+
+  /// Cached sub-triangles for cut elements (element ID → triangles)
+  std::map<dof_id_type, std::vector<std::vector<libMesh::Point>>> _sub_triangles;
 
   const Function & _level_set_func;
 };
