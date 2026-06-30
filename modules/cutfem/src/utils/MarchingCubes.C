@@ -204,3 +204,106 @@ MarchingCubes2D::triangleGaussQuadrature(
     }
   }
 }
+
+std::vector<std::pair<libMesh::Point, libMesh::Point>>
+MarchingCubes2D::interfaceSegments(const libMesh::Elem * elem,
+                                   const std::vector<libMesh::Real> & phi_nodes)
+{
+  std::vector<std::pair<libMesh::Point, libMesh::Point>> segments;
+
+  if (!elem || elem->n_vertices() != 4 || phi_nodes.size() < 4)
+    return segments;
+
+  // Find edge intersection points
+  struct EdgeInt { unsigned int i, j; libMesh::Point p; bool valid; };
+  EdgeInt eints[4] = {
+    {0, 1, {}, (phi_nodes[0] < 0) != (phi_nodes[1] < 0)},
+    {1, 2, {}, (phi_nodes[1] < 0) != (phi_nodes[2] < 0)},
+    {2, 3, {}, (phi_nodes[2] < 0) != (phi_nodes[3] < 0)},
+    {3, 0, {}, (phi_nodes[3] < 0) != (phi_nodes[0] < 0)},
+  };
+
+  unsigned int n_cut = 0;
+  for (auto & e : eints)
+  {
+    if (e.valid)
+    {
+      e.p = edgeIntersection(elem->point(e.i), elem->point(e.j),
+                             phi_nodes[e.i], phi_nodes[e.j]);
+      n_cut++;
+    }
+  }
+
+  // For a quadrilateral with a sign change, there are either 2 or 4 edge intersections.
+  // 2 intersections → single interface segment
+  // 4 intersections → two interface segments (saddle case)
+  if (n_cut == 2)
+  {
+    libMesh::Point p0, p1;
+    bool first = true;
+    for (const auto & e : eints)
+    {
+      if (e.valid)
+      {
+        if (first) { p0 = e.p; first = false; }
+        else { p1 = e.p; break; }
+      }
+    }
+    segments.push_back({p0, p1});
+  }
+  else if (n_cut == 4)
+  {
+    // Saddle case: connect opposite edge intersections
+    segments.push_back({eints[0].p, eints[2].p});
+    segments.push_back({eints[1].p, eints[3].p});
+  }
+
+  return segments;
+}
+
+void
+MarchingCubes2D::interfaceGaussQuadrature(
+    const std::vector<std::pair<libMesh::Point, libMesh::Point>> & segments,
+    unsigned int order,
+    std::vector<libMesh::Point> & points,
+    std::vector<libMesh::Real> & weights)
+{
+  points.clear();
+  weights.clear();
+
+  // 1D Gauss quadrature on reference interval [-1, 1]
+  struct Gauss1D { libMesh::Real xi, w; };
+  std::vector<Gauss1D> ref;
+
+  switch (order)
+  {
+    case 1: ref = {{0.0, 2.0}}; break;
+    case 2: ref = {{-0.577350269189626, 1.0}, {0.577350269189626, 1.0}}; break;
+    case 3: ref = {{-0.774596669241483, 0.555555555555556},
+                   {0.0, 0.888888888888889},
+                   {0.774596669241483, 0.555555555555556}}; break;
+    case 4: ref = {{-0.861136311594053, 0.347854845137454},
+                   {-0.339981043584856, 0.652145154862546},
+                   {0.339981043584856, 0.652145154862546},
+                   {0.861136311594053, 0.347854845137454}}; break;
+    default: ref = {{0.0, 2.0}}; break;
+  }
+
+  for (const auto & seg : segments)
+  {
+    const auto & p0 = seg.first;
+    const auto & p1 = seg.second;
+    libMesh::Point mid = (p0 + p1) * 0.5;
+    libMesh::Point half_len_vec = (p1 - p0) * 0.5;
+    libMesh::Real half_len = std::sqrt(half_len_vec(0)*half_len_vec(0) +
+                                       half_len_vec(1)*half_len_vec(1));
+
+    for (const auto & r : ref)
+    {
+      libMesh::Point p(mid(0) + r.xi * half_len_vec(0),
+                       mid(1) + r.xi * half_len_vec(1), 0.0);
+      points.push_back(p);
+      weights.push_back(r.w * half_len);
+    }
+  }
+}

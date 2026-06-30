@@ -55,6 +55,33 @@ public:
                           std::vector<libMesh::Point> & points,
                           std::vector<libMesh::Real> & weights);
 
+  /**
+   * Get the interface segments (line segments on φ=0) within a cut element.
+   * For a quadrilateral, the interface is the segment(s) connecting edge intersections.
+   *
+   * @param elem       The element
+   * @param phi_nodes  Level set values at vertices
+   * @return           List of interface segments, each = {p_start, p_end}
+   */
+  static std::vector<std::pair<libMesh::Point, libMesh::Point>>
+  interfaceSegments(const libMesh::Elem * elem,
+                    const std::vector<libMesh::Real> & phi_nodes);
+
+  /**
+   * Generate 1D Gauss quadrature along interface segments.
+   *
+   * @param segments   Interface segments from interfaceSegments()
+   * @param order      1D Gauss quadrature order (1-4)
+   * @param points     Output: quadrature points in physical coordinates
+   * @param weights    Output: quadrature weights (includes segment length Jacobian)
+   */
+  static void
+  interfaceGaussQuadrature(
+      const std::vector<std::pair<libMesh::Point, libMesh::Point>> & segments,
+      unsigned int order,
+      std::vector<libMesh::Point> & points,
+      std::vector<libMesh::Real> & weights);
+
 private:
   static libMesh::Point
   edgeIntersection(const libMesh::Point & va, const libMesh::Point & vb,

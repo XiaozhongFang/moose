@@ -1,0 +1,9 @@
+[Tests]
+  [laplace_beltrami_basic]
+    type = RunApp
+    input = "test_laplace_beltrami.i"
+    requirement = "SurfacePDEKernel shall solve Laplace-Beltrami on an interface and converge"
+    issues = "#0"
+    design = "SurfacePDEKernel.md"
+  []
+[]
