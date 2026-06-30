@@ -65,16 +65,27 @@ GhostPenaltyKernel::computeQpResidual(Moose::DGResidualType type)
   // Jump of normal gradient: [u_n] = u_n^+ - u_n^-
   Real u_jump = u_grad_n_element - u_grad_n_neighbor;
 
-  // Compute normal component of test function gradient
-  Real test_grad_n = _grad_test[_i][_qp] * _normals[_qp];
-
   // Compute penalty coefficient
   Real penalty = computePenaltyCoeff();
 
-  // Residual: penalty * [u_n] * [v_n] * JxW
-  Real r = penalty * u_jump * test_grad_n * _JxW[_qp];
-
-  return r;
+  // Residual: sign * penalty * [u_n] * (test_gradient·n) * JxW
+  // Element side: positive sign, using element test function
+  // Neighbor side: negative sign (normal flips), using neighbor test function
+  switch (type)
+  {
+    case Moose::Element:
+    {
+      Real test_grad_n = _grad_test[_i][_qp] * _normals[_qp];
+      return penalty * u_jump * test_grad_n * _JxW[_qp];
+    }
+    case Moose::Neighbor:
+    {
+      Real test_grad_n = _grad_test_neighbor[_i][_qp] * _normals[_qp];
+      return -penalty * u_jump * test_grad_n * _JxW[_qp];
+    }
+    default:
+      mooseError("Unknown DGResidualType in GhostPenaltyKernel");
+  }
 }
 
 Real

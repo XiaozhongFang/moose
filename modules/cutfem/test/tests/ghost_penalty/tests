@@ -6,4 +6,18 @@
     issues = "#0"
     design = "GhostPenaltyKernel.md"
   []
+  [no_gp_basic]
+    type = RunApp
+    input = 'test_no_gp.i'
+    requirement = "The diffusion problem shall also run without Ghost Penalty for baseline comparison"
+    issues = "#0"
+    design = "GhostPenaltyKernel.md"
+  []
+  [gp_fine]
+    type = RunApp
+    input = 'test_gp_fine.i'
+    requirement = "Ghost Penalty kernel shall run on a finer 20x20 mesh"
+    issues = "#0"
+    design = "GhostPenaltyKernel.md"
+  []
 []
