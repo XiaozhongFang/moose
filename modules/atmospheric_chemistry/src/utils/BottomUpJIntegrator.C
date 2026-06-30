@@ -219,6 +219,7 @@ BottomUpJIntegrator::computeJ(const std::string & jname, Real T, Real P) const
 
   // ── Smear CS and QY onto flux grid ──
   std::vector<Real> CS_out(N, 0.0), QY_out(N, 0.0);
+
   for (unsigned int i = 0; i < N; ++i)
   {
     Real wll = _wllim[i];
@@ -371,10 +372,12 @@ cs_interp_T(const std::string & path, Real T, Real T1, Real T2)
     for (auto & c : line) if (c == ',') c = ' ';
     std::istringstream iss(line);
     Real w, v1, v2;
-    if (iss >> w >> v1 >> v2)
-      { wl.push_back(w); cs.push_back(v1 + frac * (v2 - v1)); }
-    else
-      { iss.clear(); Real w2, v; if (iss >> w2 >> v) { wl.push_back(w2); cs.push_back(v); } }
+    std::vector<Real> vals;
+    { Real val; while (iss >> val) vals.push_back(val); }
+    if (vals.size() >= 3)
+      { wl.push_back(vals[0]); cs.push_back(vals[1] + frac * (vals[2] - vals[1])); }
+    else if (vals.size() >= 2)
+      { wl.push_back(vals[0]); cs.push_back(vals[1]); }
   }
   return {wl, cs};
 }
