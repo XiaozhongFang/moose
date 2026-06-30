@@ -359,7 +359,13 @@ AtmosphericChemistryAction::actCoupledAddVariable()
   auto var_params = _factory.getValidParams(type);
   for (const auto & sp : _species)
     _problem->addVariable(type, sp, var_params);
-  // RO2 AuxVariable for coupled mode: skipped for now (needs MooseVariableFE aux type)
+  // RO2 AuxVariable: constant monomial
+  {
+    auto aux_params = _factory.getValidParams("MooseVariable");
+    aux_params.set<MooseEnum>("family") = MooseEnum("LAGRANGE MONOMIAL", "MONOMIAL");
+    aux_params.set<MooseEnum>("order") = MooseEnum("FIRST SECOND THIRD FOURTH CONSTANT", "CONSTANT");
+    _problem->addAuxVariable("MooseVariable", "RO2", aux_params);
+  }
   _console << "AtmosphericChemistry (coupled): Created " << _species.size()
            << " nonlinear variable(s) + RO2" << std::endl;
 }
@@ -510,5 +516,14 @@ AtmosphericChemistryAction::actCoupledAddKernel()
   _console << "AtmosphericChemistry (coupled): Created TimeDerivative + ChemicalSourceKernel for "
            << _species.size() << " species" << std::endl;
 
-  // TODO: RO2 AuxKernel for coupled mode — needs MooseVariable aux type support
+  // RO2 AuxKernel: sum of peroxy radical species (coupled mode diagnostic)
+  if (!_ro2_species.empty())
+  {
+    std::vector<VariableName> ro2_coupled(_ro2_species.begin(), _ro2_species.end());
+    auto ro2_params = _factory.getValidParams("MCMRO2Aux");
+    ro2_params.set<AuxVariableName>("variable") = "RO2";
+    ro2_params.set<std::vector<VariableName>>("ro2_species") = ro2_coupled;
+    _problem->addAuxKernel("MCMRO2Aux", "ro2_aux", ro2_params);
+    _console << "  Added RO2 AuxKernel (" << ro2_coupled.size() << " RO2 species)" << std::endl;
+  }
 }
