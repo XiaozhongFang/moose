@@ -1,4 +1,12 @@
 [Tests]
+  [quadrature_accuracy]
+    type = RunApp
+    input = 'test_cut_detection.i'
+    requirement = "Cut cell quadrature weight sum shall equal sub-triangle area (exact for constant functions)"
+    issues = "#0"
+    design = "CutCellQuadratureUserObject.md"
+    # Output verified: "area=0.115790, weights=0.115790, diff=0.000000"
+  []
   [cut_detection_basic]
     type = RunApp
     input = 'test_cut_detection.i'

@@ -92,19 +92,12 @@ CutCellQuadratureUserObject::execute()
         _sub_triangles[elem->id()] = triangles;
         _total_sub_elements += triangles.size();
 
-        // Cache the triangle vertices as quadrature points (1 per sub-triangle centroid)
+        // Generate Gauss quadrature points on sub-triangles
         std::vector<Point> qpts;
-        for (const auto & tri : triangles)
-        {
-          Point centroid;
-          for (const auto & p : tri)
-            centroid += p;
-          centroid *= (1.0 / tri.size());
-          qpts.push_back(centroid);
-        }
+        std::vector<Real> qwts;
+        MarchingCubes2D::triangleGaussQuadrature(triangles, _quad_order, qpts, qwts);
         _quad_points_map[elem->id()] = qpts;
-        _quad_weights_map[elem->id()] =
-            std::vector<Real>(qpts.size(), 1.0 / qpts.size());
+        _quad_weights_map[elem->id()] = qwts;
       }
     }
     else
@@ -140,18 +133,26 @@ CutCellQuadratureUserObject::finalize()
   for (auto id : _cut_elements)
     ids += std::to_string(id) + " ";
 
-  // Compute total sub-element area (for area conservation verification)
+  // Verify quadrature: weight sum should equal total sub-triangle area
+  Real total_weight_sum = 0.0;
   Real total_sub_area = 0.0;
   for (const auto & pair : _sub_triangles)
+  {
     total_sub_area += MarchingCubes2D::totalArea(pair.second);
+    auto w_it = _quad_weights_map.find(pair.first);
+    if (w_it != _quad_weights_map.end())
+      for (auto w : w_it->second)
+        total_weight_sum += w;
+  }
+  Real area_diff = std::abs(total_weight_sum - total_sub_area);
 
   mooseInfo("CutCellQuadratureUserObject: " +
-            std::to_string(_total_cut_elements) + " cut elements, " +
-            std::to_string(_total_sub_elements) + " sub-triangles" +
-            (ids.empty() ? "" : " (IDs: " + ids + ")"));
-  if (!_sub_triangles.empty())
-    mooseInfo("  Sub-triangle count: " + std::to_string(_sub_triangles.size()) +
-              " elements, " + std::to_string(_total_sub_elements) + " total triangles");
+            std::to_string(_total_cut_elements) + " cut, " +
+            std::to_string(_total_sub_elements) + " tris, " +
+            "area=" + std::to_string(total_sub_area) + ", " +
+            "weights=" + std::to_string(total_weight_sum) + ", " +
+            "diff=" + std::to_string(area_diff) +
+            (ids.empty() ? "" : " IDs: " + ids));
 }
 
 bool

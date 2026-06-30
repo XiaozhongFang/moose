@@ -41,6 +41,20 @@ public:
   static libMesh::Real
   totalArea(const std::vector<std::vector<libMesh::Point>> & triangles);
 
+  /**
+   * Generate Gauss quadrature points and weights for a set of sub-triangles.
+   *
+   * @param triangles  Sub-triangles from triangulateCutElement
+   * @param order      Gauss quadrature order (1-4)
+   * @param points     Output: quadrature points in physical coordinates
+   * @param weights    Output: quadrature weights
+   */
+  static void
+  triangleGaussQuadrature(const std::vector<std::vector<libMesh::Point>> & triangles,
+                          unsigned int order,
+                          std::vector<libMesh::Point> & points,
+                          std::vector<libMesh::Real> & weights);
+
 private:
   static libMesh::Point
   edgeIntersection(const libMesh::Point & va, const libMesh::Point & vb,

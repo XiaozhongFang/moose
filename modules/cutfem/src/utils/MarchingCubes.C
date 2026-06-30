@@ -131,3 +131,76 @@ MarchingCubes2D::triangulateCutElement(
 
   return triangles;
 }
+
+void
+MarchingCubes2D::triangleGaussQuadrature(
+    const std::vector<std::vector<libMesh::Point>> & triangles,
+    unsigned int order,
+    std::vector<libMesh::Point> & points,
+    std::vector<libMesh::Real> & weights)
+{
+  points.clear();
+  weights.clear();
+
+  // Barycentric coordinates and weights for triangle Gauss quadrature.
+  // Format: each entry is {ξ1, ξ2, ξ3, w_barycentric}
+  // Physical point = ξ1*a + ξ2*b + ξ3*c, weight = area * w_barycentric
+  struct BaryPoint { libMesh::Real xi1, xi2, xi3, w; };
+
+  std::vector<BaryPoint> ref_pts;
+
+  switch (order)
+  {
+    case 1:
+      ref_pts = {{1.0/3.0, 1.0/3.0, 1.0/3.0, 1.0}};
+      break;
+    case 2:
+      ref_pts = {{0.5, 0.5, 0.0, 1.0/3.0},
+                 {0.5, 0.0, 0.5, 1.0/3.0},
+                 {0.0, 0.5, 0.5, 1.0/3.0}};
+      break;
+    case 3:
+      ref_pts = {{1.0/3.0, 1.0/3.0, 1.0/3.0, -27.0/48.0},
+                 {0.6, 0.2, 0.2, 25.0/48.0},
+                 {0.2, 0.6, 0.2, 25.0/48.0},
+                 {0.2, 0.2, 0.6, 25.0/48.0}};
+      break;
+    case 4:
+      ref_pts = {{0.816847572980459, 0.091576213509771, 0.091576213509771, 0.109951743655322},
+                 {0.091576213509771, 0.816847572980459, 0.091576213509771, 0.109951743655322},
+                 {0.091576213509771, 0.091576213509771, 0.816847572980459, 0.109951743655322},
+                 {0.108103018168070, 0.445948490915965, 0.445948490915965, 0.223381589678011},
+                 {0.445948490915965, 0.108103018168070, 0.445948490915965, 0.223381589678011},
+                 {0.445948490915965, 0.445948490915965, 0.108103018168070, 0.223381589678011}};
+      break;
+    default:
+      // Fall back to order 1
+      ref_pts = {{1.0/3.0, 1.0/3.0, 1.0/3.0, 1.0}};
+      break;
+  }
+
+  for (const auto & tri : triangles)
+  {
+    if (tri.size() < 3)
+      continue;
+
+    const auto & a = tri[0];
+    const auto & b = tri[1];
+    const auto & c = tri[2];
+
+    // Compute triangle area: 0.5 * |(b-a) × (c-a)|
+    libMesh::Real v1x = b(0) - a(0), v1y = b(1) - a(1);
+    libMesh::Real v2x = c(0) - a(0), v2y = c(1) - a(1);
+    libMesh::Real area = 0.5 * std::abs(v1x * v2y - v1y * v2x);
+
+    for (const auto & rp : ref_pts)
+    {
+      // Physical point = ξ1*a + ξ2*b + ξ3*c
+      libMesh::Point p(rp.xi1 * a(0) + rp.xi2 * b(0) + rp.xi3 * c(0),
+                       rp.xi1 * a(1) + rp.xi2 * b(1) + rp.xi3 * c(1),
+                       0.0);
+      points.push_back(p);
+      weights.push_back(area * rp.w);
+    }
+  }
+}
