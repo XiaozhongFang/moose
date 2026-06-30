@@ -60,6 +60,13 @@ public:
   /// Compute J-value for one reaction at given T, P
   Real computeJ(const std::string & jname, Real T, Real P) const;
 
+  /// Register a built-in cross-section formula (cs_type=10)
+  void addBuiltinCS(const std::string & jname, const std::string & species,
+                    const std::string & qy_file, int qy_type);
+  /// Register a built-in quantum yield formula (qy_type=10)
+  void addBuiltinQY(const std::string & jname, const std::string & cs_file, int cs_type,
+                    const std::string & species);
+
   /// Compute all registered J-values
   std::map<std::string, Real> computeAllJ(Real T, Real P) const;
 
@@ -82,6 +89,16 @@ private:
 
   /// Trapezoidal integration
   static Real trapz(const std::vector<Real> & x, const std::vector<Real> & y);
+
+  /// Built-in cross-section computation (called when cs_type==10)
+  std::pair<std::vector<Real>, std::vector<Real>> computeCS_builtin(
+      const std::string & species, Real T, Real P) const;
+  /// Built-in quantum yield computation (called when qy_type==10)
+  std::pair<std::vector<Real>, std::vector<Real>> computeQY_builtin(
+      const std::string & species, Real T, Real P) const;
+  /// 3-column CSV with explicit T1/T2 (for QY data without precomputed headers)
+  std::pair<std::vector<Real>, std::vector<Real>> loadCSV3_for_QY(
+      const std::string & path, Real T, Real T1, Real T2) const;
 
   std::string _data_dir;
 
