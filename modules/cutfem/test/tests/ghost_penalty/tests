@@ -1,0 +1,9 @@
+[Tests]
+  [gp_basic]
+    type = RunApp
+    input = 'test_gp.i'
+    requirement = "CutFEM Ghost Penalty kernel shall be constructable and run on a simple diffusion problem"
+    issues = "#0"
+    design = "GhostPenaltyKernel.md"
+  []
+[]

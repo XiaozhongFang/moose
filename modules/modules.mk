@@ -25,6 +25,7 @@ ifeq ($(ALL_MODULES),yes)
         GEOCHEMISTRY                := yes
         HEAT_TRANSFER               := yes
         LEVEL_SET                   := yes
+        CUTFEM                      := yes
         MISC                        := yes
         NAVIER_STOKES               := yes
         OPTIMIZATION                := yes
@@ -136,7 +137,7 @@ ifeq ($(SOLID_MECHANICS),yes)
 endif
 
 # The complete list of all moose modules
-MODULE_NAMES := "chemical_reactions contact electromagnetics external_petsc_solver fluid_properties fsi functional_expansion_tools geochemistry heat_transfer level_set misc navier_stokes optimization peridynamics phase_field porous_flow ray_tracing rdg reactor scalar_transport shifted_boundary_method solid_properties stochastic_tools solid_mechanics thermal_hydraulics xfem"
+MODULE_NAMES := "chemical_reactions contact cutfem electromagnetics external_petsc_solver fluid_properties fsi functional_expansion_tools geochemistry heat_transfer level_set misc navier_stokes optimization peridynamics phase_field porous_flow ray_tracing rdg reactor scalar_transport shifted_boundary_method solid_properties stochastic_tools solid_mechanics thermal_hydraulics xfem"
 
 ################################################################################
 ########################## MODULE REGISTRATION #################################
@@ -189,6 +190,13 @@ ifeq ($(LEVEL_SET),yes)
   APPLICATION_DIR    := $(MOOSE_DIR)/modules/level_set
   APPLICATION_NAME   := level_set
   SUFFIX             := ls
+  include $(FRAMEWORK_DIR)/app.mk
+endif
+
+ifeq ($(CUTFEM),yes)
+  APPLICATION_DIR    := $(MOOSE_DIR)/modules/cutfem
+  APPLICATION_NAME   := cutfem
+  SUFFIX             := cf
   include $(FRAMEWORK_DIR)/app.mk
 endif
 

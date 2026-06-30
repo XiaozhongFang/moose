@@ -1,0 +1,52 @@
+# CutFEM Module .gitignore
+
+# Build outputs
+*.o
+*.so
+*.a
+*.dylib
+*.dll
+
+# MOOSE build artifacts
+/modules/cutfem/src
+/modules/cutfem/lib
+/modules/cutfem/bin
+*.make
+
+# Test outputs
+test_outputs/
+*_out.e
+*_out.csv
+*_out.dat
+gold/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CMake / Build system
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Documentation
+doc/_build/
+doc/.doctrees/
+
+# Log files
+*.log
+*.txt.log
+
+# Object files
+*.o
