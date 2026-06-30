@@ -1,223 +1,97 @@
-# CutFEM Module Directory Structure
+# CutFEM Module File Structure
 
-This document describes the MOOSE-compliant directory structure for the CutFEM module.
+Current file layout for the CutFEM module under `modules/cutfem/`.
 
-## Standard MOOSE Module Layout
+## Source Files
 
 ```
-modules/cutfem/
-├── doc/
-│   └── content/                          # Documentation (Markdown)
-│       ├── index.md                      # Main documentation page
-│       ├── overview.md                   # Project overview & theory
-│       ├── implementation.md             # Implementation details
-│       └── workflow.md                   # Development workflow
-│
-├── include/                              # Header files
-│   ├── base/                             # Base/application headers
-│   │   └── CutFEMApp.h                   # Main application header
-│   │
-│   ├── kernels/                          # Kernel headers
-│   │   └── GhostPenaltyKernel.h
-│   │
-│   ├── userobjects/                      # UserObject headers
-│   │   └── CutCellQuadratureUserObject.h
-│   │
-│   └── utils/                            # Utility class headers
-│       ├── MarchingCubes.h
-│       └── CutGeometry.h
-│
-├── src/base/                             # Base/application implementations
-│   │   └── CutFEMApp.C                   # Main application
-│   │
-│   ├── kernels/                          # Kernel implementations
-│   │   ├── GhostPenaltyKernel.C
-│   │   └── (CutFEMInterfaceKernel.C)
-│   │
-│   ├── userobjects/                      # UserObject implementations
-│   │   └── CutCellQuadratureUserObject.C
-│   │
-│   └── utils/                            # Utility implementations
-│       ├── MarchingCubes.C
-│       └── CutGeometry.C
-│   └── CutFEMApp.C                       # Main application
-│
-├── test/
-│   └── tests/                            # Test specification directory
-│       ├── ghost_penalty/                # Phase 1 tests
-│       │   ├── test_gp.i                 # Main test input file
-│       │   ├── test_gp_gold/             # Gold standard output
-│       │   │   └── test_gp_out.e         # Exodus gold file
-│       │   └── tests.txt                 # Test specification
-│       │
-│       ├── cut_cells/                    # Phase 2 tests (future)
-│       │   ├── test_cc.i
-│       │   └── tests.txt
-│       │
-│       └── surface_pde/                  # Phase 3 tests (future)
-│           ├── test_sp.i
-│           └── tests.txt
-│
-├── examples/
-│   ├── poisson_with_ghost_penalty.i      # Phase 1 example
-│   ├── circular_interface.i              # Phase 2 example (future)
-│   └── evolving_interface.i              # Phase 3 example (future)
-│
-├── README.md                             # Project readme
-├── Makefile                              # Build configuration
-├── .gitignore                            # Git ignore rules
-├── .clang-format                         # Code formatting rules
-│
-└── IMPLEMENTATION_STRATEGY.md            # Detailed technical strategy
-    (root level - reference document)
+include/
+├── base/
+│   └── CutFEMApp.h
+├── kernels/
+│   ├── GhostPenaltyKernel.h              # Phase 1: gradient jump penalty
+│   ├── SurfacePDEKernel.h                # Phase 3: Laplace-Beltrami
+│   ├── SurfaceStabilizationKernel.h       # Phase 3: mixed stabilization
+│   ├── CutFEMDiffusion.h                 # Cut cell diffusion solve
+│   └── CutFEMCombinedKernel.h            # Diffusion + source combined
+├── userobjects/
+│   └── CutCellQuadratureUserObject.h     # Phase 2: cut detection + cache
+└── utils/
+    └── MarchingCubes.h                   # Phase 2: 2D MC + Gauss quadrature
+
+src/
+├── main.C                                # Entry: Moose::main<CutFEMTestApp>
+├── base/CutFEMApp.C
+├── kernels/
+│   ├── GhostPenaltyKernel.C
+│   ├── SurfacePDEKernel.C
+│   ├── SurfaceStabilizationKernel.C
+│   ├── CutFEMDiffusion.C
+│   └── CutFEMCombinedKernel.C
+├── userobjects/CutCellQuadratureUserObject.C
+└── utils/MarchingCubes.C
 ```
 
-## File Naming Conventions
+## Test Files
 
-### Header Files (.h)
-- Location: `include/`
-- Pattern: `include/category/ClassName.h`
-- Example: `include/kernels/GhostPenaltyKernel.h`
-
-### Source Files (.C)
-- Location: `src/`
-- Pattern: `src/category/ClassName.C`
-- Must match header file structure
-- Example: `src/kernels/GhostPenaltyKernel.C`
-
-### Test Input Files (.i)
-- Location: `test/tests/category/`
-- Pattern: `test_category.i` or `test_specific_feature.i`
-- Example: `test/tests/ghost_penalty/test_gp.i`
-
-### Test Specification Files
-- Location: `test/tests/category/`
-- Name: `tests.txt`
-- Defines which tests to run and their parameters
-
-### Documentation Files (.md)
-- Location: `doc/content/`
-- Standard names:
-  - `index.md` - Main page
-  - `overview.md` - Project overview
-  - `implementation.md` - Implementation guide
-  - `workflow.md` - Development workflow
-
-### Configuration Files
-- `.gitignore` - Git ignore patterns
-- `.clang-format` - Code formatting rules
-- `Makefile` - Build system
-- `README.md` - Project readme
-
-## Directory Organization Principles
-
-### By Category
-Files are grouped by **type/category** rather than **phase**:
-- `kernels/` contains all kernel-related code
-- `userobjects/` contains all user object code
-- `utils/` contains utility functions
-
-### Separation of Concerns
-- **Headers** go in `include/`
-- **Implementations** go in `src/`
-- **Tests** go in `test/tests/`
-- **Documentation** goes in `doc/content/`
-- **Examples** go in `examples/`
-
-### Nested Symmetry
-The directory structure in `src/` **mirrors** that in `include/`:
 ```
-include/kernels/GhostPenaltyKernel.h    ← Header
-src/kernels/GhostPenaltyKernel.C        ← Implementation
+test/
+├── include/base/CutFEMTestApp.h
+├── src/base/CutFEMTestApp.C
+└── tests/
+    ├── ghost_penalty/                     # Phase 1 validation
+    │   ├── test_gp.i / test_no_gp.i
+    │   ├── test_gp_fine.i / test_no_gp_fine.i
+    │   ├── test_convergence.i
+    │   └── tests
+    ├── cut_cells/                         # Phase 2 validation
+    │   ├── test_cut_detection.i
+    │   ├── test_quadrature.i
+    │   ├── test_diagonal_cut.i
+    │   ├── test_boundary_tangent.i
+    │   ├── test_combined_kernel.i
+    │   └── tests
+    └── surface_pde/                       # Phase 3 validation
+        ├── test_laplace_beltrami.i
+        ├── test_hj_evolution.i
+        └── tests
 ```
 
-## Phases vs. File Organization
+## Documentation
 
-**Important**: Phases (1, 2, 3) do **NOT** create separate directory structures.
-
-Instead:
-- All Phase 1 files are in `include/kernels/`, `src/kernels/`, etc.
-- All Phase 2 files are in `include/userobjects/`, `src/userobjects/`, etc.
-- Files are organized by **functionality** not by **phase**
-
-Exception:
-- **Tests** can have phase-specific subdirectories:
-  - `test/tests/ghost_penalty/` (Phase 1)
-  - `test/tests/cut_cells/` (Phase 2)
-  - `test/tests/surface_pde/` (Phase 3)
-
-## Building and Testing
-
-### Compile
-```bash
-cd modules/cutfem
-make -j4 METHOD=opt
+```
+doc/content/
+├── index.md                              # Main module documentation
+├── overview.md                           # Project overview
+├── implementation.md                     # Implementation guide
+├── workflow.md                           # Development workflow
+└── source/kernels/
+    └── GhostPenaltyKernel.md             # GP kernel reference
 ```
 
-### Test Single Category
-```bash
-cd test/tests/ghost_penalty
-../../../moose_test-opt
+## Configuration
+
+```
+Makefile                                   # MODULE_NAME := cutfem
+.clang-format                              # LLVM style, column 100
+.gitignore
 ```
 
-### Test All
-```bash
-cd modules/cutfem
-make test
+## Examples
+
+```
+examples/
+└── poisson_with_ghost_penalty.i           # CutFEM demo
 ```
 
-### Format Code
-```bash
-make format
-```
+## Implementation Status
 
-## Adding New Files
-
-When adding new functionality:
-
-1. **Create header** in appropriate `include/` subdirectory
-2. **Create source** in corresponding `src/` subdirectory
-3. **Update** `include/CutFEMApp.h` to register the class
-4. **Update** `Makefile` if new subdirectory was created
-5. **Add tests** in `test/tests/` subdirectory
-6. **Format code** with `make format`
-
-## File Descriptions
-
-### Base Application
-
-| File | Type | Status | Purpose |
-|------|------|--------|---------|
-| `include/base/CutFEMApp.h` | Header | ✅ Complete | Application class declaration |
-| `src/base/CutFEMApp.C` | Source | ✅ Complete | Application initialization & registration |
-
-### Phase 1: Ghost Penalty (Current)
-
-| File | Type | Status | Purpose |
-|------|------|--------|---------|
-| `GhostPenaltyKernel.h` | Header | ✅ Complete | Face-based penalty kernel |
-| `GhostPenaltyKernel.C` | Source | 📝 To-do | Kernel implementation |
-| `test_gp.i` | Input | ✅ Complete | Ghost Penalty test |
-| `poisson_with_ghost_penalty.i` | Example | ✅ Complete | Usage example |
-
-### Phase 2: Cut Cell Quadrature (Future)
-
-| File | Type | Status | Purpose |
-|------|------|--------|---------|
-| `CutCellQuadratureUserObject.h` | Header | ✅ Complete | Dynamic quadrature |
-| `CutCellQuadratureUserObject.C` | Source | 📝 To-do | Implementation |
-| `MarchingCubes.h` | Header | 🔳 Stub | Marching Cubes algorithm |
-| `MarchingCubes.C` | Source | 🔳 Stub | Algorithm implementation |
-
-### Phase 3: Surface PDE (Future)
-
-| File | Type | Status | Purpose |
-|------|------|--------|---------|
-| `SurfacePDEKernel.h` | Header | 🔳 Stub | Surface PDE kernel |
-| `SurfacePDEKernel.C` | Source | 🔳 Stub | Implementation |
-
-## References
-
-- **MOOSE Module Naming**: https://mooseframework.inl.gov/modules/
-- **Code Organization**: https://mooseframework.inl.gov/syntax/
-- **Build System**: https://mooseframework.inl.gov/help/development/
+| Component | Phase | Status |
+|-----------|-------|--------|
+| GhostPenaltyKernel | 1 | ✅ Complete, documented |
+| CutCellQuadratureUserObject | 2 | ✅ Complete (cut detection + cache) |
+| MarchingCubes2D | 2 | ✅ Complete (16-case + Gauss quad) |
+| SurfacePDEKernel | 3 | ✅ Complete (tangential projection) |
+| SurfaceStabilizationKernel | 3 | ✅ Complete (mixed stabilization) |
+| CutFEMDiffusion | — | ✅ Complete (reinitAtPhysical solve) |
+| CutFEMCombinedKernel | — | ✅ Complete (combined terms) |

@@ -110,22 +110,27 @@ GhostPenaltyKernel::computeQpJacobian(Moose::DGJacobianType type)
 
     case Moose::ElementNeighbor:
     {
-      Real test_grad_n = _grad_test[_i][_qp] * _normals[_qp];
-      jac = -penalty * phi_grad_n * test_grad_n * _JxW[_qp];
+      // ∂r⁺/∂u⁻ = -penalty * (∇φ⁻·n) * (∇ψ⁺·n)
+      Real phi_n = _grad_phi_neighbor[_j][_qp] * _normals[_qp];
+      Real test_n = _grad_test[_i][_qp] * _normals[_qp];
+      jac = -penalty * phi_n * test_n * _JxW[_qp];
       break;
     }
 
     case Moose::NeighborElement:
     {
+      // ∂r⁻/∂u⁺ = -penalty * (∇φ⁺·n) * (∇ψ⁻·n)
       Real test_neighbor_grad_n = _grad_test_neighbor[_i][_qp] * _normals[_qp];
-      jac = penalty * phi_grad_n * test_neighbor_grad_n * _JxW[_qp];
+      jac = -penalty * phi_grad_n * test_neighbor_grad_n * _JxW[_qp];
       break;
     }
 
     case Moose::NeighborNeighbor:
     {
-      Real test_neighbor_grad_n = _grad_test_neighbor[_i][_qp] * _normals[_qp];
-      jac = -penalty * phi_grad_n * test_neighbor_grad_n * _JxW[_qp];
+      // ∂r⁻/∂u⁻ = +penalty * (∇φ⁻·n) * (∇ψ⁻·n)
+      Real phi_n = _grad_phi_neighbor[_j][_qp] * _normals[_qp];
+      Real test_n = _grad_test_neighbor[_i][_qp] * _normals[_qp];
+      jac = penalty * phi_n * test_n * _JxW[_qp];
       break;
     }
 

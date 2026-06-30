@@ -55,7 +55,7 @@
     type = CutCellQuadratureUserObject
     level_set_function = level_set_func
     quadrature_order = 4
-    level_set_tolerance = 0.01
+    level_set_tolerance = 1e-12
     execute_on = 'INITIAL'
   []
 []

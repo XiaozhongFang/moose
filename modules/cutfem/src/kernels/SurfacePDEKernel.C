@@ -61,6 +61,7 @@ SurfacePDEKernel::computeQpJacobian(Moose::DGJacobianType type)
   {
     case Moose::ElementElement:
     {
+      // ∂r^E/∂u^E: element residual depends on element u
       Real phi_grad_dot_n = _grad_phi[_j][_qp] * _normals[_qp];
       RealVectorValue grad_phi_tang = _grad_phi[_j][_qp] - phi_grad_dot_n * _normals[_qp];
 
@@ -71,20 +72,14 @@ SurfacePDEKernel::computeQpJacobian(Moose::DGJacobianType type)
     }
     case Moose::ElementNeighbor:
     {
-      Real phi_grad_dot_n = _grad_phi[_j][_qp] * _normals[_qp];
-      RealVectorValue grad_phi_tang = _grad_phi[_j][_qp] - phi_grad_dot_n * _normals[_qp];
-
-      // Neighbor test function uses the same n (tangential projection is sign-independent)
-      Real test_grad_dot_n = _grad_test[_i][_qp] * _normals[_qp];
-      RealVectorValue grad_test_tang = _grad_test[_i][_qp] - test_grad_dot_n * _normals[_qp];
-
-      return (grad_phi_tang * grad_test_tang) * _JxW[_qp];
+      // ∂r^E/∂u^N = 0: element residual depends only on element-side u
+      return 0.0;
     }
     case Moose::NeighborElement:
     {
-      Real phi_grad_dot_n = _grad_phi_neighbor[_j][_qp] * _normals[_qp];
-      RealVectorValue grad_phi_tang = _grad_phi_neighbor[_j][_qp] -
-                                      phi_grad_dot_n * _normals[_qp];
+      // ∂r^N/∂u^E: neighbor residual depends on element-side u (shared variable)
+      Real phi_grad_dot_n = _grad_phi[_j][_qp] * _normals[_qp];
+      RealVectorValue grad_phi_tang = _grad_phi[_j][_qp] - phi_grad_dot_n * _normals[_qp];
 
       Real test_grad_dot_n = _grad_test_neighbor[_i][_qp] * _normals[_qp];
       RealVectorValue grad_test_tang = _grad_test_neighbor[_i][_qp] -
@@ -94,15 +89,8 @@ SurfacePDEKernel::computeQpJacobian(Moose::DGJacobianType type)
     }
     case Moose::NeighborNeighbor:
     {
-      Real phi_grad_dot_n = _grad_phi_neighbor[_j][_qp] * _normals[_qp];
-      RealVectorValue grad_phi_tang = _grad_phi_neighbor[_j][_qp] -
-                                      phi_grad_dot_n * _normals[_qp];
-
-      Real test_grad_dot_n = _grad_test_neighbor[_i][_qp] * _normals[_qp];
-      RealVectorValue grad_test_tang = _grad_test_neighbor[_i][_qp] -
-                                       test_grad_dot_n * _normals[_qp];
-
-      return (grad_phi_tang * grad_test_tang) * _JxW[_qp];
+      // ∂r^N/∂u^N = 0: neighbor residual depends only on element-side u
+      return 0.0;
     }
     default:
       mooseError("Unknown DGJacobianType in SurfacePDEKernel");
