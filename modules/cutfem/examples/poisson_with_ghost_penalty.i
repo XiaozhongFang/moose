@@ -114,7 +114,7 @@
   # In phase 1, standard quadrature is used
   [cut_cell_quad]
     type = CutCellQuadratureUserObject
-    level_set_variable = phi
+    level_set_function = level_set_func
     quadrature_order = 4
     level_set_tolerance = 1e-12
     execute_on = 'INITIAL'

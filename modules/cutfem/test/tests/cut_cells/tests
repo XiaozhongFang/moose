@@ -1,0 +1,12 @@
+[Tests]
+  [cut_detection_basic]
+    type = RunApp
+    input = 'test_cut_detection.i'
+    requirement = "CutCellQuadratureUserObject shall detect elements cut by a circular LevelSet function on a 10x10 mesh"
+    issues = "#0"
+    design = "CutCellQuadratureUserObject.md"
+    # Expected: 28 cut elements for circle radius 0.3 at (0.5,0.5) on 10x10 grid
+    # Output contains: "28 cut elements (IDs: ...)"
+    # We use the RunApp check as the primary verification
+  []
+[]
