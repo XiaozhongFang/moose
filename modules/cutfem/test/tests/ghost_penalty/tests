@@ -27,4 +27,12 @@
     issues = "#0"
     design = "GhostPenaltyKernel.md"
   []
+  [gp_bimaterial]
+    type = Exodiff
+    input = 'test_gp_bimaterial.i'
+    exodiff = 'test_gp_bimaterial_out.e'
+    requirement = "GhostPenaltyKernel shall stabilize a bimaterial diffusion problem with different diffusivities across the interface (k=1 left, k=10 right)"
+    issues = "#0"
+    design = "GhostPenaltyKernel.md"
+  []
 []
