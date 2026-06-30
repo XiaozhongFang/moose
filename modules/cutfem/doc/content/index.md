@@ -10,9 +10,19 @@ This module implements the CutFEM methodology for discretizing PDEs on domains d
 2. **Implementation**: See [implementation.md](./implementation.md)  
 3. **Development**: Check [workflow.md](./workflow.md)
 
+## Implementation Status
+
+| Phase | Component | Status |
+|-------|-----------|--------|
+| **1** | GhostPenaltyKernel | ✅ Implemented, verified, documented |
+| **1** | Convergence tests | ✅ Machine precision for linear solutions |
+| **2** | CutCellQuadratureUserObject | ⚠️ Framework in place, core algorithm stubbed |
+| **3** | Surface PDE | 📝 Design phase |
+
 ## Key Features
 
 - **Phase 1**: Ghost Penalty stabilization for unfitted meshes
+  - GhostPenaltyKernel: [documentation](source/kernels/GhostPenaltyKernel.md)
 - **Phase 2**: Non-conforming discontinuous integration via Level Set
 - **Phase 3**: Dynamic interface evolution with Hamilton-Jacobi coupling
 
