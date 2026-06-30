@@ -20,4 +20,11 @@
     issues = "#0"
     design = "GhostPenaltyKernel.md"
   []
+  [convergence]
+    type = RunApp
+    input = 'test_convergence.i'
+    requirement = "Ghost Penalty kernel shall achieve machine-precision L2 error for a linear solution u=x"
+    issues = "#0"
+    design = "GhostPenaltyKernel.md"
+  []
 []
