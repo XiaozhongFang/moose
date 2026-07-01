@@ -97,6 +97,19 @@ The [!param](/AtmosphericChemistry/family_names),
 chemical family conservation via DAE slack variables. See the
 [`MCMFamilyConstraint` documentation](MCMFamilyConstraint.md) for details.
 
+### PETSc TS Standalone Integrator
+
+New parameters available since implementation:
+
+- `petsc_ts` (bool, default: false): Enable PETSc TS standalone integrator for box mode.
+- `petsc_ts_type` (enum: bdf|arkimex|sundials, default: bdf): TS integrator type.
+- `petsc_ts_rtol` (real, default: 1e-6): Relative tolerance.
+- `petsc_ts_atol` (real, default: 1e-10): Absolute tolerance.
+
+When `petsc_ts = true` and `mode = box`, the MCMBoxModel handles integration via
+PETSc TS, achieving 28-32× speedup over the MOOSE LU solver for the S1 chamber case.
+Coupled mode with `petsc_ts = true` triggers an error at input parsing time.
+
 ## Example Input File Syntax
 
 ### Box Mode

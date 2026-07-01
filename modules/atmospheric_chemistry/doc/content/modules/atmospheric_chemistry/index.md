@@ -334,6 +334,27 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 | `box_chamber` | — | 610 | F0AM chamber example (3h, MCM_SZA) |
 | `box_dielcycle` | — | 2908 | F0AM diel cycle example (24h) |
 
+## Performance
+
+### PETSc TS Standalone Integrator
+
+An optional standalone ODE integrator using PETSc's TS module is available for
+box-mode simulations, achieving dramatic speedups over the default MOOSE LU solver.
+
+| Feature | Description |
+|---------|-------------|
+| Standalone ODE integrator | PETSc TS (BDF / ARKIMEX / SUNDIALS), adaptive step size, 28-32× speedup |
+| Configuration | `integrator = petsc_ts` with `petsc_ts_type`, `petsc_ts_rtol`, `petsc_ts_atol` |
+| Limitation | Box mode only; coupled mode with transport triggers input parsing error |
+
+For the S1 chamber test case (610 species, 1974 reactions, 3h simulation):
+
+| Integrator | Wall Time | vs LU Baseline | C5H8 Error |
+|------------|-----------|---------------|------------|
+| MOOSE LU (baseline) | 477.8s | 1× | — |
+| PETSc TS BDF, rtol=1e-2 | 17.3s | **28×** | 1.5% |
+| PETSc TS BDF, rtol=1e-1 | 14.8s | **32×** | 1.5% |
+
 ## Objects
 
 - [`AtmosphericChemistryAction`](source/actions/AtmosphericChemistryAction.md) — Unified Action (box / coupled modes)

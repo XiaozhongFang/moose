@@ -183,6 +183,42 @@ first time step regardless of framework initialization ordering.
 | `reactionRate(r, C)` | Single reaction rate |
 | `allReactionRates(C, rates)` | All reaction rates |
 
+### PETSc TS Standalone Integrator
+
+`MCMBoxModel` supports an optional standalone ODE integrator using PETSc's TS (Time
+Stepping) module, enabled by setting `integrator = petsc_ts` in the input file.
+
+**Architecture:**
+- When `integrator = petsc_ts`, the MOOSE Newton solve is bypassed for chemistry.
+  `MCMBoxModel::execute()` (called at `TIMESTEP_END`) drives the integration.
+- ChemistryODEKernel short-circuits (returns zero residual), ODETimeDerivative is
+  not created — preventing interference with the CVODE-integrated solution.
+- PETSc TS handles all ODE integration internally with adaptive step size control.
+- After integration, the solution is written to the libMesh solution vector and
+  the ScalarVariable local cache (`sv.setValue()`), ensuring CSV output correctness.
+
+**Configuration Parameters:**
+- `petsc_ts_type`: TS integrator type — `bdf` (default), `arkimex`, or `sundials`.
+- `petsc_ts_rtol`: Relative tolerance for adaptive stepping (default: 1e-6).
+- `petsc_ts_atol`: Absolute tolerance for adaptive stepping (default: 1e-10).
+
+**Performance:**
+For the S1 chamber test case (610 species, 1974 reactions, 3h simulation):
+
+| Integrator | Wall Time | vs LU Baseline | C5H8 Error |
+|------------|-----------|---------------|------------|
+| MOOSE LU (baseline) | 477.8s | 1× | — |
+| PETSc TS BDF, rtol=1e-2 | 17.3s | **28×** | 1.5% |
+| PETSc TS BDF, rtol=1e-1 | 14.8s | **32×** | 1.5% |
+
+**Limitations:**
+- Only available in `mode = box` (coupled mode with transport cannot use this).
+- Requires PETSc TS types compiled into the PETSc installation (`sundials` requires --download-sundials).
+- The solution is written at each MOOSE timestep end — intermediate TS internal steps
+  are not visible to MOOSE output.
+- Fast handler coverage: ~93% of coefficient expressions use compiled lambdas
+  (6 pattern-matched templates), remaining ~7% fall back to fparser.
+
 ## Example Input File Syntax
 
 ```moose
