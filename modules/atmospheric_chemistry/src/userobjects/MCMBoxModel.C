@@ -1517,20 +1517,17 @@ MCMBoxModel::execute()
   if (t_start < 0.0 || dt <= 0.0)
     return;
 
-  // Build concentration vector from NonlinearSystem solution (source of truth)
+  // Build concentration vector from ScalarVariable values (source of truth
+  // for ICs and persistent state — the NL solution vector may not be
+  // populated until after the first solve).
   NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
   {
-    // Read current solution for initial condition of TS integration.
-    // Use nl.solution() (source of truth) rather than currentSolution()
-    // which may be a working vector.
-    const NumericVector<Number> & sol = nl.solution();
     PetscScalar *x_arr;
     VecGetArray(_ts_X, &x_arr);
     for (unsigned int i = 0; i < _n_species; ++i)
     {
       MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
-      dof_id_type dof = sv.dofIndices()[0];
-      x_arr[i] = sol(dof);
+      x_arr[i] = sv.sln()[0];
     }
     VecRestoreArray(_ts_X, &x_arr);
   }
@@ -1538,38 +1535,29 @@ MCMBoxModel::execute()
   // Run PETSc TS integration from t_start to t_end
   runPETScStep(t_start, t_end);
 
-  // Write TS solution back.  Update ALL vector locations used by MOOSE:
-  //  1. nl.solution() — the "official" solution vector for the next solve
-  //  2. nl.currentSolution() — what the next residual evaluation reads
-  //  3. sv.setValue() — local cache for output (sln())
+  // Write TS solution to BOTH the libMesh solution and the variable cache.
+  // The CSV output reads from sln() → _u.  sv.setValue() updates _u.
+  // Also update sys.solution for consistency (used by next step's predictor).
   {
-    NumericVector<Number> & nl_sol = nl.solution();
     PetscScalar *x_arr;
     VecGetArray(_ts_X, &x_arr);
+    NumericVector<Number> & sys_sol = *nl.system().solution;
     for (unsigned int i = 0; i < _n_species; ++i)
     {
       MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
       dof_id_type dof = sv.dofIndices()[0];
-      nl_sol.set(dof, x_arr[i]);
-      sv.setValue(0, x_arr[i]);
+      // Write to ALL locations — sln() reads from _u, CSV writes from sln()
+      sv.setValue(0, x_arr[i]);    // _u[i] = val (for sln() → output)
+      sys_sol.set(dof, x_arr[i]);  // sys.solution (for next predictor)
+      nl.solution().set(dof, x_arr[i]);  // nl.solution (backup)
     }
+    sys_sol.close();
+    nl.solution().close();
     VecRestoreArray(_ts_X, &x_arr);
-    nl_sol.close();
-    // Sync currentSolution to point to the same data
-    *const_cast<NumericVector<Number>*>(nl.currentSolution()) = nl_sol;
+    *const_cast<NumericVector<Number>*>(nl.currentSolution()) = nl.solution();
   }
 
-  // Verify: read back and confirm the solution matches
-  {
-    const NumericVector<Number> & cur = *nl.currentSolution();
-    MooseVariableScalar & sv0 = _subproblem.getScalarVariable(0, _species_names[0]);
-    auto c5h8 = _name_to_index.find("C5H8");
-    auto no2 = _name_to_index.find("NO2");
-    _console << "MCMBoxModel: post-TS C5H8(sln)=" << _subproblem.getScalarVariable(0, "C5H8").sln()[0]
-             << " C5H8(cur)=" << (c5h8 != _name_to_index.end() ? cur(sv0.dofIndices()[0]) : -1)
-             << " NO2(sln)=" << _subproblem.getScalarVariable(0, "NO2").sln()[0]
-             << std::endl;
-  }
+  // Diagnostics removed — verify using CSV output comparison
 
   _console << "MCMBoxModel: TS step t=[" << t_start << "," << t_end
            << "] dt=" << dt << " completed" << std::endl;
@@ -1650,16 +1638,8 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
   if (!_coeff_parsers.empty())
     evaluateCoefficients();
 
-  // Debug: print _ts_X[0] and C5H8 to diagnose Vec read issue
-  {
-    const PetscScalar *x0;
-    VecGetArrayRead(_ts_X, &x0);
-    _console << "MCMBoxModel: preTS @" << _t << "s _ts_X[0]=" << x0[0]
-             << " _ts_X[1]=" << x0[1] << " _n_species=" << _n_species
-             << " _k[0]=" << _k[0] << " _k[1]=" << _k[1] << " _k[2]=" << _k[2]
-             << std::endl;
-    VecRestoreArrayRead(_ts_X, &x0);
-  }
+  // NOTE: _ts_X was filled from sv.sln() in execute() above.
+  // _k is evaluated at interval midpoint for constant photolysis.
 
   // Run the integrator
   PETSC_TRY(TSSolve(_ts, _ts_X));
