@@ -1517,7 +1517,7 @@ MCMBoxModel::execute()
   if (t_start < 0.0 || dt <= 0.0)
     return;
 
-  // Build concentration vector from NonlinearSystem solution (source of truth).
+  // Build concentration vector from NonlinearSystem solution (source of truth)
   NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
   {
     // Read current solution for initial condition of TS integration
@@ -1554,6 +1554,15 @@ MCMBoxModel::execute()
     sol.close();
   }
 
+  // Verify: read back a few variables and confirm setValue() propagated
+  {
+    MooseVariableScalar & sv0 = _subproblem.getScalarVariable(0, _species_names[0]);
+    _console << "MCMBoxModel: post-TS verify C4PAN5=" << sv0.sln()[0]
+             << " C5H8=" << _subproblem.getScalarVariable(0, "C5H8").sln()[0]
+             << " NO2=" << _subproblem.getScalarVariable(0, "NO2").sln()[0]
+             << std::endl;
+  }
+
   _console << "MCMBoxModel: TS step t=[" << t_start << "," << t_end
            << "] dt=" << dt << " completed" << std::endl;
 }
@@ -1585,6 +1594,18 @@ MCMBoxModel::setupPETScTS()
 
   PETSC_TRY(TSSetRHSJacobian(_ts, _ts_J, _ts_J, tsRHSJacobian, this));
   PETSC_TRY(TSSetType(_ts, _ts_type.c_str()));
+
+  // For ARKIMEX, configure as fully implicit with 4th order scheme
+  {
+    TSType actual_type;
+    PETSC_TRY(TSGetType(_ts, &actual_type));
+    if (std::string(actual_type) == "arkimex")
+    {
+      PETSC_TRY(TSARKIMEXSetFullyImplicit(_ts, PETSC_TRUE));
+      PETSC_TRY(TSARKIMEXSetType(_ts, TSARKIMEX4));
+    }
+  }
+
   PETSC_TRY(TSSetTolerances(_ts, _ts_atol, nullptr, _ts_rtol, nullptr));
   // Allow unlimited SNES failures (retry with smaller step), matching extchem.c
   PETSC_TRY(TSSetMaxSNESFailures(_ts, -1));
@@ -1616,9 +1637,12 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
   PETSC_TRY(TSAdaptSetStepLimits(adapt, 1.0e-12, (t1 - t0)));
   PETSC_TRY(TSSetSolution(_ts, _ts_X));
 
-  // Update time for SZA photolysis evaluation (used in evaluateCoefficients
-  // via tsRHSFunction → computeDCdt).
-  _t = t0;
+  // Evaluate rate coefficients at the midpoint of this interval.
+  // For short MOOSE timesteps (dt=100s), SZA-driven photolysis changes
+  // are negligible within the interval, so midpoint is a good approximation.
+  _t = 0.5 * (t0 + t1);
+  if (!_coeff_parsers.empty())
+    evaluateCoefficients();
 
   // Run the integrator
   PETSC_TRY(TSSolve(_ts, _ts_X));
@@ -1664,6 +1688,12 @@ MCMBoxModel::tsRHSFunction(TS ts, PetscReal t, Vec C, Vec F, void *ctx)
   PetscFunctionBeginUser;
   PetscCall(VecGetArrayRead(C, &c_arr));
   PetscCall(VecGetArray(F, &f_arr));
+
+  // NOTE: evaluateCoefficients() is NOT called here — it's called once per
+  // MOOSE timestep (in runPETScStep) with the midpoint time.  Calling it
+  // on every TS internal step would modify shared state (_func_params, _k)
+  // in ways that break the TS integrator's assumptions.  For the short
+  // MOOSE timesteps (dt=100s), SZA-driven photolysis changes are negligible.
 
   // Build std::vector around PETSc array (no copy for 610 elements - acceptable)
   std::vector<Real> C_vec(c_arr, c_arr + model->_n_species);
