@@ -1634,12 +1634,10 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
   PETSC_TRY(TSSetSolution(_ts, _ts_X));
 
   // Evaluate rate coefficients at the midpoint of this interval.
+  // _k is evaluated at interval midpoint for constant photolysis.
   _t = 0.5 * (t0 + t1);
   if (!_coeff_parsers.empty())
     evaluateCoefficients();
-
-  // NOTE: _ts_X was filled from sv.sln() in execute() above.
-  // _k is evaluated at interval midpoint for constant photolysis.
 
   // Run the integrator
   PETSC_TRY(TSSolve(_ts, _ts_X));
