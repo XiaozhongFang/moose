@@ -116,7 +116,7 @@ AtmosphericChemistryAction::validParams()
       "stepping for the ODE integration. When true, ODETimeDerivative and "
       "ChemistryODEKernel are NOT created — MCMBoxModel::execute() handles "
       "the integration and directly updates the solution.");
-  MooseEnum ts_type_enum("bdf arkimex sundials", "bdf");
+  MooseEnum ts_type_enum("bdf arkimex eimex rosw mimex beuler cn rk theta ssp", "bdf");
   params.addParam<MooseEnum>("petsc_ts_type", ts_type_enum,
       "PETSc TS integrator type for standalone mode: 'bdf' (default), "
       "'arkimex' (adaptive IMEX), or 'sundials' (CVODE via SUNDIALS).");

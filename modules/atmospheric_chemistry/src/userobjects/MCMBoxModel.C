@@ -239,7 +239,7 @@ MCMBoxModel::validParams()
       "ODE integrator for box mode: 'moose' (default, through MOOSE's Newton solver) "
       "or 'petsc_ts' (PETSc TS, bypasses MOOSE solver for chemistry)");
 
-  MooseEnum ts_type_enum("bdf arkimex sundials", "bdf");
+  MooseEnum ts_type_enum("bdf arkimex eimex rosw mimex beuler cn rk theta sspl", "bdf");
   params.addParam<MooseEnum>("petsc_ts_type", ts_type_enum,
       "PETSc TS integrator type: 'bdf' (default), 'arkimex', or 'sundials' (CVODE).");
   params.addParam<Real>("petsc_ts_rtol", 1e-6,
