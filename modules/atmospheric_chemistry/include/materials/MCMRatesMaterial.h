@@ -11,6 +11,7 @@
 
 #include "Material.h"
 #include "FunctionParserUtils.h"
+#include <functional>
 #include <memory>
 
 class HybridJTableReader;
@@ -160,6 +161,17 @@ private:
   std::vector<std::vector<Real>> _reaction_local_params;
   /// True if RO2 was added as an EXTRA fparser variable (not in species list)
   bool _has_ro2;
+
+  // ── Fast pre-compiled handlers (bypass fparser tree traversal) ──
+  /// Fast handler: takes full _func_params, returns evaluated value.
+  /// nullptr means fall back to fparser.
+  using FastHandler = std::function<Real(const std::vector<Real> &)>;
+  std::vector<FastHandler> _coeff_fast;
+  std::vector<FastHandler> _reaction_fast;
+  /// Compile a coefficient or reaction expression to a fast handler.
+  /// Returns nullptr if the expression doesn't match any known pattern.
+  FastHandler compileFastHandler(const std::string & expr,
+                                 const std::vector<unsigned int> & var_indices) const;
 
   /// Compute day of year from day/month/year
   unsigned int computeDayOfYear() const;

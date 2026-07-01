@@ -1,4 +1,4 @@
-# Chamber S1 with PETSc TS(BDF), relaxed tolerance for performance sweep
+# Chamber S1 with PETSc TS(BDF rtol=1e-1), very relaxed for speed
 [Mesh]
   [gen]
     type = GeneratedMeshGenerator
@@ -6,7 +6,6 @@
     nx = 1
   []
 []
-
 [AtmosphericChemistry]
   mode = box
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac'
@@ -20,21 +19,19 @@
   jfac = 1.0
   petsc_ts = true
   petsc_ts_type = bdf
-  petsc_ts_rtol = 1e-2
-  petsc_ts_atol = 1e-6
+  petsc_ts_rtol = 1e-1
+  petsc_ts_atol = 1e-4
 []
-
 [ICs]
-  [C5H8_ic]    type = ScalarConstantIC  variable = C5H8  value = 2.47e11   []
-  [NO2_ic]     type = ScalarConstantIC  variable = NO2   value = 2.47e9    []
-  [H2O2_ic]    type = ScalarConstantIC  variable = H2O2  value = 4.94e12   []
+  [C5H8_ic] type = ScalarConstantIC variable = C5H8 value = 2.47e11 []
+  [NO2_ic] type = ScalarConstantIC variable = NO2 value = 2.47e9 []
+  [H2O2_ic] type = ScalarConstantIC variable = H2O2 value = 4.94e12 []
 []
-
 [Executioner]
   type = Transient
   solve_type = NEWTON
   scheme = 'bdf2'
-  end_time = 500
+  end_time = 10800
   dt = 100
   l_max_its = 200
   l_tol = 1e-4
@@ -48,10 +45,9 @@
     dt = 100
   []
 []
-
 [Outputs]
   csv = true
   execute_on = 'timestep_end'
-  file_base = 'vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-2'
+  file_base = 'vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-1'
   time_step_interval = 10
 []
