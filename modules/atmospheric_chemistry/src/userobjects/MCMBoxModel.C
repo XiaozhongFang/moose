@@ -1520,8 +1520,10 @@ MCMBoxModel::execute()
   // Build concentration vector from NonlinearSystem solution (source of truth)
   NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
   {
-    // Read current solution for initial condition of TS integration
-    const NumericVector<Number> & sol = *nl.currentSolution();
+    // Read current solution for initial condition of TS integration.
+    // Use nl.solution() (source of truth) rather than currentSolution()
+    // which may be a working vector.
+    const NumericVector<Number> & sol = nl.solution();
     PetscScalar *x_arr;
     VecGetArray(_ts_X, &x_arr);
     for (unsigned int i = 0; i < _n_species; ++i)
@@ -1536,30 +1538,36 @@ MCMBoxModel::execute()
   // Run PETSc TS integration from t_start to t_end
   runPETScStep(t_start, t_end);
 
-  // Write TS solution back to NonlinearSystem solution vector AND
-  // ScalarVariable local cache (needed for CSV output).
+  // Write TS solution back.  Update ALL vector locations used by MOOSE:
+  //  1. nl.solution() — the "official" solution vector for the next solve
+  //  2. nl.currentSolution() — what the next residual evaluation reads
+  //  3. sv.setValue() — local cache for output (sln())
   {
-    NumericVector<Number> & sol = *const_cast<NumericVector<Number>*>(nl.currentSolution());
+    NumericVector<Number> & nl_sol = nl.solution();
     PetscScalar *x_arr;
     VecGetArray(_ts_X, &x_arr);
     for (unsigned int i = 0; i < _n_species; ++i)
     {
       MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
       dof_id_type dof = sv.dofIndices()[0];
-      sol.set(dof, x_arr[i]);
-      // Also update local cache so output (CSV) reads the CVODE-computed value
+      nl_sol.set(dof, x_arr[i]);
       sv.setValue(0, x_arr[i]);
     }
     VecRestoreArray(_ts_X, &x_arr);
-    sol.close();
+    nl_sol.close();
+    // Sync currentSolution to point to the same data
+    *const_cast<NumericVector<Number>*>(nl.currentSolution()) = nl_sol;
   }
 
-  // Verify: read back a few variables and confirm setValue() propagated
+  // Verify: read back and confirm the solution matches
   {
+    const NumericVector<Number> & cur = *nl.currentSolution();
     MooseVariableScalar & sv0 = _subproblem.getScalarVariable(0, _species_names[0]);
-    _console << "MCMBoxModel: post-TS verify C4PAN5=" << sv0.sln()[0]
-             << " C5H8=" << _subproblem.getScalarVariable(0, "C5H8").sln()[0]
-             << " NO2=" << _subproblem.getScalarVariable(0, "NO2").sln()[0]
+    auto c5h8 = _name_to_index.find("C5H8");
+    auto no2 = _name_to_index.find("NO2");
+    _console << "MCMBoxModel: post-TS C5H8(sln)=" << _subproblem.getScalarVariable(0, "C5H8").sln()[0]
+             << " C5H8(cur)=" << (c5h8 != _name_to_index.end() ? cur(sv0.dofIndices()[0]) : -1)
+             << " NO2(sln)=" << _subproblem.getScalarVariable(0, "NO2").sln()[0]
              << std::endl;
   }
 
@@ -1638,11 +1646,20 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
   PETSC_TRY(TSSetSolution(_ts, _ts_X));
 
   // Evaluate rate coefficients at the midpoint of this interval.
-  // For short MOOSE timesteps (dt=100s), SZA-driven photolysis changes
-  // are negligible within the interval, so midpoint is a good approximation.
   _t = 0.5 * (t0 + t1);
   if (!_coeff_parsers.empty())
     evaluateCoefficients();
+
+  // Debug: print _ts_X[0] and C5H8 to diagnose Vec read issue
+  {
+    const PetscScalar *x0;
+    VecGetArrayRead(_ts_X, &x0);
+    _console << "MCMBoxModel: preTS @" << _t << "s _ts_X[0]=" << x0[0]
+             << " _ts_X[1]=" << x0[1] << " _n_species=" << _n_species
+             << " _k[0]=" << _k[0] << " _k[1]=" << _k[1] << " _k[2]=" << _k[2]
+             << std::endl;
+    VecRestoreArrayRead(_ts_X, &x0);
+  }
 
   // Run the integrator
   PETSC_TRY(TSSolve(_ts, _ts_X));
@@ -1699,6 +1716,9 @@ MCMBoxModel::tsRHSFunction(TS ts, PetscReal t, Vec C, Vec F, void *ctx)
   std::vector<Real> C_vec(c_arr, c_arr + model->_n_species);
   std::vector<Real> dC_vec;
   model->computeDCdt(C_vec, dC_vec);
+
+  // NOTE: computeDCdt uses _k from the most recent evaluateCoefficients()
+  // call in runPETScStep().  _k is constant throughout the TS interval.
 
   for (unsigned int i = 0; i < model->_n_species; ++i)
     f_arr[i] = dC_vec[i];

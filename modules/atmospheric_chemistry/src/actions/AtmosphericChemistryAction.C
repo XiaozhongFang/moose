@@ -506,17 +506,13 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
   // Build the species_variables list for ChemistryODEKernel (includes RO2 for coupling)
   std::vector<VariableName> species_vars(_species.begin(), _species.end());
 
-  // PETSc TS mode: create standard ODETimeDerivative + ChemistryODEKernel
-  // for every species to satisfy MOOSE's kernel coverage check.
-  // ChemistryODEKernel short-circuits via usePETScTS() to skip getDCdt().
+  // PETSc TS mode: create ChemistryODEKernel (short-circuits to zero in TS mode)
+  // for each species.  No ODETimeDerivative — it would overwrite the CVODE
+  // solution during MOOSE's Newton solve.
   if (_use_petsc_ts)
   {
     for (unsigned int j = 0; j < _species.size(); ++j)
     {
-      auto td_params = _factory.getValidParams("ODETimeDerivative");
-      td_params.set<NonlinearVariableName>("variable") = _species[j];
-      _problem->addScalarKernel("ODETimeDerivative", "td_" + _species[j], td_params);
-
       auto chem_params = _factory.getValidParams("ChemistryODEKernel");
       chem_params.set<NonlinearVariableName>("variable") = _species[j];
       chem_params.set<UserObjectName>("box_model") = "box_model";
@@ -524,12 +520,13 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
       chem_params.set<std::vector<VariableName>>("species_variables") = species_vars;
       _problem->addScalarKernel("ChemistryODEKernel", "chem_" + _species[j], chem_params);
     }
+    // Set coupling matrix for ChemistryODEKernel (even though short-circuited,
+    // MOOSE needs it for the sparse Jacobian structure)
     _console << "AtmosphericChemistry (box): PETSc TS mode active — "
-             << "created ODETimeDerivative + ChemistryODEKernel (short-circuited) for "
+             << "created ChemistryODEKernel (short-circuited) for "
              << _species.size() << " species" << std::endl;
+    return;
   }
-  else
-  {
 
   // If families are active, identify slack variable indices to skip
   // (MCMFamilyScalarKernel replaces ChemistryODEKernel for slack species)
@@ -574,38 +571,32 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
     _console << "AtmosphericChemistry (box): Created ODETimeDerivative + ChemistryODEKernel for "
              << _species.size() << " species" << std::endl;
 
-set_coupling:
   // ── Set sparse Jacobian coupling pattern ──
-  // Build name→index map for the mechanism species.
-  // Compute per-species coupling: species i couples to species j if both
-  // participate in the same reaction (j is a reactant).
-  std::map<std::string, unsigned int> sp_idx;
-  for (unsigned int i = 0; i < _species.size(); ++i)
-    sp_idx[_species[i]] = i;
-
-  auto cm = std::make_unique<libMesh::CouplingMatrix>(_species.size());
-  for (unsigned int i = 0; i < _species.size(); ++i)
   {
-    (*cm)(i, i) = 1;  // always self-coupled (diagonal Jacobian)
+    std::map<std::string, unsigned int> sp_idx;
+    for (unsigned int i = 0; i < _species.size(); ++i)
+      sp_idx[_species[i]] = i;
 
-    // Find reactions where species i participates
-    for (unsigned int r = 0; r < _reactions.size(); ++r)
+    auto cm = std::make_unique<libMesh::CouplingMatrix>(_species.size());
+    for (unsigned int i = 0; i < _species.size(); ++i)
     {
-      if (std::abs(_stoichiometric_matrix[i][r]) < 1.0e-30)
-        continue;
-      // Species i participates in reaction r → couple to all reactants of r
-      for (const auto & reactant_pair : _reactions[r].reactants)
+      (*cm)(i, i) = 1;
+      for (unsigned int r = 0; r < _reactions.size(); ++r)
       {
-        auto it = sp_idx.find(reactant_pair.second);
-        if (it != sp_idx.end())
-          (*cm)(i, it->second) = 1;
+        if (std::abs(_stoichiometric_matrix[i][r]) < 1.0e-30)
+          continue;
+        for (const auto & reactant_pair : _reactions[r].reactants)
+        {
+          auto it = sp_idx.find(reactant_pair.second);
+          if (it != sp_idx.end())
+            (*cm)(i, it->second) = 1;
+        }
       }
     }
+    _problem->setCouplingMatrix(std::move(cm), 0);
+    _console << "AtmosphericChemistry (box): Set sparse Jacobian coupling pattern"
+             << " (" << _species.size() << "×" << _species.size() << ")" << std::endl;
   }
-  _problem->setCouplingMatrix(std::move(cm), /*nl_sys_num=*/0);
-  _console << "AtmosphericChemistry (box): Set sparse Jacobian coupling pattern"
-           << " (" << _species.size() << "×" << _species.size() << ")" << std::endl;
-  } // end else (!_use_petsc_ts)
 }
 
 // ===== Coupled mode tasks (equivalent to old MCMFacsimileAction) =====
