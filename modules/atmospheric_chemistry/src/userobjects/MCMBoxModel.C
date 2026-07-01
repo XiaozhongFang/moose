@@ -324,8 +324,10 @@ MCMBoxModel::initialize()
   if (!mech_file.empty())
   {
     std::string photo_file = getParam<std::string>("photolysis_file");
+    _console << "MCMBoxModel: parsing " << mech_file << "..." << std::endl;
     MCMFacsimileParser parser;
     ParsedMechanism mech = parser.parse(mech_file, photo_file);
+    _console << "MCMBoxModel: parsing complete." << std::endl;
     bool use_lr = getParam<bool>("use_limiting_reagent");
     loadMechanism(mech, use_lr);
     _console << "MCMBoxModel: Loaded " << _n_species << " species, "
@@ -354,12 +356,14 @@ MCMBoxModel::initialize()
     // which may not happen in the expected order during the first nonlinear solve.
     if (!_coeff_parsers.empty())
     {
+      _console << "MCMBoxModel: evaluating coefficients..." << std::endl;
       evaluateCoefficients();
       // Reset time-varying solar params to safe defaults — per-timestep
       // evaluateCoefficients() will overwrite them during the first solve.
       _solar_cosx = 0.0;
       _solar_secx = 1.0e2;
       _solar_lha = 0.0;
+      _console << "MCMBoxModel: coefficients evaluated." << std::endl;
     }
 
     // Set up dilution if dilute > 0
@@ -373,7 +377,11 @@ MCMBoxModel::initialize()
 
     // Initialize PETSc TS integrator if box mode uses standalone TS integration
     if (_use_petsc_ts)
+    {
+      _console << "MCMBoxModel: setting up PETSc TS..." << std::endl;
       setupPETScTS();
+      _console << "MCMBoxModel: PETSc TS setup complete." << std::endl;
+    }
   }
 }
 
@@ -1582,10 +1590,36 @@ MCMBoxModel::setupPETScTS()
   PETSC_TRY(TSSetRHSFunction(_ts, nullptr, tsRHSFunction, this));
   PETSC_TRY(VecCreateSeq(PETSC_COMM_SELF, _n_species, &_ts_X));
 
-  // Use dense matrix for Jacobian — 610×610 ~ 3MB, avoids sparse preallocation issues.
-  // PETSc's BDF/ARKIMEX with SuperLU_DIST or LU handles dense efficiently at this size.
+  // Use sparse AIJ matrix for Jacobian with preallocation from stoichiometry.
+  // For each species row i, preallocate for all unique reactant species in
+  // reactions involving i.  This matches the Jacobian sparsity pattern from
+  // computeJacobianTriplets.
   PetscInt n = static_cast<PetscInt>(_n_species);
-  PETSC_TRY(MatCreateSeqDense(PETSC_COMM_SELF, n, n, nullptr, &_ts_J));
+  std::vector<PetscInt> nnz_per_row(n, 0);
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+  {
+    const int i0 = _iG[r][0], i1 = _iG[r][1], i2 = _iG[r][2];
+    // Collect unique reactant species indices
+    std::set<unsigned int> reactants;
+    if (i0 >= 0) reactants.insert((unsigned int)i0);
+    if (i1 >= 0) reactants.insert((unsigned int)i1);
+    if (i2 >= 0) reactants.insert((unsigned int)i2);
+    // For each product species in this reaction, add entries for all reactants
+    _stoich.forEachInRow(r, [&](int s, Real) {
+      nnz_per_row[s] += reactants.size();
+    });
+  }
+  // Cap at n (can't exceed total columns) and add 1 for diagonal
+  PetscInt total_nnz = 0, max_nnz = 0;
+  for (PetscInt i = 0; i < n; ++i) {
+    nnz_per_row[i] = std::min(nnz_per_row[i] + 1, n);
+    total_nnz += nnz_per_row[i];
+    if (nnz_per_row[i] > max_nnz) max_nnz = nnz_per_row[i];
+  }
+  _console << "MCMBoxModel: Jacobian AIJ preallocation: " << n << "×" << n
+           << ", avg nnz/row=" << (total_nnz / n) << ", max=" << max_nnz << std::endl;
+  PETSC_TRY(MatCreateSeqAIJ(PETSC_COMM_SELF, n, n, 0, nnz_per_row.data(), &_ts_J));
+  PETSC_TRY(MatSetOption(_ts_J, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE));
   PETSC_TRY(MatSetFromOptions(_ts_J));
 
   PETSC_TRY(TSSetRHSJacobian(_ts, _ts_J, _ts_J, tsRHSJacobian, this));
