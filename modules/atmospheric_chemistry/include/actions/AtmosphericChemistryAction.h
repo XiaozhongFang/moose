@@ -63,6 +63,8 @@ protected:
   void actBoxAddVariable();
   void actBoxAddUserObject();
   void actBoxAddScalarKernel();
+  void actBoxAddFamilyUO();
+  void actBoxAddFamilyScalarKernel();
 
   /// Coupled mode tasks (equivalent to old MCMFacsimileAction)
   void actCoupledAddVariable();
@@ -89,9 +91,16 @@ protected:
 
   /// Include transport in coupled mode
   const bool _include_transport;
+  /// PETSc TS standalone integrator for box mode
+  const bool _use_petsc_ts;
 
   /// Whether RO2 diagnostic variable should be created (computed once in constructor)
   bool _ro2_diagnostic_enabled;
   /// Whether the RO2 conflict warning has been printed
   bool _ro2_warning_printed;
+
+  /// Family conservation (F0AM DAE method)
+  std::vector<std::string> _family_names;
+  std::vector<std::vector<std::string>> _family_members;
+  std::vector<std::vector<Real>> _family_scaling;
 };

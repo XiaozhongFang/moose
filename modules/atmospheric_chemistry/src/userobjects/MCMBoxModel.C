@@ -8,8 +8,14 @@
 //* https://www.gnu.org/licenses/lgpl-2.1.html
 
 #include "MCMBoxModel.h"
+#include "MooseVariableScalar.h"
+#include "FEProblemBase.h"
+#include "NonlinearSystemBase.h"
 #include "pcrecpp.h"
+#include <algorithm>
+#include <regex>
 #include <sstream>
+#include <utility>
 
 registerMooseObject("AtmosphericChemistryApp", MCMBoxModel);
 
@@ -189,6 +195,15 @@ MCMBoxModel::validParams()
       "automatically converts between ppb and molec/cm³ using the air density.");
 
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor");
+  params.addParam<Real>("default_ic", 0.0,
+      "Default initial concentration (molec/cm³) for species without explicit ICs.\n"
+      "Set to a small positive value (e.g. 1e6) to prevent Jacobian singularities\n"
+      "when many species start at zero. 0.0 = no default (original F0AM behavior).");
+  params.addParam<bool>("use_limiting_reagent", false,
+      "Enable F0AM-style limiting-reagent formulation for RO2+RO2 termination "
+      "reactions: rate = k * min([A],[B])² instead of k * [A] * [B]. "
+      "Default false (standard MCM chemistry). Set true for F0AM-compatible "
+      "RO2 termination or when comparing against F0AM reference outputs.");
   MooseEnum stoich_fmt("CSR COO DENSE CSC", "CSR");
   params.addParam<MooseEnum>(
       "stoich_format", stoich_fmt,
@@ -219,6 +234,19 @@ MCMBoxModel::validParams()
   params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units, used by HYBRID scheme");
   params.addParam<Real>("altitude", 0.0, "Altitude in meters, used by HYBRID scheme");
 
+  MooseEnum integrator_enum("moose petsc_ts", "moose");
+  params.addParam<MooseEnum>("integrator", integrator_enum,
+      "ODE integrator for box mode: 'moose' (default, through MOOSE's Newton solver) "
+      "or 'petsc_ts' (PETSc TS, bypasses MOOSE solver for chemistry)");
+
+  MooseEnum ts_type_enum("bdf arkimex sundials", "bdf");
+  params.addParam<MooseEnum>("petsc_ts_type", ts_type_enum,
+      "PETSc TS integrator type: 'bdf' (default), 'arkimex', or 'sundials' (CVODE).");
+  params.addParam<Real>("petsc_ts_rtol", 1e-6,
+      "Relative tolerance for PETSc TS adaptive integrator.");
+  params.addParam<Real>("petsc_ts_atol", 1e-10,
+      "Absolute tolerance for PETSc TS adaptive integrator.");
+
   params.addClassDescription(
       "Centralized box model UserObject for atmospheric chemistry ODE systems.");
   return params;
@@ -237,6 +265,9 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _month((int)getParam<unsigned int>("month")),
     _year((int)getParam<unsigned int>("year")),
     _kdil(0.0),
+    _tgauss(0.0),
+    _t_start_dil(0.0),
+    _use_gaussian(false),
     _roof_open(true),
     _j_index_start(0),
     _temperature(getParam<Real>("temperature")),
@@ -250,7 +281,8 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _dirty(true),
     _cached_bottomup_T(0.0),
     _cached_bottomup_P(0.0),
-    _bottomup_j_valid(false)
+    _bottomup_j_valid(false),
+    _use_petsc_ts(getParam<MooseEnum>("integrator") == "petsc_ts")
 {
   // Load Hybrid table reader if photolysis scheme is HYBRID
   auto scheme = getParam<MooseEnum>("photolysis_scheme");
@@ -274,6 +306,14 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
   }
 }
 
+MCMBoxModel::~MCMBoxModel()
+{
+  // Clean up PETSc TS objects (safe if never initialized — pointers are null)
+  if (_ts_J) { MatDestroy(&_ts_J); _ts_J = nullptr; }
+  if (_ts_X) { VecDestroy(&_ts_X); _ts_X = nullptr; }
+  if (_ts)   { TSDestroy(&_ts);   _ts = nullptr; }
+}
+
 void
 MCMBoxModel::initialize()
 {
@@ -286,9 +326,26 @@ MCMBoxModel::initialize()
     std::string photo_file = getParam<std::string>("photolysis_file");
     MCMFacsimileParser parser;
     ParsedMechanism mech = parser.parse(mech_file, photo_file);
-    loadMechanism(mech);
+    bool use_lr = getParam<bool>("use_limiting_reagent");
+    loadMechanism(mech, use_lr);
     _console << "MCMBoxModel: Loaded " << _n_species << " species, "
              << _n_reactions << " reactions from " << mech_file << std::endl;
+
+    // Apply default IC (if > 0) to uninitialized species.
+    // This prevents Jacobian singularities when many species start at zero.
+    // 1.0e6 molec/cm³ is chemically negligible (~4e-5 ppb).
+    Real default_ic = getParam<Real>("default_ic");
+    if (default_ic > 0.0)
+    {
+      for (const auto & sp_name : _species_names)
+      {
+        MooseVariableScalar & sv = _subproblem.getScalarVariable(0, sp_name);
+        if (sv.sln()[0] == 0.0)
+          sv.setValue(0, default_ic);
+      }
+      _console << "MCMBoxModel: Set default_ic = " << default_ic
+               << " molec/cm³ for uninitialized species" << std::endl;
+    }
 
     // Pre-compute rate coefficients (_k) and time-invariant solar parameters
     // (DEC, sinld, cosld, eqtime) so the first time step starts with correct
@@ -313,6 +370,10 @@ MCMBoxModel::initialize()
       _conc_bkgd.assign(_n_species, 0.0);
       _console << "MCMBoxModel: Dilution enabled, kdil = " << dilute << " /s" << std::endl;
     }
+
+    // Initialize PETSc TS integrator if box mode uses standalone TS integration
+    if (_use_petsc_ts)
+      setupPETScTS();
   }
 }
 
@@ -341,6 +402,26 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
     Real c1 = (_iG[r][1] >= 0) ? C[_iG[r][1]] : 1.0;
     Real c2 = (_iG[r][2] >= 0) ? C[_iG[r][2]] : 1.0;
     _scratch_G[r] = c0 * c1 * c2;
+  }
+
+  // Limiting-reagent override (F0AM RO2 termination reactions):
+  // rate = k * min([RO2_i], [RO2_j]) instead of k * [RO2_i] * [RO2_j]
+  // For RO2+RO2, the reaction is limited by whichever RO2 concentration is smaller.
+  // OFF by default — opt-in via use_limiting_reagent=true to preserve gold CSV compatibility.
+  if (_use_limiting_reagent && !_limiting_reagent.empty())
+  {
+    for (unsigned int r = 0; r < _n_reactions; ++r)
+    {
+      if (!_limiting_reagent[r])
+        continue;
+      const int i0 = _iG[r][0], i1 = _iG[r][1];
+      if (i0 >= 0 && i1 >= 0)
+      {
+        Real c0 = C[i0], c1 = C[i1];
+        Real minc = std::min(c0, c1);
+        _scratch_G[r] = minc * minc;  // [min]² replaces [A]*[B]
+      }
+    }
   }
 
   // Step 2: rates = k .* G
@@ -398,6 +479,24 @@ MCMBoxModel::computeJacobianTriplets(
       });
     };
 
+    // Limiting-reagent (LR) Jacobian:
+    // For LR reactions: rate = k * min([A],[B])^2  (F0AM RO2 termination)
+    //   ∂rate/∂C_min = 2*k*min([A],[B])
+    //   ∂rate/∂C_other = 0
+    // OFF by default — opt-in via use_limiting_reagent=true.
+    if (_use_limiting_reagent && !_limiting_reagent.empty() && r < _limiting_reagent.size() && _limiting_reagent[r])
+    {
+      if (i0 >= 0 && i1 >= 0)
+      {
+        Real minc = std::min(c0, c1);
+        unsigned int min_idx = (c0 <= c1) ? (unsigned int)i0 : (unsigned int)i1;
+        Real drate = 2.0 * k * minc;
+        emit_contrib(min_idx, drate);
+        // The non-limiting reactant has zero derivative contribution
+      }
+      continue; // Skip standard Jacobian for LR reactions
+    }
+
     // Contribution from C[i0]: dr/dC[i0] = k * c1 * c2
     if (i0 >= 0) emit_contrib((unsigned int)i0, k * c1 * c2);
     // Contribution from C[i1]: dr/dC[i1] = k * c0 * c2
@@ -412,9 +511,12 @@ MCMBoxModel::computeJacobianTriplets(
 Real
 MCMBoxModel::getDCdt(unsigned int idx, const std::vector<Real> & C) const
 {
-  if (_dirty || _cached_dC.size() != _n_species)
+  // _dirty flag is set by markDirty() in EVERY reinit() call (610x per residual),
+  // but the first getDCdt() call rebuilds the cache and clears _dirty.
+  // Subsequent calls (remaining 609 kernels) find _dirty=false and return cached.
+  if ((_dirty) || _cached_dC.size() != _n_species)
   {
-    _cached_C = C;  // store for evaluateCoefficients species lookup
+    _cached_C = C;  // store for evaluateCoefficients species lookup (deep copy)
     if (!_coeff_parsers.empty())
       const_cast<MCMBoxModel*>(this)->evaluateCoefficients();
     _cached_dC.resize(_n_species);
@@ -427,7 +529,7 @@ MCMBoxModel::getDCdt(unsigned int idx, const std::vector<Real> & C) const
 Real
 MCMBoxModel::getJacobianDiagonal(unsigned int idx, const std::vector<Real> & C) const
 {
-  if (_dirty || _cached_C != C || _cached_diag_J.size() != _n_species)
+  if (_dirty || _cached_diag_J.size() != _n_species)
   {
     _cached_C = C;
     _buildJacobianCache();
@@ -439,25 +541,44 @@ MCMBoxModel::getJacobianDiagonal(unsigned int idx, const std::vector<Real> & C) 
 Real
 MCMBoxModel::getJacobianOffDiagonal(unsigned int i, unsigned int j, const std::vector<Real> & C) const
 {
-  if (_dirty || _cached_C != C || _cached_diag_J.size() != _n_species)
+  if (_dirty || _cached_od_row_ptr.size() != _n_species + 1)
   {
     _cached_C = C;
     _buildJacobianCache();
     _dirty = false;
   }
-  uint64_t key = (static_cast<uint64_t>(i) << 32) | static_cast<uint64_t>(j);
-  auto it = _cached_offdiag_J.find(key);
-  return (it != _cached_offdiag_J.end()) ? it->second : 0.0;
+  // CSR binary search: row i columns are sorted at [_od_row_ptr[i] .. _od_row_ptr[i+1])
+  size_t lo = _cached_od_row_ptr[i];
+  size_t hi = _cached_od_row_ptr[i + 1];
+  while (lo < hi)
+  {
+    size_t mid = lo + (hi - lo) / 2;
+    unsigned int col = _cached_od_cols[mid];
+    if (col == j)
+      return _cached_od_vals[mid];
+    else if (col < j)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  return 0.0;
 }
 
 void
 MCMBoxModel::_buildJacobianCache() const
 {
   _cached_diag_J.assign(_n_species, 0.0);
-  _cached_offdiag_J.clear();
 
   if (_n_reactions == 0 || _n_species == 0)
+  {
+    _cached_od_row_ptr.assign(_n_species + 1, 0);
+    _cached_od_cols.clear();
+    _cached_od_vals.clear();
     return;
+  }
+
+  // Per-row temporary accumulator: collects (col, val) pairs
+  std::vector<std::vector<std::pair<unsigned int, Real>>> temp(_n_species);
 
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
@@ -477,12 +598,22 @@ MCMBoxModel::_buildJacobianCache() const
         if (j == us)
           _cached_diag_J[us] += val;
         else
-        {
-          uint64_t key = (static_cast<uint64_t>(us) << 32) | static_cast<uint64_t>(j);
-          _cached_offdiag_J[key] += val;
-        }
+          temp[us].emplace_back(j, val);
       });
     };
+
+    // Limiting-reagent (LR) Jacobian: rate = k * min([A],[B])²
+    // Only the limiting species contributes: ∂rate/∂C_min = 2*k*min([A],[B])
+    // OFF by default — opt-in via use_limiting_reagent=true.
+    bool is_lr = (_use_limiting_reagent && !_limiting_reagent.empty() && r < _limiting_reagent.size() && _limiting_reagent[r]);
+    if (is_lr && i0 >= 0 && i1 >= 0)
+    {
+      Real minc = std::min(c0, c1);
+      unsigned int min_idx = (c0 <= c1) ? (unsigned int)i0 : (unsigned int)i1;
+      Real drate = 2.0 * k * minc;
+      accum(min_idx, drate);
+      continue; // Skip standard Jacobian for LR reactions
+    }
 
     // dr/dC[i0] = k * c1 * c2
     accum((unsigned int)i0, k * c1 * c2);
@@ -491,10 +622,51 @@ MCMBoxModel::_buildJacobianCache() const
     // dr/dC[i2] = k * c0 * c1
     if (i2 != i0 && i2 != i1) accum((unsigned int)i2, k * c0 * c1);
   }
+
+  // Flatten temp to CSR: sort each row, merge duplicates
+  _cached_od_row_ptr.resize(_n_species + 1);
+  _cached_od_row_ptr[0] = 0;
+  for (unsigned int i = 0; i < _n_species; ++i)
+  {
+    auto & row = temp[i];
+    if (row.size() <= 1)
+    {
+      if (row.size() == 1)
+        _cached_od_row_ptr[i + 1] = _cached_od_row_ptr[i] + 1;
+      else
+        _cached_od_row_ptr[i + 1] = _cached_od_row_ptr[i];
+      continue;
+    }
+    std::sort(row.begin(), row.end());
+    size_t w = 0;
+    for (size_t k = 1; k < row.size(); ++k)
+    {
+      if (row[w].first == row[k].first)
+        row[w].second += row[k].second;
+      else
+        row[++w] = row[k];
+    }
+    row.resize(w + 1);
+    _cached_od_row_ptr[i + 1] = _cached_od_row_ptr[i] + row.size();
+  }
+
+  // Copy to flat CSR arrays
+  size_t nnz = _cached_od_row_ptr[_n_species];
+  _cached_od_cols.resize(nnz);
+  _cached_od_vals.resize(nnz);
+  for (unsigned int i = 0; i < _n_species; ++i)
+  {
+    size_t base = _cached_od_row_ptr[i];
+    for (size_t k = 0; k < temp[i].size(); ++k)
+    {
+      _cached_od_cols[base + k] = temp[i][k].first;
+      _cached_od_vals[base + k] = temp[i][k].second;
+    }
+  }
 }
 
 void
-MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
+MCMBoxModel::loadMechanism(const ParsedMechanism & mech, bool use_limiting_reagent)
 {
   _n_species = mech.species.size();
   _n_reactions = mech.reactions.size();
@@ -531,6 +703,12 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech)
     const auto & src = mech.reactant_indices[r];
     _iG[r] = {src[0], src[1], src[2]};
   }
+
+  // Load limiting-reagent flags (F0AM RO2 termination reactions)
+  // Opt-in via use_limiting_reagent=true (default false — preserves gold CSV compat).
+  _use_limiting_reagent = use_limiting_reagent;
+  _limiting_reagent = mech.is_limiting_reagent;
+  _limiting_reactant = mech.limiting_reactant;
 
   // --- Evaluate rate coefficients (fparser for complex expressions) ---
   _k.assign(_n_reactions, 1.0);
@@ -769,6 +947,102 @@ MCMBoxModel::setupFparser(const ParsedMechanism & mech)
   }
   if (_n_j_vars > 0)
     _console << "MCMBoxModel: " << _n_j_vars << " photolysis J values loaded" << std::endl;
+
+  // Build fast pre-compiled handlers for coefficient and reaction expressions.
+  // These bypass fparser tree traversal (AST walk) for common patterns.
+  // Non-matching expressions get nullptr → fall back to fparser.
+  _coeff_fast.resize(_coeff_parsers.size());
+  for (unsigned int i = 0; i < _coeff_parsers.size(); ++i)
+    _coeff_fast[i] = compileFastHandler(coeff_exprs[i], _coeff_var_indices[i]);
+
+  _reaction_fast.resize(_n_reactions);
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+    _reaction_fast[r] = compileFastHandler(rxn_exprs[r], _reaction_var_indices[r]);
+}
+
+MCMBoxModel::FastHandler
+MCMBoxModel::compileFastHandler(const std::string & expr,
+                                 const std::vector<unsigned int> & var_indices) const
+{
+  // Pattern 1: Single variable reference — most reaction expressions (e.g. "KMT01").
+  // Just read _func_params at the pre-computed index.
+  if (var_indices.size() == 1 && std::regex_match(expr, std::regex("^[A-Za-z_][A-Za-z0-9_]*$")))
+  {
+    unsigned int idx = var_indices[0];
+    return [idx](const std::vector<Real> & p) { return p[idx]; };
+  }
+
+  // Pattern 2: Simple numeric constant.
+  // Patterns like "2.0e-11", "1.234"
+  {
+    char * end = nullptr;
+    double val = std::strtod(expr.c_str(), &end);
+    if (end && *end == '\0')
+      return [val](const std::vector<Real> &) { return val; };
+  }
+
+  // Pattern 3: Simple Arrhenius: A*exp(B/TEMP)
+  // e.g. "1.0e-11*exp(-550/TEMP)", "2.54e-12*exp(360/TEMP)"
+  {
+    std::smatch m;
+    if (std::regex_match(expr, m, std::regex(
+        R"(^([0-9.eE+\-]+)\*exp\(([0-9.eE+\-]+)/TEMP\)$)")))
+    {
+      double A = std::stod(m[1].str());
+      double B = std::stod(m[2].str());
+      return [A, B](const std::vector<Real> & p) { return A * std::exp(B / p[0]); };
+    }
+  }
+
+  // Pattern 4: Modified Arrhenius: A*(TEMP/300)^B*exp(C/TEMP)
+  // e.g. "1.44e-13*(TEMP/300)^4*exp(825/TEMP)"
+  {
+    std::smatch m;
+    if (std::regex_match(expr, m, std::regex(
+        R"(^([0-9.eE+\-]+)\*\(TEMP/300\)\^([0-9.eE+\-]+)\*exp\(([0-9.eE+\-]+)/TEMP\)$)")))
+    {
+      double A = std::stod(m[1].str());
+      double B = std::stod(m[2].str());
+      double C = std::stod(m[3].str());
+      return [A, B, C](const std::vector<Real> & p) {
+        return A * std::pow(p[0] / 300.0, B) * std::exp(C / p[0]);
+      };
+    }
+  }
+
+  // Pattern 5: Power temp: A*(TEMP/300)^B
+  // e.g. "1.0e-11*(TEMP/300)^2"
+  {
+    std::smatch m;
+    if (std::regex_match(expr, m, std::regex(
+        R"(^([0-9.eE+\-]+)\*\(TEMP/300\)\^([0-9.eE+\-]+)$)")))
+    {
+      double A = std::stod(m[1].str());
+      double B = std::stod(m[2].str());
+      return [A, B](const std::vector<Real> & p) {
+        return A * std::pow(p[0] / 300.0, B);
+      };
+    }
+  }
+
+  // Pattern 6: Arrhenius with M: A*exp(B/TEMP)*M
+  // e.g. "3.28e-28*M*(TEMP/300)^-6.87" – handled by pattern 7
+  // This is just A*exp(B/TEMP)*M → p[1] is M
+  {
+    std::smatch m;
+    if (std::regex_match(expr, m, std::regex(
+        R"(^([0-9.eE+\-]+)\*exp\(([0-9.eE+\-]+)/TEMP\)\*M$)")))
+    {
+      double A = std::stod(m[1].str());
+      double B = std::stod(m[2].str());
+      return [A, B](const std::vector<Real> & p) {
+        return A * std::exp(B / p[0]) * p[1];
+      };
+    }
+  }
+
+  // No pattern matched — fall back to fparser
+  return nullptr;
 }
 
 void
@@ -861,6 +1135,33 @@ MCMBoxModel::evaluateCoefficients()
     }
   }
 
+  // Auto-calibrate J values from observed data (F0AM jcorr)
+  if (_jcalibrator && _jcalibrator->hasObservedData())
+  {
+    // Collect parameterized J values (without _jfac/roof_factor — those are
+    // separate corrections applied before calibration)
+    std::map<unsigned int, Real> param_J;
+    for (size_t i = 0; i < _j_CL_vals.size() && i < _j_photo_indices.size(); ++i)
+    {
+      unsigned int idx = _j_photo_indices[i];
+      if (idx == (unsigned int)-1) continue;
+      unsigned int jn = (_j_numbers.size() > i) ? _j_numbers[i] : (unsigned int)(i + 1);
+      param_J[jn] = _func_params[idx];
+    }
+    _jcalibrator->calibrate(param_J);
+    _jcalibrator->applyTo(param_J);
+    // Write calibrated J values back to _func_params
+    for (size_t i = 0; i < _j_CL_vals.size() && i < _j_photo_indices.size(); ++i)
+    {
+      unsigned int idx = _j_photo_indices[i];
+      if (idx == (unsigned int)-1) continue;
+      unsigned int jn = (_j_numbers.size() > i) ? _j_numbers[i] : (unsigned int)(i + 1);
+      auto it = param_J.find(jn);
+      if (it != param_J.end())
+        _func_params[idx] = it->second;
+    }
+  }
+
   // Per.19: before evaluating any parser, populate ALL _func_params slots.
   // Species and RO2 must be set before coefficient evaluation because some
   // coefficient expressions reference species concentrations directly
@@ -883,31 +1184,43 @@ MCMBoxModel::evaluateCoefficients()
   }
 
   // Evaluate coefficients in topological order.
-  // Each parser has its own variable subset → copy values from _func_params
-  // into the parser's pre-allocated local buffer, then evaluate.
+  // Use fast pre-compiled handlers when available; fall back to fparser for
+  // complex expressions (fall-off formulas, RO2-dependent, etc.).
   unsigned int n_coeff = _coeff_parsers.size();
   for (unsigned int i = 0; i < n_coeff; ++i)
   {
-    const auto & indices = _coeff_var_indices[i];
-    auto & local = _coeff_local_params[i];
-    for (size_t j = 0; j < indices.size(); ++j)
-      local[j] = _func_params[indices[j]];
-
-    Real val = evaluate(_coeff_parsers[i], local);
-    if (std::isnan(val)) val = 0.0;
+    Real val;
+    if (_coeff_fast[i])
+      val = _coeff_fast[i](_func_params);
+    else
+    {
+      const auto & indices = _coeff_var_indices[i];
+      auto & local = _coeff_local_params[i];
+      for (size_t j = 0; j < indices.size(); ++j)
+        local[j] = _func_params[indices[j]];
+      val = evaluate(_coeff_parsers[i], local);
+    }
+    if (std::isnan(val) || std::isinf(val)) val = 0.0;
     _func_params[5 + i] = val;
   }
 
   // Evaluate reaction rate expressions → _k
+  // ~93% of reaction expressions are single-variable references (e.g. "KMT01")
+  // handled by the fast path; complex expressions fall back to fparser.
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
-    const auto & indices = _reaction_var_indices[r];
-    auto & local = _reaction_local_params[r];
-    for (size_t j = 0; j < indices.size(); ++j)
-      local[j] = _func_params[indices[j]];
-
-    Real val = evaluate(_reaction_parsers[r], local);
-    _k[r] = (std::isnan(val)) ? 1.0 : val;
+    Real val;
+    if (_reaction_fast[r])
+      val = _reaction_fast[r](_func_params);
+    else
+    {
+      const auto & indices = _reaction_var_indices[r];
+      auto & local = _reaction_local_params[r];
+      for (size_t j = 0; j < indices.size(); ++j)
+        local[j] = _func_params[indices[j]];
+      val = evaluate(_reaction_parsers[r], local);
+    }
+    _k[r] = (std::isnan(val) || std::isinf(val)) ? 0.0 : val;
   }
 }
 
@@ -1013,117 +1326,38 @@ MCMBoxModel::allReactionRates(const std::vector<Real> & C, std::vector<Real> & r
     rates[r] = reactionRate(r, C);
 }
 
+Real
+MCMBoxModel::speciesLossRate(unsigned int s, const std::vector<Real> & C) const
+{
+  Real total = 0.0;
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+  {
+    Real coeff = _stoich.get(r, s);
+    if (coeff < 0.0)
+      total += (-coeff) * reactionRate(r, C);
+  }
+  return total;
+}
+
+Real
+MCMBoxModel::speciesProductionRate(unsigned int s, const std::vector<Real> & C) const
+{
+  Real total = 0.0;
+  for (unsigned int r = 0; r < _n_reactions; ++r)
+  {
+    Real coeff = _stoich.get(r, s);
+    if (coeff > 0.0)
+      total += coeff * reactionRate(r, C);
+  }
+  return total;
+}
+
 // -- Photolysis --
 void
 MCMBoxModel::enableHybridPhotolysis(const std::string & table_dir)
 {
   _photolysis_method = HYBRID;
   _hybrid_reader = std::make_unique<HybridJTableReader>(table_dir);
-}
-
-void
-MCMBoxModel::mapPhotolysisReactions()
-{
-  _j_reaction_indices.clear();
-  for (unsigned int r = 0; r < _n_reactions; ++r)
-  {
-    // Scan rate expression for J<N> pattern
-    for (unsigned int jn = 1; jn <= 100; ++jn)
-    {
-      std::string jname = "J" + std::to_string(jn);
-      if (_reaction_names[r].find(jname) != std::string::npos ||
-          (_species_names.size() > 0 && r < _n_reactions))
-      {
-        // Check if this reaction's rate expression references J<N>
-        // Simple heuristic: if the reaction name starts with "R" + number
-        // Real mapping done by Action passing photolysis parameter vectors
-        _j_reaction_indices.push_back(r);
-        break;
-      }
-    }
-  }
-}
-
-void
-MCMBoxModel::updatePhotolysis(Real sza, Real albedo, Real o3col, Real altitude)
-{
-  if (_photolysis_method == HYBRID && _hybrid_reader)
-  {
-    for (unsigned int i = 0; i < _j_reaction_indices.size(); ++i)
-    {
-      unsigned int r = _j_reaction_indices[i];
-      unsigned int jn = i + 1;  // J1, J2, ...
-      std::string jname = "J" + std::to_string(jn);
-      if (_hybrid_reader->hasJValue(jname))
-        _k[r] = _hybrid_reader->interpolate(jname, sza, albedo, o3col, altitude);
-    }
-  }
-  else if (_photolysis_method == BOTTOMUP && _bottomup_integrator)
-    updatePhotolysisBottomUp();
-  else
-    updatePhotolysisSZA(sza, _jfac);
-}
-
-void
-MCMBoxModel::calcJFAC(const std::string & ref_j_name, Real constrained_val)
-{
-  if (constrained_val <= 0.0)
-  {
-    _jfac = 0.0;
-    return;
-  }
-
-  // Parse J number from name like "J4"
-  unsigned int ref_jn = 0;
-  if (ref_j_name.size() > 1 && ref_j_name[0] == 'J')
-    ref_jn = (unsigned int)std::stoi(ref_j_name.substr(1));
-
-  // Find the photolysis parameters for this reference J
-  Real cl_val = 0.0, cmm_val = 1.0, cnn_val = 0.0;
-  for (size_t i = 0; i < _j_numbers.size(); ++i)
-    if (_j_numbers[i] == ref_jn)
-    {
-      cl_val = _j_CL_vals[i];
-      cmm_val = _j_CMM_vals[i];
-      cnn_val = _j_CNN_vals[i];
-      break;
-    }
-
-  if (cl_val == 0.0)
-  {
-    mooseWarning("MCMBoxModel: JFAC reference ", ref_j_name, " has no photolysis parameters");
-    _jfac = 1.0;
-    return;
-  }
-
-  // Compute parameterized value at current SZA
-  Real cosx = calculateCosSZA(_t);
-  if (cosx <= 1.0e-10)
-  {
-    _jfac = 0.0;
-    return;
-  }
-  Real secx = 1.0 / cosx;
-  Real j_calc = cl_val * std::pow(cosx, cmm_val) * std::exp(-cnn_val * secx);
-
-  if (j_calc <= 0.0)
-    _jfac = 0.0;
-  else
-    _jfac = constrained_val / j_calc;  // JFAC = observed / calculated
-}
-
-void
-MCMBoxModel::updatePhotolysisSZA(Real sza, Real jfac)
-{
-  if (!_roof_open) return;  // ROOF CLOSED: J rates handled in evaluateCoefficients
-  Real cosx = std::cos(sza * M_PI / 180.0);
-  if (cosx <= 0.0) { cosx = 1e-10; }
-  Real secx = 1.0 / cosx;
-  for (unsigned int i = 0; i < _j_reaction_indices.size() && i < _j_CL.size(); ++i)
-  {
-    _k[_j_reaction_indices[i]] = _j_CL[i] * std::pow(cosx, _j_CMM[i])
-                               * std::exp(-_j_CNN[i] * secx) * jfac;
-  }
 }
 
 // -- BottomUp photolysis (F0AM chamber mode) --
@@ -1133,29 +1367,6 @@ MCMBoxModel::loadBottomUpData(const std::string & data_dir, const std::string & 
   _bottomup_integrator = std::make_unique<BottomUpJIntegrator>(data_dir);
   _bottomup_integrator->loadLampFlux(flux_file);
   _bottomup_integrator->loadReactionMap("bottomup_jmap.dat");
-}
-
-void
-MCMBoxModel::updatePhotolysisBottomUp()
-{
-  if (!_roof_open || !_bottomup_integrator) return;
-
-  // Compute all J-values at current T, P once
-  auto allJ = _bottomup_integrator->computeAllJ(_temperature, _press > 0 ? _press : 1013.25);
-
-  // Write J-values into the _j_CL/_j_CMM/_j_CNN arrays for PHOTOJ<N> fparser variables
-  // BottomUp: CMM=1.0 (no SZA dependence), CNN=0.0, CL = J_value
-  for (unsigned int i = 0; i < _j_reaction_indices.size() && i < _j_CL.size(); ++i)
-  {
-    unsigned int jn = _j_numbers.size() > i ? _j_numbers[i] : (i + 1);
-    std::string jname = "J" + std::to_string(jn);
-    auto it = allJ.find(jname);
-    if (it != allJ.end())
-    {
-      // Set J value directly as the rate constant (SZA formula with CMM=1, CNN=0)
-      _k[_j_reaction_indices[i]] = it->second * _jfac;
-    }
-  }
 }
 
 // -- Solar cycle (Madronich 1993) --
@@ -1187,14 +1398,6 @@ MCMBoxModel::cosSZA(Real seconds) const
   Real ha = (hour - 12.0 + _eot + _lon*12.0/M_PI) * M_PI / 12.0;
   return std::sin(_lat)*std::sin(_declination)
        + std::cos(_lat)*std::cos(_declination)*std::cos(ha);
-}
-
-void
-MCMBoxModel::advanceSolarCycle(Real s)
-{
-  Real cosx = cosSZA(s);
-  Real sza = std::acos(std::max(-1.0,std::min(1.0,cosx))) * 180.0 / M_PI;
-  updatePhotolysis(sza, 0.1, 300.0, 0.0);
 }
 
 // -- Dilution --
@@ -1242,11 +1445,36 @@ MCMBoxModel::getJValue(unsigned int j_number) const
 }
 
 void
+MCMBoxModel::setGaussianDispersion(Real tgauss, const std::vector<Real> & conc_bkgd,
+                                    Real t_start)
+{
+  _tgauss = tgauss;
+  _conc_bkgd = conc_bkgd;
+  _t_start_dil = t_start;
+  _use_gaussian = true;
+  _kdil = 0.0; // disable first-order dilution
+  _console << "MCMBoxModel: Gaussian dispersion enabled, tgauss=" << tgauss << "s"
+           << std::endl;
+}
+
+void
 MCMBoxModel::computeDCdtWithDilution(const std::vector<Real> & C, std::vector<Real> & dC) const
 {
   computeDCdt(C, dC);
-  for (unsigned int i = 0; i < _n_species; ++i)
-    dC[i] -= _kdil * (C[i] - (_conc_bkgd.empty() ? 0.0 : _conc_bkgd[i]));
+  if (_use_gaussian)
+  {
+    // F0AM Gaussian dispersion: dilrate = -1/(tgauss + 2*(t+t_start))
+    Real denom = _tgauss + 2.0 * (_t + _t_start_dil);
+    Real dilrate = (denom > 1.0e-30) ? 1.0 / denom : 1.0e30;
+    for (unsigned int i = 0; i < _n_species; ++i)
+      dC[i] -= dilrate * (C[i] - (_conc_bkgd.empty() ? 0.0 : _conc_bkgd[i]));
+  }
+  else
+  {
+    // First-order dilution (AtChem2 DILUTE)
+    for (unsigned int i = 0; i < _n_species; ++i)
+      dC[i] -= _kdil * (C[i] - (_conc_bkgd.empty() ? 0.0 : _conc_bkgd[i]));
+  }
 }
 
 // -- Convergence --
@@ -1266,4 +1494,227 @@ MCMBoxModel::checkConvergence(const std::vector<Real> & Cp, const std::vector<Re
     if (d > mx) mx = d;
   }
   return mx;
+}
+
+// ===== PETSc TS standalone integrator =====
+
+void
+MCMBoxModel::execute()
+{
+  // PETSc TS mode: integrate chemistry at TIMESTEP_END, bypassing MOOSE's solver.
+  // No kernels (ODETimeDerivative / ChemistryODEKernel) exist in this mode —
+  // MOOSE's solve is a no-op (residual=0), and this execute() sets the solution.
+  if (!_use_petsc_ts || _n_species == 0)
+    return;
+
+  // Get current and previous times from FEProblemBase
+  FEProblemBase & fe_problem = static_cast<FEProblemBase &>(_subproblem);
+  PetscReal t_end = fe_problem.time();
+  PetscReal dt = fe_problem.dt();
+  PetscReal t_start = t_end - dt;
+
+  // Skip initial call at t=0 (no step yet)
+  if (t_start < 0.0 || dt <= 0.0)
+    return;
+
+  // Build concentration vector from NonlinearSystem solution (source of truth).
+  NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
+  {
+    // Read current solution for initial condition of TS integration
+    const NumericVector<Number> & sol = *nl.currentSolution();
+    PetscScalar *x_arr;
+    VecGetArray(_ts_X, &x_arr);
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      dof_id_type dof = sv.dofIndices()[0];
+      x_arr[i] = sol(dof);
+    }
+    VecRestoreArray(_ts_X, &x_arr);
+  }
+
+  // Run PETSc TS integration from t_start to t_end
+  runPETScStep(t_start, t_end);
+
+  // Write TS solution back to NonlinearSystem solution vector AND
+  // ScalarVariable local cache (needed for CSV output).
+  {
+    NumericVector<Number> & sol = *const_cast<NumericVector<Number>*>(nl.currentSolution());
+    PetscScalar *x_arr;
+    VecGetArray(_ts_X, &x_arr);
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      dof_id_type dof = sv.dofIndices()[0];
+      sol.set(dof, x_arr[i]);
+      // Also update local cache so output (CSV) reads the CVODE-computed value
+      sv.setValue(0, x_arr[i]);
+    }
+    VecRestoreArray(_ts_X, &x_arr);
+    sol.close();
+  }
+
+  _console << "MCMBoxModel: TS step t=[" << t_start << "," << t_end
+           << "] dt=" << dt << " completed" << std::endl;
+}
+
+void
+MCMBoxModel::setupPETScTS()
+{
+  PetscErrorCode ierr;
+
+  // Load TS parameters from input
+  _ts_type = std::string(getParam<MooseEnum>("petsc_ts_type"));
+  _ts_rtol = getParam<Real>("petsc_ts_rtol");
+  _ts_atol = getParam<Real>("petsc_ts_atol");
+
+  // Helper macro for error checking without PetscCheck (which returns a value)
+  // and without requiring MPI_Comm (use PETSC_COMM_SELF for sequential TS).
+#define PETSC_TRY(expr) do { ierr = (expr); if (ierr) mooseError("PETSc error ", ierr, " at ", __FILE__, ":", __LINE__); } while(0)
+
+  PETSC_TRY(TSCreate(PETSC_COMM_SELF, &_ts));
+  PETSC_TRY(TSSetProblemType(_ts, TS_NONLINEAR));
+  PETSC_TRY(TSSetRHSFunction(_ts, nullptr, tsRHSFunction, this));
+  PETSC_TRY(VecCreateSeq(PETSC_COMM_SELF, _n_species, &_ts_X));
+
+  // Use dense matrix for Jacobian — 610×610 ~ 3MB, avoids sparse preallocation issues.
+  // PETSc's BDF/ARKIMEX with SuperLU_DIST or LU handles dense efficiently at this size.
+  PetscInt n = static_cast<PetscInt>(_n_species);
+  PETSC_TRY(MatCreateSeqDense(PETSC_COMM_SELF, n, n, nullptr, &_ts_J));
+  PETSC_TRY(MatSetFromOptions(_ts_J));
+
+  PETSC_TRY(TSSetRHSJacobian(_ts, _ts_J, _ts_J, tsRHSJacobian, this));
+  PETSC_TRY(TSSetType(_ts, _ts_type.c_str()));
+  PETSC_TRY(TSSetTolerances(_ts, _ts_atol, nullptr, _ts_rtol, nullptr));
+  // Allow unlimited SNES failures (retry with smaller step), matching extchem.c
+  PETSC_TRY(TSSetMaxSNESFailures(_ts, -1));
+  PETSC_TRY(TSSetSolution(_ts, _ts_X));
+  PETSC_TRY(TSSetFromOptions(_ts));
+
+#undef PETSC_TRY
+
+  _console << "MCMBoxModel: PETSc TS initialized (" << _n_species << " species, type="
+           << _ts_type << ", rtol=" << _ts_rtol << ", atol=" << _ts_atol << ")" << std::endl;
+}
+
+void
+MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
+{
+  PetscErrorCode ierr;
+
+#define PETSC_TRY(expr) do { ierr = (expr); if (ierr) mooseError("PETSc error ", ierr, " at ", __FILE__, ":", __LINE__); } while(0)
+
+  PETSC_TRY(TSSetTime(_ts, t0));
+  PETSC_TRY(TSSetMaxTime(_ts, t1));
+
+  // Set initial step size (very small for stiff chemistry)
+  PetscReal step0 = std::max((t1 - t0) * 1.0e-6, 1.0e-10);
+  PETSC_TRY(TSSetTimeStep(_ts, step0));
+  // Also set adaptive step limits
+  TSAdapt adapt;
+  PETSC_TRY(TSGetAdapt(_ts, &adapt));
+  PETSC_TRY(TSAdaptSetStepLimits(adapt, 1.0e-12, (t1 - t0)));
+  PETSC_TRY(TSSetSolution(_ts, _ts_X));
+
+  // Update time for SZA photolysis evaluation (used in evaluateCoefficients
+  // via tsRHSFunction → computeDCdt).
+  _t = t0;
+
+  // Run the integrator
+  PETSC_TRY(TSSolve(_ts, _ts_X));
+
+  // Get integration statistics
+  PetscInt steps;
+  TSConvergedReason reason;
+  PETSC_TRY(TSGetStepNumber(_ts, &steps));
+  PETSC_TRY(TSGetConvergedReason(_ts, &reason));
+
+#undef PETSC_TRY
+
+  // Diagnostic: print key species after TS integration
+  {
+    const PetscScalar *dbg_arr;
+    VecGetArrayRead(_ts_X, &dbg_arr);
+    auto c5h8 = _name_to_index.find("C5H8");
+    auto no2 = _name_to_index.find("NO2");
+    auto h2o2 = _name_to_index.find("H2O2");
+    auto o3 = _name_to_index.find("O3");
+    auto oh = _name_to_index.find("OH");
+    _console << "MCMBoxModel: TS [" << t0 << "," << t1 << "] C5H8="
+             << (c5h8 != _name_to_index.end() ? dbg_arr[c5h8->second] : -1.0)
+             << " NO2=" << (no2 != _name_to_index.end() ? dbg_arr[no2->second] : -1.0)
+             << " O3=" << (o3 != _name_to_index.end() ? dbg_arr[o3->second] : -1.0)
+             << " OH=" << (oh != _name_to_index.end() ? dbg_arr[oh->second] : -1.0)
+             << std::endl;
+    VecRestoreArrayRead(_ts_X, &dbg_arr);
+  }
+
+  _console << "MCMBoxModel: TS step [" << t0 << "," << t1 << "] "
+           << steps << " internal steps, reason=" << reason << std::endl;
+}
+
+// static
+PetscErrorCode
+MCMBoxModel::tsRHSFunction(TS ts, PetscReal t, Vec C, Vec F, void *ctx)
+{
+  MCMBoxModel *model = static_cast<MCMBoxModel *>(ctx);
+  const PetscScalar *c_arr;
+  PetscScalar *f_arr;
+
+  PetscFunctionBeginUser;
+  PetscCall(VecGetArrayRead(C, &c_arr));
+  PetscCall(VecGetArray(F, &f_arr));
+
+  // Build std::vector around PETSc array (no copy for 610 elements - acceptable)
+  std::vector<Real> C_vec(c_arr, c_arr + model->_n_species);
+  std::vector<Real> dC_vec;
+  model->computeDCdt(C_vec, dC_vec);
+
+  for (unsigned int i = 0; i < model->_n_species; ++i)
+    f_arr[i] = dC_vec[i];
+
+  PetscCall(VecRestoreArrayRead(C, &c_arr));
+  PetscCall(VecRestoreArray(F, &f_arr));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// static
+PetscErrorCode
+MCMBoxModel::tsRHSJacobian(TS ts, PetscReal t, Vec C, Mat Amat, Mat Pmat, void *ctx)
+{
+  MCMBoxModel *model = static_cast<MCMBoxModel *>(ctx);
+  const PetscScalar *c_arr;
+
+  PetscFunctionBeginUser;
+  PetscCall(VecGetArrayRead(C, &c_arr));
+
+  // Build concentration vector
+  std::vector<Real> C_vec(c_arr, c_arr + model->_n_species);
+
+  // Compute Jacobian triplets
+  std::vector<std::tuple<unsigned int, unsigned int, Real>> J;
+  model->computeJacobianTriplets(C_vec, J);
+
+  // Insert into PETSc matrix — use ADD_VALUES because multiple reactions
+  // contribute to the same (row,col) pair, and the triplets from
+  // computeJacobianTriplets are per-reaction contributions.
+  PetscCall(MatZeroEntries(Pmat));
+  for (const auto & [row, col, val] : J)
+  {
+    PetscInt irow = static_cast<PetscInt>(row);
+    PetscInt icol = static_cast<PetscInt>(col);
+    PetscScalar pval = val;
+    PetscCall(MatSetValues(Pmat, 1, &irow, 1, &icol, &pval, ADD_VALUES));
+  }
+
+  PetscCall(MatAssemblyBegin(Pmat, MAT_FINAL_ASSEMBLY));
+  PetscCall(MatAssemblyEnd(Pmat, MAT_FINAL_ASSEMBLY));
+  if (Amat != Pmat)
+  {
+    PetscCall(MatAssemblyBegin(Amat, MAT_FINAL_ASSEMBLY));
+    PetscCall(MatAssemblyEnd(Amat, MAT_FINAL_ASSEMBLY));
+  }
+
+  PetscCall(VecRestoreArrayRead(C, &c_arr));
+  PetscFunctionReturn(PETSC_SUCCESS);
 }

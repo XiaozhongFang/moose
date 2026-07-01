@@ -53,6 +53,13 @@ struct ParsedMechanism
 
   /// RO2 (peroxy radical) species list (AtChem2-compatible)
   std::vector<std::string> ro2_species;
+
+  /// Limiting-reagent flags: true = reaction uses min([A],[B]) formulation
+  /// (F0AM style for RO2+RO2 termination reactions)
+  std::vector<bool> is_limiting_reagent;
+
+  /// For LR reactions: which reactant is the limiting one (0,1,2)
+  std::vector<int> limiting_reactant;
 };
 
 /**

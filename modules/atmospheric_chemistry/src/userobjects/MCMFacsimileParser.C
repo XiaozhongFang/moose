@@ -175,6 +175,43 @@ MCMFacsimileParser::parse(const std::string & filename, const std::string & phot
   std::cout << "MCMFacsimileParser: Detected " << mech.ro2_species.size()
             << " RO2 species" << std::endl;
 
+  // Detect limiting-reagent (LR) reactions: RO2 + RO2 termination
+  // In F0AM, these use rate = k * min([RO2_i], [RO2_j]) instead of k * [RO2_i] * [RO2_j]
+  // Build a set for fast lookup
+  mech.is_limiting_reagent.assign(n_rxn, false);
+  mech.limiting_reactant.assign(n_rxn, -1);
+  std::set<std::string> ro2_set(mech.ro2_species.begin(), mech.ro2_species.end());
+  unsigned int n_lr = 0;
+  for (unsigned int r = 0; r < n_rxn; ++r)
+  {
+    // Check if the rate expression references RO2 (indicator of RO2 termination)
+    bool is_ro2_rxn = false;
+    for (const auto & [coeff, name] : _reactions[r].reactants)
+      if (ro2_set.count(name))
+        is_ro2_rxn = true;
+
+    if (is_ro2_rxn)
+    {
+      // Count RO2 reactants
+      std::vector<std::string> ro2_reactants;
+      for (const auto & [coeff, name] : _reactions[r].reactants)
+        if (ro2_set.count(name))
+          ro2_reactants.push_back(name);
+
+      // RO2 + RO2 (or RO2 + HO2) → LR
+      if (ro2_reactants.size() >= 2 &&
+          _reactions[r].reactants.size() == 2)
+      {
+        mech.is_limiting_reagent[r] = true;
+        mech.limiting_reactant[r] = -1; // -1 = auto-detect limiting species at runtime
+        n_lr++;
+      }
+    }
+  }
+  if (n_lr > 0)
+    std::cout << "MCMFacsimileParser: Detected " << n_lr
+              << " limiting-reagent (RO2 termination) reactions" << std::endl;
+
   // Transfer photolysis data — only for J values actually referenced in
   // the mechanism (not all 35 from the photolysis-rates file).  This
   // prevents MCMRatesMaterial from receiving excess CL/CMM/CNN entries

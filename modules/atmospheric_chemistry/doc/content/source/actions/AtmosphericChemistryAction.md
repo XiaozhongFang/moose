@@ -73,6 +73,30 @@ and 4D linear interpolation.
 []
 ```
 
+## Limiting Reagent (RO₂ Termination)
+
+The [!param](/AtmosphericChemistry/use_limiting_reagent) parameter (default
+`false`) enables the F0AM-style limiting-reagent formulation for RO₂+RO₂
+termination reactions. See the [`MCMBoxModel` documentation](MCMBoxModel.md#limiting-reagent-ro₂-termination)
+for the mathematical formulation and usage guidance.
+
+When enabled, the parser detects RO₂+RO₂ reactions during mechanism loading
+and applies:
+$$ R_r = k_r \cdot \min([\mathrm{RO_2^{\it i}}], [\mathrm{RO_2^{\it j}}])^2 $$
+instead of the standard $k_r \cdot [\mathrm{RO_2^{\it i}}] \cdot [\mathrm{RO_2^{\it j}}]$.
+
+This parameter is forwarded to the underlying `MCMBoxModel` UserObject in
+box mode. In coupled mode, it is not applicable (the `MCMRatesMaterial`
+always uses the standard formulation).
+
+## Family Conservation (DAE Method)
+
+The [!param](/AtmosphericChemistry/family_names), 
+[!param](/AtmosphericChemistry/family_members), and
+[!param](/AtmosphericChemistry/family_scaling) parameters enable F0AM-style
+chemical family conservation via DAE slack variables. See the
+[`MCMFamilyConstraint` documentation](MCMFamilyConstraint.md) for details.
+
 ## Example Input File Syntax
 
 ### Box Mode

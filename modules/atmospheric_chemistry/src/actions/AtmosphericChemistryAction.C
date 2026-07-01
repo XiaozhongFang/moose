@@ -12,10 +12,12 @@
 #include "AddVariableAction.h"
 #include "FEProblem.h"
 #include "pcrecpp.h"
+#include "libmesh/coupling_matrix.h"
 
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <set>
 
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_variable");
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_user_object");
@@ -97,7 +99,43 @@ AtmosphericChemistryAction::validParams()
       "Only effective when no species named 'RO2' exists in the mechanism. "
       "Recommended default: false (use Postprocessors for precise RO2 output).");
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
+  params.addParam<Real>("default_ic", 0.0,
+      "Default initial concentration (molec/cm³) for species without explicit ICs.\n"
+      "Set to 1e6 for large mechanisms to prevent Jacobian singularities.");
   params.addParam<bool>("roof_open", true, "Roof (chamber cover) open. false = CLOSED (all J=0)");
+  params.addParam<bool>("use_limiting_reagent", false,
+      "Enable F0AM-style limiting-reagent formulation for RO2+RO2 termination "
+      "reactions: rate = k * min([A],[B])² instead of k * [A] * [B]. "
+      "Default false (standard MCM chemistry). Set true for F0AM-compatible "
+      "RO2 termination or when comparing against F0AM reference outputs.");
+
+  // --- PETSc TS standalone integrator ---
+  params.addParam<bool>("petsc_ts", false,
+      "Enable PETSc TS standalone integrator for box mode (mode=box only). "
+      "Bypasses MOOSE's Newton solver and uses PETSc TS with internal adaptive "
+      "stepping for the ODE integration. When true, ODETimeDerivative and "
+      "ChemistryODEKernel are NOT created — MCMBoxModel::execute() handles "
+      "the integration and directly updates the solution.");
+  MooseEnum ts_type_enum("bdf arkimex sundials", "bdf");
+  params.addParam<MooseEnum>("petsc_ts_type", ts_type_enum,
+      "PETSc TS integrator type for standalone mode: 'bdf' (default), "
+      "'arkimex' (adaptive IMEX), or 'sundials' (CVODE via SUNDIALS).");
+  params.addParam<Real>("petsc_ts_rtol", 1e-6,
+      "Relative tolerance for PETSc TS adaptive integrator.");
+  params.addParam<Real>("petsc_ts_atol", 1e-10,
+      "Absolute tolerance for PETSc TS adaptive integrator.");
+
+  // --- Family conservation (F0AM DAE method) ---
+  params.addParam<std::vector<std::string>>("family_names", {},
+      "Names of chemical families for DAE conservation (e.g. 'NOx', 'Ox'). "
+      "If non-empty, family_{members,scaling} must also be provided.");
+  params.addParam<std::vector<std::vector<std::string>>>(
+      "family_members", {},
+      "Member species for each family. "
+      "First member is the DAE slack variable (algebraically constrained).");
+  params.addParam<std::vector<std::vector<Real>>>("family_scaling", {},
+      "Scaling/weighting factors for each family member. "
+      "E.g. Ox = O3 + NO2 + 2*NO3 → scaling = [1, 1, 2]");
 
   params.addClassDescription(
       "Unified atmospheric chemistry Action. Supports box mode (0-D ODE via "
@@ -111,7 +149,8 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   : Action(params),
     _mechanism_file(getParam<std::string>("mechanism_file")),
     _mode(getParam<MooseEnum>("mode")),
-    _include_transport(getParam<bool>("include_transport"))
+    _include_transport(getParam<bool>("include_transport")),
+    _use_petsc_ts(getParam<bool>("petsc_ts"))
 {
   // Reject absolute paths — prevents reading arbitrary system files via
   // malicious mechanism_file / photolysis_file parameters.
@@ -119,6 +158,11 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   // routinely use "../../../doc/..." to reference database files.
   if (!_mechanism_file.empty() && _mechanism_file[0] == '/')
     mooseError("AtmosphericChemistry: mechanism_file must be relative, got absolute: ", _mechanism_file);
+
+  // Validate: petsc_ts requires box mode
+  if (_use_petsc_ts && _mode != "box")
+    mooseError("AtmosphericChemistry: petsc_ts=true requires mode=box. "
+               "Coupled mode cannot use standalone PETSc TS integration.");
 
   // Parse the .fac mechanism file via MCMFacsimileParser (shared with MCMBoxModel)
   MCMFacsimileParser parser;
@@ -233,6 +277,32 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
                    "    []\n"
                    "  []\n")
              << std::endl;
+
+  // Load family conservation configuration
+  _family_names = getParam<std::vector<std::string>>("family_names");
+  if (!_family_names.empty())
+  {
+    _family_members = getParam<std::vector<std::vector<std::string>>>("family_members");
+    _family_scaling = getParam<std::vector<std::vector<Real>>>("family_scaling");
+    if (_family_members.size() != _family_names.size())
+      mooseError("AtmosphericChemistry: family_names (", _family_names.size(),
+                 ") and family_members (", _family_members.size(), ") must have same length");
+    if (_family_scaling.size() != _family_names.size())
+      mooseError("AtmosphericChemistry: family_names (", _family_names.size(),
+                 ") and family_scaling (", _family_scaling.size(), ") must have same length");
+    for (unsigned int i = 0; i < _family_names.size(); ++i)
+    {
+      if (_family_members[i].size() != _family_scaling[i].size())
+        mooseError("AtmosphericChemistry: Family '", _family_names[i],
+                   "' has ", _family_members[i].size(), " members but ",
+                   _family_scaling[i].size(), " scaling factors");
+    }
+    _console << "AtmosphericChemistry: Loaded " << _family_names.size()
+             << " family conservation groups: ";
+    for (const auto & fn : _family_names)
+      _console << fn << " ";
+    _console << std::endl;
+  }
 }
 
 const std::string &
@@ -279,7 +349,11 @@ AtmosphericChemistryAction::act()
   else if (_current_task == "add_user_object")
   {
     if (_mode == "box")
+    {
       actBoxAddUserObject();
+      if (!_family_names.empty())
+        actBoxAddFamilyUO();
+    }
   }
   else if (_current_task == "add_scalar_kernel")
   {
@@ -335,6 +409,8 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<unsigned int>("year") = getParam<unsigned int>("year");
   params.set<MooseEnum>("units") = getParam<MooseEnum>("units");
   params.set<Real>("jfac") = getParam<Real>("jfac");
+  params.set<Real>("default_ic") = getParam<Real>("default_ic");
+  params.set<bool>("use_limiting_reagent") = getParam<bool>("use_limiting_reagent");
   {
     auto scheme = getParam<MooseEnum>("photolysis_scheme");
     params.set<std::string>("photolysis_file") =
@@ -347,8 +423,81 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<Real>("albedo") = getParam<Real>("albedo");
   params.set<Real>("o3column") = getParam<Real>("o3column");
   params.set<Real>("altitude") = getParam<Real>("altitude");
+  // PETSc TS standalone integrator parameters
+  params.set<MooseEnum>("integrator") = _use_petsc_ts ? MooseEnum("moose petsc_ts", "petsc_ts") : MooseEnum("moose petsc_ts", "moose");
+  if (_use_petsc_ts)
+  {
+    params.set<MooseEnum>("petsc_ts_type") = getParam<MooseEnum>("petsc_ts_type");
+    params.set<Real>("petsc_ts_rtol") = getParam<Real>("petsc_ts_rtol");
+    params.set<Real>("petsc_ts_atol") = getParam<Real>("petsc_ts_atol");
+  }
   _problem->addUserObject("MCMBoxModel", "box_model", params);
   _console << "AtmosphericChemistry (box): Created MCMBoxModel UserObject" << std::endl;
+  if (_use_petsc_ts)
+    _console << "AtmosphericChemistry (box): PETSc TS standalone integrator enabled "
+             << "(type=" << getParam<MooseEnum>("petsc_ts_type")
+             << ", rtol=" << getParam<Real>("petsc_ts_rtol")
+             << ", atol=" << getParam<Real>("petsc_ts_atol") << ")" << std::endl;
+}
+
+void
+AtmosphericChemistryAction::actBoxAddFamilyUO()
+{
+  auto fam_params = _factory.getValidParams("MCMFamilyConstraint");
+  fam_params.set<std::vector<std::string>>("family_names") = _family_names;
+  fam_params.set<std::vector<std::vector<std::string>>>("family_members") = _family_members;
+  fam_params.set<std::vector<std::vector<Real>>>("family_scaling") = _family_scaling;
+  fam_params.set<std::vector<std::string>>("species_list") = _species;
+  _problem->addUserObject("MCMFamilyConstraint", "family_uo", fam_params);
+
+  // Build species variables list for family kernel
+  std::vector<VariableName> species_vars(_species.begin(), _species.end());
+
+  unsigned int fam_count = _family_names.size();
+  for (unsigned int f = 0; f < fam_count; ++f)
+  {
+    const auto & members = _family_members[f];
+    if (members.empty()) continue;
+
+    // Find the first member (slack variable) index in _species
+    unsigned int slack_idx = 0;
+    bool found = false;
+    for (unsigned int j = 0; j < _species.size(); ++j)
+    {
+      if (_species[j] == members[0])
+      {
+        slack_idx = j;
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+    {
+      _console << "AtmosphericChemistry Warning: Family '"
+               << _family_names[f] << "' slack species '"
+               << members[0] << "' not found in mechanism, skipping"
+               << std::endl;
+      continue;
+    }
+
+    // Create MCMFamilyScalarKernel for the slack variable
+    // (replaces ChemistryODEKernel to enforce DAE constraint)
+    auto fam_k_params = _factory.getValidParams("MCMFamilyScalarKernel");
+    fam_k_params.set<NonlinearVariableName>("variable") = _species[slack_idx];
+    fam_k_params.set<UserObjectName>("box_model") = "box_model";
+    fam_k_params.set<UserObjectName>("family_uo") = "family_uo";
+    fam_k_params.set<unsigned int>("species_index") = slack_idx;
+    fam_k_params.set<std::string>("family_name") = _family_names[f];
+    fam_k_params.set<std::vector<VariableName>>("species_variables") = species_vars;
+    _problem->addScalarKernel("MCMFamilyScalarKernel",
+                              "fam_" + _family_names[f] + "_" + _species[slack_idx],
+                              fam_k_params);
+
+    _console << "AtmosphericChemistry (box): Family '"
+             << _family_names[f] << "' slack = "
+             << members[0] << " (idx=" << slack_idx << ")"
+             << std::endl;
+  }
 }
 
 void
@@ -357,12 +506,49 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
   // Build the species_variables list for ChemistryODEKernel (includes RO2 for coupling)
   std::vector<VariableName> species_vars(_species.begin(), _species.end());
 
+  // PETSc TS mode: create standard ODETimeDerivative + ChemistryODEKernel
+  // for every species to satisfy MOOSE's kernel coverage check.
+  // ChemistryODEKernel short-circuits via usePETScTS() to skip getDCdt().
+  if (_use_petsc_ts)
+  {
+    for (unsigned int j = 0; j < _species.size(); ++j)
+    {
+      auto td_params = _factory.getValidParams("ODETimeDerivative");
+      td_params.set<NonlinearVariableName>("variable") = _species[j];
+      _problem->addScalarKernel("ODETimeDerivative", "td_" + _species[j], td_params);
+
+      auto chem_params = _factory.getValidParams("ChemistryODEKernel");
+      chem_params.set<NonlinearVariableName>("variable") = _species[j];
+      chem_params.set<UserObjectName>("box_model") = "box_model";
+      chem_params.set<unsigned int>("species_index") = j;
+      chem_params.set<std::vector<VariableName>>("species_variables") = species_vars;
+      _problem->addScalarKernel("ChemistryODEKernel", "chem_" + _species[j], chem_params);
+    }
+    _console << "AtmosphericChemistry (box): PETSc TS mode active — "
+             << "created ODETimeDerivative + ChemistryODEKernel (short-circuited) for "
+             << _species.size() << " species" << std::endl;
+  }
+  else
+  {
+
+  // If families are active, identify slack variable indices to skip
+  // (MCMFamilyScalarKernel replaces ChemistryODEKernel for slack species)
+  std::set<std::string> slack_species;
+  for (unsigned int f = 0; f < _family_names.size(); ++f)
+    if (!_family_members[f].empty())
+      slack_species.insert(_family_members[f][0]); // first member = slack
+
   for (unsigned int j = 0; j < _species.size(); ++j)
   {
     // ODETimeDerivative: contributes du/dt to the residual
     auto td_params = _factory.getValidParams("ODETimeDerivative");
     td_params.set<NonlinearVariableName>("variable") = _species[j];
     _problem->addScalarKernel("ODETimeDerivative", "td_" + _species[j], td_params);
+
+    // For family slack variables, MCMFamilyScalarKernel is created separately.
+    // Skip ChemistryODEKernel here to avoid double-counting residuals.
+    if (slack_species.count(_species[j]))
+      continue;
 
     // ChemistryODEKernel: contributes -dC/dt (chemical source)
     auto chem_params = _factory.getValidParams("ChemistryODEKernel");
@@ -387,6 +573,39 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
   else
     _console << "AtmosphericChemistry (box): Created ODETimeDerivative + ChemistryODEKernel for "
              << _species.size() << " species" << std::endl;
+
+set_coupling:
+  // ── Set sparse Jacobian coupling pattern ──
+  // Build name→index map for the mechanism species.
+  // Compute per-species coupling: species i couples to species j if both
+  // participate in the same reaction (j is a reactant).
+  std::map<std::string, unsigned int> sp_idx;
+  for (unsigned int i = 0; i < _species.size(); ++i)
+    sp_idx[_species[i]] = i;
+
+  auto cm = std::make_unique<libMesh::CouplingMatrix>(_species.size());
+  for (unsigned int i = 0; i < _species.size(); ++i)
+  {
+    (*cm)(i, i) = 1;  // always self-coupled (diagonal Jacobian)
+
+    // Find reactions where species i participates
+    for (unsigned int r = 0; r < _reactions.size(); ++r)
+    {
+      if (std::abs(_stoichiometric_matrix[i][r]) < 1.0e-30)
+        continue;
+      // Species i participates in reaction r → couple to all reactants of r
+      for (const auto & reactant_pair : _reactions[r].reactants)
+      {
+        auto it = sp_idx.find(reactant_pair.second);
+        if (it != sp_idx.end())
+          (*cm)(i, it->second) = 1;
+      }
+    }
+  }
+  _problem->setCouplingMatrix(std::move(cm), /*nl_sys_num=*/0);
+  _console << "AtmosphericChemistry (box): Set sparse Jacobian coupling pattern"
+           << " (" << _species.size() << "×" << _species.size() << ")" << std::endl;
+  } // end else (!_use_petsc_ts)
 }
 
 // ===== Coupled mode tasks (equivalent to old MCMFacsimileAction) =====

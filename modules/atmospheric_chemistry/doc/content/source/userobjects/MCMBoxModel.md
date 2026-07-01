@@ -102,6 +102,63 @@ $$ \frac{\mathrm{d}C_i}{\mathrm{d}t} \mathrel{-}= k_{\text{dil}} \cdot (C_i - C_
 This matches AtChem2's DILUTE parameter.  Background concentrations default
 to zero (clean air dilution).
 
+### Limiting Reagent (RO₂ Termination)
+
+The [!param](/UserObjects/MCMBoxModel/use_limiting_reagent) parameter (default
+`false`) controls whether RO₂+RO₂ termination reactions use the F0AM-style
+"limiting reagent" formulation instead of the standard bimolecular product.
+
+**Standard (default, `use_limiting_reagent = false`):**
+
+For a reaction $\mathrm{RO_2^{\it i} + RO_2^{\it j} \xrightarrow{k} products}$,
+the rate follows the standard second-order law:
+
+$$ R_r = k_r \cdot [\mathrm{RO_2^{\it i}}] \cdot [\mathrm{RO_2^{\it j}}] $$
+
+**F0AM limiting reagent (`use_limiting_reagent = true`):**
+
+When enabled, the reaction rate is governed by the *smaller* of the two RO₂
+concentrations:
+
+$$ R_r = k_r \cdot \min([\mathrm{RO_2^{\it i}}], [\mathrm{RO_2^{\it j}}])^2 $$
+
+This formulation avoids double-counting when RO₂ species are lumped
+(F0AM's RO₂ sum variable represents the total peroxy radical pool).
+It is physically motivated by the fact that two RO₂ radicals cannot
+react faster than the less abundant one permits.
+
+**When to enable:**
+
+| Scenario | Recommendation |
+|----------|---------------|
+| Standard MCM box model (AtChem2-compatible) | `false` (default) |
+| F0AM-compatible simulation | `true` |
+| Mechanisms with explicit RO₂ lumping | `true` |
+| Comparing against F0AM reference outputs | `true` |
+| Comparing against AtChem2/CVODE reference | `false` |
+
+**Jacobian:**
+
+The LR formulation introduces a $C^0$ discontinuity at
+$[\mathrm{RO_2^{\it i}}] = [\mathrm{RO_2^{\it j}}]$, but the derivative
+away from the crossing point is well-defined:
+
+$$ \frac{\partial R_r}{\partial C_{\min}} = 2 k_r \cdot \min([\mathrm{RO_2^{\it i}}], [\mathrm{RO_2^{\it j}}]) $$
+
+$$ \frac{\partial R_r}{\partial C_{\text{other}}} = 0 $$
+
+The analytical Jacobian handles this via a conditional branch — only the
+limiting species contributes to the Jacobian, matching F0AM's
+`Jac_eval.m` behavior.
+
+**Auto-detection:**
+
+The parser automatically detects RO₂+RO₂ termination reactions during
+mechanism loading by checking if both reactants appear in the peroxy
+radical species list. However, the detected flags are only used when
+`use_limiting_reagent = true` — the standard formulation is always
+preserved by default.
+
 ### Lazy Initialization
 
 `MCMBoxModel` supports lazy initialization: if the MOOSE framework calls

@@ -13,11 +13,14 @@
 #include "MCMFacsimileParser.h"
 #include "HybridJTableReader.h"
 #include "BottomUpJIntegrator.h"
+#include "JCalibrator.h"
 #include "FunctionParserUtils.h"
+#include <petscts.h>
 
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <functional>
 #include <map>
 
 /**
@@ -178,15 +181,30 @@ class MCMBoxModel : public GeneralUserObject, public FunctionParserUtils<false>
 public:
   static InputParameters validParams();
   MCMBoxModel(const InputParameters & params);
+  ~MCMBoxModel();
 
   using FunctionParserUtils<false>::evaluate;
   using FunctionParserUtils<false>::_func_params;
 
   // -- GeneralUserObject interface --
   void initialize() override;
-  void execute() override {}
+  void execute() override;
   void finalize() override {}
 
+  // -- PETSc TS standalone integrator (box mode only) --
+  /** Whether PETSc TS mode is active */
+  bool usePETScTS() const { return _use_petsc_ts; }
+  /** Initialize PETSc TS context */
+  void setupPETScTS();
+  /** Run one PETSc TS step from t0 to t1, update _ts_X in-place */
+  void runPETScStep(PetscReal t0, PetscReal t1);
+
+  // -- PETSc TS callback wrappers (static, used as PETSc function pointers) --
+protected:
+  static PetscErrorCode tsRHSFunction(TS ts, PetscReal t, Vec C, Vec F, void *ctx);
+  static PetscErrorCode tsRHSJacobian(TS ts, PetscReal t, Vec C, Mat Amat, Mat Pmat, void *ctx);
+
+public:
   // -- Core chemistry computation --
   /**
    * Compute dC/dt for given species concentrations.
@@ -275,7 +293,7 @@ public:
   const std::vector<std::string> & reactionNames() const { return _reaction_names; }
 
   /** Populate internal matrices from a ParsedMechanism. */
-  void loadMechanism(const ParsedMechanism & mech);
+  void loadMechanism(const ParsedMechanism & mech, bool use_limiting_reagent = false);
 
   // -- Constrained species (AtChem2 mode) --
   /** Mark species as constrained (fixed to observed values, not solved). */
@@ -297,6 +315,12 @@ public:
   /** Compute net rate contribution of reaction r to species s. */
   Real speciesReactionRate(unsigned int s, unsigned int r, const std::vector<Real> & C) const;
 
+  /** Compute total loss rate for species s (sum of consuming reactions). */
+  Real speciesLossRate(unsigned int s, const std::vector<Real> & C) const;
+
+  /** Compute total production rate for species s (sum of producing reactions). */
+  Real speciesProductionRate(unsigned int s, const std::vector<Real> & C) const;
+
   /** Compute all reaction rates as a vector. */
   void allReactionRates(const std::vector<Real> & C, std::vector<Real> & rates) const;
 
@@ -304,37 +328,21 @@ public:
   /** Enable Hybrid J (TUV lookup) photolysis. Call before loadMechanism. */
   void enableHybridPhotolysis(const std::string & table_dir);
 
-  /** Map J<N> names to reaction indices and set up photolysis rate pointer. */
-  void mapPhotolysisReactions();
-
-  /** Update photolysis rates for current SZA/alt/albedo/O3. */
-  void updatePhotolysis(Real sza, Real albedo, Real o3col, Real altitude);
-
   /** Load BottomUp lamp flux and reaction map. */
   void loadBottomUpData(const std::string & data_dir, const std::string & flux_file);
-
-  /** Update photolysis via BottomUp integration (constant T,P for chamber). */
-  void updatePhotolysisBottomUp();
-
-  /** Update photolysis using SZA formula (default MCM method). */
-  void updatePhotolysisSZA(Real sza, Real jfac = 1.0);
 
   /** ROOF (chamber cover) switch. CLOSED = all photolysis rates forced to zero. */
   void setRoofOpen(bool open) { _roof_open = open; }
   bool isRoofOpen() const { return _roof_open; }
 
+  /** Set JFAC scaling factor (light intensity multiplier). */
+  void setJFac(Real jfac) { _jfac = jfac; }
+  Real getJFac() const { return _jfac; }
+
   /** Invalidate BottomUp J-value cache. Call when photolysis-relevant
    *  parameters (T, P, lamp flux, reaction map) change during a simulation.
    *  Next evaluateCoefficients() will recompute all J-values. */
   void invalidatePhotolysisCache() { _bottomup_j_valid = false; }
-
-  /**
-   * Auto-calculate JFAC from a reference species (e.g., J4=NO2).
-   * JFAC = constrained_value / parameterized_value.
-   * @param ref_j_name Reference J name (e.g. "J4"), must have constrained data
-   * @param constrained_val Reference species' measured (constrained) J value
-   */
-  void calcJFAC(const std::string & ref_j_name, Real constrained_val);
 
   // -- Solar cycle + convergence (F0AM nDays/Converge) --
   /** Set solar cycle params for multi-day simulation. */
@@ -343,12 +351,14 @@ public:
   /** Compute cos(SZA) at given seconds since midnight (Madronich 1993). */
   Real cosSZA(Real seconds) const;
 
-  /** Run one solar cycle day: update photolysis at each time step. */
-  void advanceSolarCycle(Real seconds_from_midnight);
-
   // -- Dilution --
   /** Set dilution rate (kdil, /s) and background concentrations. */
   void setDilution(Real kdil, const std::vector<Real> & conc_bkgd);
+
+  /** Enable Gaussian dispersion dilution (F0AM tgauss model).
+   *  dilrate = -1/(tgauss + 2*(t+t_start)) * (conc - conc_bkgd) */
+  void setGaussianDispersion(Real tgauss, const std::vector<Real> & conc_bkgd,
+                             Real t_start = 0.0);
 
   /** Compute dC/dt with dilution: dC/dt = chemistry - kdil*(C - C_bkgd). */
   void computeDCdtWithDilution(const std::vector<Real> & C, std::vector<Real> & dC) const;
@@ -382,7 +392,6 @@ protected:
   enum PhotolysisMethod { MCM_SZA, HYBRID, BOTTOMUP } _photolysis_method;
   std::unique_ptr<HybridJTableReader> _hybrid_reader;
   std::unique_ptr<BottomUpJIntegrator> _bottomup_integrator;
-  std::vector<unsigned int> _j_reaction_indices;
   std::vector<Real> _j_CL, _j_CMM, _j_CNN;
 
   /// Units: true = ppb, false = molec/cm³
@@ -402,6 +411,10 @@ protected:
   // -- Dilution --
   Real _kdil;
   std::vector<Real> _conc_bkgd;
+  /// Gaussian dispersion parameters (F0AM tgauss model)
+  Real _tgauss;          // Gaussian time constant (s)
+  Real _t_start_dil;     // Start time for Gaussian dispersion
+  bool _use_gaussian;    // true = use Gaussian, false = simple first-order
 
   /// ROOF chamber cover: false = CLOSED (all J=0), true = OPEN (normal)
   bool _roof_open;
@@ -442,8 +455,17 @@ protected:
   mutable std::vector<Real> _cached_C;
   /// Cached diagonal Jacobian elements
   mutable std::vector<Real> _cached_diag_J;
-  /// Cached off-diagonal Jacobian elements: key = (row << 32) | col
-  mutable std::unordered_map<uint64_t, Real> _cached_offdiag_J;
+  /// Cached off-diagonal Jacobian elements: CSR format (row-major, sorted cols per row)
+  mutable std::vector<unsigned int> _cached_od_cols;
+  mutable std::vector<Real> _cached_od_vals;
+  mutable std::vector<size_t> _cached_od_row_ptr;
+
+  /// Limiting-reagent flags (F0AM RO2 termination reactions)
+  std::vector<bool> _limiting_reagent;
+  /// For LR reactions: limiting reactant index (-1 = auto-detect at runtime)
+  std::vector<int> _limiting_reactant;
+  /// Whether LR (min([A],[B])) formulation is active — OFF by default
+  bool _use_limiting_reagent;
 
   /// Scratch buffers for computeDCdt (Per.14 — reused across calls, no per-call allocation)
   mutable std::vector<Real> _scratch_G;
@@ -458,6 +480,9 @@ protected:
   mutable Real _cached_bottomup_P;
   mutable bool _bottomup_j_valid;
 
+  /// JFAC auto-calibration (F0AM jcorr from observed J values)
+  std::unique_ptr<JCalibrator> _jcalibrator;
+
   // ── Per-parser variable indirection (ParseAndDeduceVariables) ──
   /// _func_params indices each coefficient parser actually references
   std::vector<std::vector<unsigned int>> _coeff_var_indices;
@@ -468,6 +493,27 @@ protected:
   /// Pre-allocated local param buffer per reaction parser
   std::vector<std::vector<Real>> _reaction_local_params;
 
+  // ── Fast pre-compiled handlers (bypass fparser tree traversal) ──
+  /// Fast handler: takes full _func_params, returns evaluated value.
+  /// nullptr means fall back to fparser.
+  using FastHandler = std::function<Real(const std::vector<Real> &)>;
+  std::vector<FastHandler> _coeff_fast;
+  std::vector<FastHandler> _reaction_fast;
+  /// Compile a coefficient or reaction expression to a fast handler.
+  /// Returns nullptr if the expression doesn't match any known pattern.
+  FastHandler compileFastHandler(const std::string & expr,
+                                 const std::vector<unsigned int> & var_indices) const;
+
   /// Build the sparse Jacobian cache from the current _cached_C
   void _buildJacobianCache() const;
+
+  // -- PETSc TS members --
+  bool _use_petsc_ts = false;
+  TS _ts = nullptr;
+  Vec _ts_X = nullptr;
+  Mat _ts_J = nullptr;
+  PetscReal _ts_rtol = 1e-6;
+  PetscReal _ts_atol = 1e-10;
+  std::string _ts_type = "bdf";
 };
+

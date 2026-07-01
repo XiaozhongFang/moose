@@ -72,7 +72,7 @@
   [./vs_F0AM_chamber_S1_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S1_box.i
-    csvdiff = vs_F0AM_chamber_S1_box.csv
+    csvdiff = gold/vs_F0AM_chamber_S1_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     heavy = true
@@ -81,7 +81,7 @@
   [./vs_F0AM_chamber_S2_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S2_box.i
-    csvdiff = vs_F0AM_chamber_S2_box.csv
+    csvdiff = gold/vs_F0AM_chamber_S2_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     heavy = true
@@ -90,7 +90,7 @@
   [./vs_F0AM_chamber_S3_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S3_box.i
-    csvdiff = vs_F0AM_chamber_S3_box.csv
+    csvdiff = gold/vs_F0AM_chamber_S3_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     heavy = true
@@ -100,7 +100,7 @@
     type = CSVDiff
     prereq = vs_F0AM_chamber_S2_box
     input = vs_F0AM_chamber_S2b_box.i
-    csvdiff = vs_F0AM_chamber_S2b_box.csv
+    csvdiff = gold/vs_F0AM_chamber_S2b_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     heavy = true
@@ -117,5 +117,10 @@
     input = vs_atchem2_transport_building.i
     requirement = 'The coupled mode with Diffusion + atchem2_example chemistry + CO emission plume shall converge.'
     heavy = true
+  [../]
+  [./test_family_conservation]
+    type = RunApp
+    input = test_family_conservation.i
+    requirement = 'The box mode with family conservation (NOx = NO2 + NO) shall run without error. The DAE slack variable (NO2) absorbs the algebraic constraint to conserve NOx.'
   [../]
 []

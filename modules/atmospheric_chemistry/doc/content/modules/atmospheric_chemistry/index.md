@@ -330,11 +330,14 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 | `vs_F0AM_chamber_S2b_box` | CSVDiff | 610 | S2b (restart, jcorr=10): BOTTOMUP vs F0AM |
 | `vs_F0AM_dielcycle_box` | RunApp | 2908 | SOAS diel cycle: MCM_SZA |
 | `vs_atchem2_transport_building` | Exodiff | 29 | NS + chemistry + building emission |
+| `test_family_conservation` | RunApp | 29 | Family conservation (NOx = NO2 + NO) |
+| `box_chamber` | — | 610 | F0AM chamber example (3h, MCM_SZA) |
+| `box_dielcycle` | — | 2908 | F0AM diel cycle example (24h) |
 
 ## Objects
 
 - [`AtmosphericChemistryAction`](source/actions/AtmosphericChemistryAction.md) — Unified Action (box / coupled modes)
-- [`MCMBoxModel`](source/userobjects/MCMBoxModel.md) — 0-D chemical ODE engine with caching interface and pluggable sparse matrix backends (CSR/COO/DENSE/CSC)
+- [`MCMBoxModel`](source/userobjects/MCMBoxModel.md) — 0-D chemical ODE engine with caching interface, pluggable sparse matrix backends (CSR/COO/DENSE/CSC), and optional F0AM-style limiting-reagent (LR) formulation for RO₂ termination
 - [`ChemistryODEKernel`](source/kernels/ChemistryODEKernel.md) — Box mode ScalarKernel bridge to MCMBoxModel
 - [`ChemicalSourceKernel`](source/kernels/ChemicalSourceKernel.md) — FEM chemical source with analytical Jacobian + CSR sparse reactant matrix
 - [`MCMRatesMaterial`](source/materials/MCMRatesMaterial.md) — Runtime rate evaluation (coupled mode) with roof_open photolysis switch
@@ -348,5 +351,14 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 - [`MCMPhotolysisPostprocessor`](source/postprocessors/MCMPhotolysisPostprocessor.md) — Individual photolysis J-values
 - [`MCMRO2Kernel`](source/kernels/MCMRO2Kernel.md) — RO2 algebraic kernel (pins RO2 to sum of peroxy radicals)
 - [`MCMRO2Postprocessor`](source/postprocessors/MCMRO2Postprocessor.md) — Total peroxy radical (RO2) concentration
+- [`MCMFamilyConstraint`](source/userobjects/MCMFamilyConstraint.md) — Chemical family conservation (DAE method)
+- [`MCMFamilyScalarKernel`](source/kernels/MCMFamilyScalarKernel.md) — Family conservation ScalarKernel (DAE slack variable)
+- [`MCMReactionRatePostprocessor`](source/postprocessors/MCMReactionRatePostprocessor.md) — Single reaction rate output
+- [`MCMSpeciesLossRatePostprocessor`](source/postprocessors/MCMSpeciesLossRatePostprocessor.md) — Species loss rate diagnostic
+- [`MCMSpeciesProductionRatePostprocessor`](source/postprocessors/MCMSpeciesProductionRatePostprocessor.md) — Species production rate diagnostic
+- [`MCMLifetimePostprocessor`](source/postprocessors/MCMLifetimePostprocessor.md) — Chemical lifetime (tau = C / loss_rate)
+- [`JCalibrator`](source/utils/JCalibrator.md) — JFAC auto-calibration from observed J values (F0AM jcorr)
+- [`MCMInputInterpolator`](source/utils/MCMInputInterpolator.md) — Time-interpolation for input data (F0AM InputInterp)
+- [`EKMAScanner`](source/utils/EKMAScanner.md) — EKMA sensitivity scan (VOC × NOx grid)
 
 !syntax complete groups=AtmosphericChemistryApp level=3

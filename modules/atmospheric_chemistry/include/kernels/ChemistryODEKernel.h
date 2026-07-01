@@ -51,5 +51,3 @@ protected:
   mutable std::vector<Real> _C_buffer;
   const std::vector<Real> & _buildC() const;
 };
-
-

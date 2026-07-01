@@ -446,7 +446,7 @@ MCMRatesMaterial::computeQpProperties()
       local[j] = _func_params[indices[j]];
 
     Real val = evaluate(_coeff_parsers[i], local);
-    if (std::isnan(val))
+    if (std::isnan(val) || std::isinf(val))
       val = 0.0;
     _func_params[5 + i] = val;
   }
@@ -469,7 +469,7 @@ MCMRatesMaterial::computeQpProperties()
   for (unsigned int i = 0; i < _n_reactions; ++i)
   {
     Real rate = _k_values[i];
-    if (std::isnan(rate))
+    if (std::isnan(rate) || std::isinf(rate))
       rate = 0.0;
     const auto & row = _reactant_matrix[i];
     for (size_t j = 0; j + 1 < row.size(); j += 2)

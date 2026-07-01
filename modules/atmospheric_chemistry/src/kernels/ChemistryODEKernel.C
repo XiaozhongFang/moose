@@ -53,8 +53,13 @@ ChemistryODEKernel::ChemistryODEKernel(const InputParameters & params)
 void
 ChemistryODEKernel::reinit()
 {
-  // Invalidate the BoxModel cache so the next getDCdt / getJacobian*
-  // call triggers a fresh full-system computation.
+  // PETSc TS mode: skip cache invalidation — MCMBoxModel::execute() handles integration
+  if (_box_model.usePETScTS())
+    return;
+
+  // Invalidate caches so the next Newton iteration uses fresh photolysis
+  // and Jacobian.  _dirty flag is set; cache rebuild only happens once
+  // on the first getDCdt() call (609 remaining calls find _dirty=false).
   _box_model.markDirty();
   _box_model.setCurrentTime(_t);
 }
@@ -81,6 +86,10 @@ ChemistryODEKernel::_buildC() const
 Real
 ChemistryODEKernel::computeQpResidual()
 {
+  // PETSc TS mode: chemical source handled by MCMBoxModel::execute()
+  if (_box_model.usePETScTS())
+    return 0.0;
+
   // R = -dC/dt  (ODEKernel convention: R = du/dt - f, chemical source is f)
   Real dCdt = _box_model.getDCdt(_species_idx, _buildC());
   // If user variable stores ppb, convert dC/dt from molec/cm³/s back to ppb/s
@@ -92,11 +101,17 @@ ChemistryODEKernel::computeQpResidual()
 Real
 ChemistryODEKernel::computeQpJacobian()
 {
+  // PETSc TS mode: Jacobian handled by MCMBoxModel::execute()
+  if (_box_model.usePETScTS())
+    return 0.0;
   return -_box_model.getJacobianDiagonal(_species_idx, _buildC());
 }
 
 Real
 ChemistryODEKernel::computeQpOffDiagJacobianScalar(unsigned int jvar)
 {
+  // PETSc TS mode: Jacobian handled by MCMBoxModel::execute()
+  if (_box_model.usePETScTS())
+    return 0.0;
   return -_box_model.getJacobianOffDiagonal(_species_idx, jvar, _buildC());
 }
