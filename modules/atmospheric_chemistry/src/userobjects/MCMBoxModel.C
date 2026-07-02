@@ -1606,19 +1606,17 @@ MCMBoxModel::setupPETScTS()
   // reactions involving i.  This matches the Jacobian sparsity pattern from
   // computeJacobianTriplets.
   PetscInt n = static_cast<PetscInt>(_n_species);
-  // Preallocate each row for ALL columns (dense-lite).  610 species ×
-  // 610 entries ≈ 3 MB; even full MCM (5832 species) is ≈ 272 MB.
-  // The alternative (stoichiometry-based preallocation) is fragile because
-  // tsRHSJacobian may produce entries outside the reaction-product pattern
-  // (chain-rule intermediates), and MatSetOption(MAT_NEW_NONZERO_ALLOCATION_ERR,
-  // PETSC_FALSE) may be reset by TSSetFromOptions.
-  std::vector<PetscInt> nnz_per_row(n, n);
-  _console << "MCMBoxModel: Jacobian AIJ preallocation: " << n << "×" << n
+  // Preallocate the DIAGONAL portion (all rows are local in seq mode).
+  // nz = n means every row gets slots for all n columns — dense preallocation.
+  // For 610 species this is 610×610 ≈ 3 MB; for full MCM (5832) ≈ 272 MB.
+  // Must use nz > 0 (not 0) because with nz=0 the nnz[] array is interpreted
+  // as OFF-DIAGONAL preallocation, leaving the diagonal with 0 slots.
+  _console << "MCMBoxModel: Jacobian dense preallocation: " << n << "×" << n
            << " (" << (n * n * (PetscInt)sizeof(PetscScalar) / (1024*1024))
            << " MB)" << std::endl;
-  PETSC_TRY(MatCreateSeqAIJ(PETSC_COMM_SELF, n, n, 0, nnz_per_row.data(), &_ts_J));
+  PETSC_TRY(MatCreateSeqAIJ(PETSC_COMM_SELF, n, n, n, nullptr, &_ts_J));
   PETSC_TRY(MatSetFromOptions(_ts_J));
-  // Also disable the strict allocation check as a safety net.
+  // Also disable strict allocation check as a safety net.
   PETSC_TRY(MatSetOption(_ts_J, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE));
 
   PETSC_TRY(TSSetRHSJacobian(_ts, _ts_J, _ts_J, tsRHSJacobian, this));

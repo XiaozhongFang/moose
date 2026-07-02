@@ -126,6 +126,7 @@ function configure_petsc()
       --download-parmetis=1 \
       --download-scalapack=1 \
       --download-slepc=1 \
+      --download-sundials2=1 \
       --download-strumpack=1 \
       --download-superlu_dist=1 \
       --download-kokkos=1 \
