@@ -239,7 +239,7 @@ MCMBoxModel::validParams()
       "ODE integrator for box mode: 'moose' (default, through MOOSE's Newton solver) "
       "or 'petsc_ts' (PETSc TS, bypasses MOOSE solver for chemistry)");
 
-  MooseEnum ts_type_enum("bdf arkimex eimex rosw mimex beuler cn rk theta sspl", "bdf");
+  MooseEnum ts_type_enum("bdf arkimex eimex rosw mimex beuler cn rk theta ssp sundials", "bdf");
   params.addParam<MooseEnum>("petsc_ts_type", ts_type_enum,
       "PETSc TS integrator type: 'bdf' (default), 'arkimex', or 'sundials' (CVODE).");
   params.addParam<Real>("petsc_ts_rtol", 1e-6,
@@ -309,9 +309,9 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
 MCMBoxModel::~MCMBoxModel()
 {
   // Clean up PETSc TS objects (safe if never initialized — pointers are null)
-  if (_ts_J) { MatDestroy(&_ts_J); _ts_J = nullptr; }
-  if (_ts_X) { VecDestroy(&_ts_X); _ts_X = nullptr; }
-  if (_ts)   { TSDestroy(&_ts);   _ts = nullptr; }
+  if (_ts_J) { CHKERRABORT(PETSC_COMM_SELF, MatDestroy(&_ts_J)); _ts_J = nullptr; }
+  if (_ts_X) { CHKERRABORT(PETSC_COMM_SELF, VecDestroy(&_ts_X)); _ts_X = nullptr; }
+  if (_ts)   { CHKERRABORT(PETSC_COMM_SELF, TSDestroy(&_ts));   _ts = nullptr; }
 }
 
 void
@@ -1532,13 +1532,13 @@ MCMBoxModel::execute()
   NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
   {
     PetscScalar *x_arr;
-    VecGetArray(_ts_X, &x_arr);
+    CHKERRABORT(PETSC_COMM_SELF, VecGetArray(_ts_X, &x_arr));
     for (unsigned int i = 0; i < _n_species; ++i)
     {
       MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
       x_arr[i] = sv.sln()[0];
     }
-    VecRestoreArray(_ts_X, &x_arr);
+    CHKERRABORT(PETSC_COMM_SELF, VecRestoreArray(_ts_X, &x_arr));
   }
 
   // Run PETSc TS integration from t_start to t_end
@@ -1549,7 +1549,7 @@ MCMBoxModel::execute()
   // Also update sys.solution for consistency (used by next step's predictor).
   {
     PetscScalar *x_arr;
-    VecGetArray(_ts_X, &x_arr);
+    CHKERRABORT(PETSC_COMM_SELF, VecGetArray(_ts_X, &x_arr));
     NumericVector<Number> & sys_sol = *nl.system().solution;
     for (unsigned int i = 0; i < _n_species; ++i)
     {
@@ -1562,7 +1562,7 @@ MCMBoxModel::execute()
     }
     sys_sol.close();
     nl.solution().close();
-    VecRestoreArray(_ts_X, &x_arr);
+    CHKERRABORT(PETSC_COMM_SELF, VecRestoreArray(_ts_X, &x_arr));
     *const_cast<NumericVector<Number>*>(nl.currentSolution()) = nl.solution();
   }
 
@@ -1688,10 +1688,9 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
   // Diagnostic: print key species after TS integration
   {
     const PetscScalar *dbg_arr;
-    VecGetArrayRead(_ts_X, &dbg_arr);
+    CHKERRABORT(PETSC_COMM_SELF, VecGetArrayRead(_ts_X, &dbg_arr));
     auto c5h8 = _name_to_index.find("C5H8");
     auto no2 = _name_to_index.find("NO2");
-    auto h2o2 = _name_to_index.find("H2O2");
     auto o3 = _name_to_index.find("O3");
     auto oh = _name_to_index.find("OH");
     _console << "MCMBoxModel: TS [" << t0 << "," << t1 << "] C5H8="
@@ -1700,7 +1699,7 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
              << " O3=" << (o3 != _name_to_index.end() ? dbg_arr[o3->second] : -1.0)
              << " OH=" << (oh != _name_to_index.end() ? dbg_arr[oh->second] : -1.0)
              << std::endl;
-    VecRestoreArrayRead(_ts_X, &dbg_arr);
+    CHKERRABORT(PETSC_COMM_SELF, VecRestoreArrayRead(_ts_X, &dbg_arr));
   }
 
   _console << "MCMBoxModel: TS step [" << t0 << "," << t1 << "] "
@@ -1709,7 +1708,7 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
 
 // static
 PetscErrorCode
-MCMBoxModel::tsRHSFunction(TS ts, PetscReal t, Vec C, Vec F, void *ctx)
+MCMBoxModel::tsRHSFunction(TS /*ts*/, PetscReal /*t*/, Vec C, Vec F, void *ctx)
 {
   MCMBoxModel *model = static_cast<MCMBoxModel *>(ctx);
   const PetscScalar *c_arr;
@@ -1743,7 +1742,7 @@ MCMBoxModel::tsRHSFunction(TS ts, PetscReal t, Vec C, Vec F, void *ctx)
 
 // static
 PetscErrorCode
-MCMBoxModel::tsRHSJacobian(TS ts, PetscReal t, Vec C, Mat Amat, Mat Pmat, void *ctx)
+MCMBoxModel::tsRHSJacobian(TS /*ts*/, PetscReal /*t*/, Vec C, Mat Amat, Mat Pmat, void *ctx)
 {
   MCMBoxModel *model = static_cast<MCMBoxModel *>(ctx);
   const PetscScalar *c_arr;
