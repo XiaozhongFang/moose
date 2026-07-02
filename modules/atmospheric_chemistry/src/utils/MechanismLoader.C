@@ -23,10 +23,21 @@ MechanismLoader::load(const std::string & mechanism_file,
 {
   MechanismData data;
 
+  // ── Resolve photolysis file path (before parse — parser needs it) ────
+  {
+    std::string mech_dir;
+    auto pos = mechanism_file.find_last_of("/\\");
+    if (pos != std::string::npos)
+      mech_dir = mechanism_file.substr(0, pos);
+    data.resolved_photo_path = resolvePhotoPath(photo_path, input_file_dirs, mech_dir);
+  }
+
   // ── Parse the .fac mechanism file ────────────────────────────────────
+  // Use the RESOLVED photo path so the parser's internal
+  // loadPhotolysisParameters() can find the file from the test directory.
   MCMFacsimileParser parser;
   parser.setMCMVersion(mcm_version);
-  ParsedMechanism mech = parser.parse(mechanism_file, photo_path, peroxy_path);
+  ParsedMechanism mech = parser.parse(mechanism_file, data.resolved_photo_path, peroxy_path);
 
   // ── Copy species ─────────────────────────────────────────────────────
   data.species = mech.species;
@@ -74,17 +85,6 @@ MechanismLoader::load(const std::string & mechanism_file,
     // jname starts with "J<" for photolysis rate coefficients
     if (jname.size() > 2 && jname[0] == 'J' && jname[1] == '<')
       data.base_variables.insert(jname);
-  }
-
-  // ── Resolve photolysis file path ─────────────────────────────────────
-  {
-    // Determine the mechanism file directory for fallback resolution
-    std::string mech_dir;
-    auto pos = mechanism_file.find_last_of("/\\");
-    if (pos != std::string::npos)
-      mech_dir = mechanism_file.substr(0, pos);
-
-    data.resolved_photo_path = resolvePhotoPath(photo_path, input_file_dirs, mech_dir);
   }
 
   // ── Load full photolysis parameter set ───────────────────────────────
