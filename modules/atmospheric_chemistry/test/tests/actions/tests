@@ -2,20 +2,20 @@
   [./vs_F0AM_tutorial5_box]
     type = CSVDiff
     input = vs_F0AM_tutorial5_box.i
-    csvdiff = gold/vs_F0AM_tutorial5_box.csv
+    csvdiff = vs_F0AM_tutorial5_box.csv
     rel_err = 3.0e-3
     requirement = 'Species B [decoupled ODE: dB/dt = -K2*B - 2*K4*B^2] shall match the analytical solution B(t)=1/(40*exp(0.01*t)-20) within 0.3% relative error.'
   [../]
   [./vs_F0AM_tutorial5_coupled]
     type = CSVDiff
     input = vs_F0AM_tutorial5_coupled.i
-    csvdiff = gold/vs_F0AM_tutorial5_coupled.csv
+    csvdiff = vs_F0AM_tutorial5_coupled.csv
     requirement = 'The coupled mode (mode=coupled, FEM + ChemicalSourceKernel) shall match the F0AM ode15s reference for the 5-species tutorial mechanism under chamber conditions.'
   [../]
   [./vs_AtChem2_inorg_box]
     type = CSVDiff
     input = vs_AtChem2_inorg_box.i
-    csvdiff = gold/vs_AtChem2_inorg_box.csv
+    csvdiff = vs_AtChem2_inorg_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     # Compared columns (NOT ignored): time, O3, NO2, NO, OH, CO, CH4, CL, HSO3, SA, SO2, SO3
@@ -28,7 +28,7 @@
   [./vs_AtChem2_inorg_coupled]
     type = CSVDiff
     input = vs_AtChem2_inorg_coupled.i
-    csvdiff = gold/vs_AtChem2_inorg_coupled.csv
+    csvdiff = vs_AtChem2_inorg_coupled.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     # Compared columns (NOT ignored): time, O3, NO2, CO, CH4, CL, HSO3, SA, SO2, SO3
@@ -72,7 +72,7 @@
   [./vs_F0AM_chamber_S1_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S1_box.i
-    csvdiff = gold/gold/vs_F0AM_chamber_S1_box.csv
+    csvdiff = vs_F0AM_chamber_S1_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'
@@ -97,10 +97,16 @@
     heavy = true
     requirement = 'S1 TS benchmark: PETSc TS ARKIMEX with rtol=1e-2 shall complete 10800s chamber simulation.'
   [../]
+  [./vs_F0AM_chamber_S1_box_ts_sundials_rtol1e-2]
+    type = RunApp
+    input = vs_F0AM_chamber_S1_box_ts_sundials_rtol1e-2.i
+    heavy = true
+    requirement = 'S1 TS benchmark: PETSc TS SUNDIALS(CVODE) with rtol=1e-2 shall complete 10800s chamber simulation.'
+  [../]
   [./vs_F0AM_chamber_S2_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S2_box.i
-    csvdiff = gold/vs_F0AM_chamber_S2_box.csv
+    csvdiff = vs_F0AM_chamber_S2_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'
@@ -110,7 +116,7 @@
   [./vs_F0AM_chamber_S3_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S3_box.i
-    csvdiff = gold/vs_F0AM_chamber_S3_box.csv
+    csvdiff = vs_F0AM_chamber_S3_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'
@@ -121,7 +127,7 @@
     type = CSVDiff
     prereq = vs_F0AM_chamber_S2_box
     input = vs_F0AM_chamber_S2b_box.i
-    csvdiff = gold/vs_F0AM_chamber_S2b_box.csv
+    csvdiff = vs_F0AM_chamber_S2b_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     heavy = true
@@ -142,7 +148,7 @@
   [./test_ro2_detection]
     type = CSVDiff
     input = test_ro2_detection.i
-    csvdiff = 'gold/test_ro2_detection_ro2_list_0001.csv'
+    csvdiff = 'test_ro2_detection_ro2_list_0001.csv'
     requirement = 'The box mode with MCMv331_Inorg_Isoprene shall detect exactly 117 RO2 species (as declared in the .fac RO2 = ... line). The MCMRO2ListPostprocessor (VPP) validates the parser identifies peroxy radicals via the explicit declaration — the VPP CSV has ro2_count (117) and ro2_species indices for all 117 peroxy radicals, verified by CSVDiff.'
   [../]
   [./test_family_conservation]
