@@ -153,6 +153,7 @@
 []
 
 [Outputs]
+  checkpoint = false
   csv = true
   execute_on = 'timestep_end'
   file_base = 'vs_AtChem2_inorg_coupled'

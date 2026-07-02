@@ -58,6 +58,7 @@
 []
 
 [Outputs]
+  checkpoint = false
   csv = true
   execute_on = 'timestep_end'
   file_base = 'test_ro2_detection'

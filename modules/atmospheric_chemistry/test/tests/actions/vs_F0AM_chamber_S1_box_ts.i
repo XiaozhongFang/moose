@@ -50,6 +50,7 @@
 []
 
 [Outputs]
+  checkpoint = false
   csv = true
   execute_on = 'timestep_end'
   file_base = 'vs_F0AM_chamber_S1_box_ts_fast'

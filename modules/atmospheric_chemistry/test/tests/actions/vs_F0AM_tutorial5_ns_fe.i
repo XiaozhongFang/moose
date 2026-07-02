@@ -98,6 +98,7 @@
 []
 
 [Outputs]
+  checkpoint = false
   exodus = true
   file_base = 'vs_F0AM_tutorial5_ns_fe'
 []

@@ -127,6 +127,7 @@ rho = 1
 []
 
 [Outputs]
+  checkpoint = false
   csv = true
   file_base = 'vs_F0AM_tutorial5_ns_fv'
 []

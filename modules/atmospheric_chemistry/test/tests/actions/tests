@@ -2,20 +2,20 @@
   [./vs_F0AM_tutorial5_box]
     type = CSVDiff
     input = vs_F0AM_tutorial5_box.i
-    csvdiff = vs_F0AM_tutorial5_box.csv
+    csvdiff = gold/vs_F0AM_tutorial5_box.csv
     rel_err = 3.0e-3
     requirement = 'Species B [decoupled ODE: dB/dt = -K2*B - 2*K4*B^2] shall match the analytical solution B(t)=1/(40*exp(0.01*t)-20) within 0.3% relative error.'
   [../]
   [./vs_F0AM_tutorial5_coupled]
     type = CSVDiff
     input = vs_F0AM_tutorial5_coupled.i
-    csvdiff = vs_F0AM_tutorial5_coupled.csv
+    csvdiff = gold/vs_F0AM_tutorial5_coupled.csv
     requirement = 'The coupled mode (mode=coupled, FEM + ChemicalSourceKernel) shall match the F0AM ode15s reference for the 5-species tutorial mechanism under chamber conditions.'
   [../]
   [./vs_AtChem2_inorg_box]
     type = CSVDiff
     input = vs_AtChem2_inorg_box.i
-    csvdiff = vs_AtChem2_inorg_box.csv
+    csvdiff = gold/vs_AtChem2_inorg_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     # Compared columns (NOT ignored): time, O3, NO2, NO, OH, CO, CH4, CL, HSO3, SA, SO2, SO3
@@ -28,7 +28,7 @@
   [./vs_AtChem2_inorg_coupled]
     type = CSVDiff
     input = vs_AtChem2_inorg_coupled.i
-    csvdiff = vs_AtChem2_inorg_coupled.csv
+    csvdiff = gold/vs_AtChem2_inorg_coupled.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     # Compared columns (NOT ignored): time, O3, NO2, CO, CH4, CL, HSO3, SA, SO2, SO3
@@ -72,7 +72,7 @@
   [./vs_F0AM_chamber_S1_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S1_box.i
-    csvdiff = gold/vs_F0AM_chamber_S1_box.csv
+    csvdiff = gold/gold/vs_F0AM_chamber_S1_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'

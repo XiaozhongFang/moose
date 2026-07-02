@@ -53,6 +53,7 @@
 []
 
 [Outputs]
+  checkpoint = false
   csv = true
   execute_on = 'timestep_end'
   file_base = 'vs_F0AM_chamber_S3_box'

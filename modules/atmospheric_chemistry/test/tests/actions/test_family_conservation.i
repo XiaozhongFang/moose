@@ -65,6 +65,7 @@
 []
 
 [Outputs]
+  checkpoint = false
   csv = true
   execute_on = 'TIMESTEP_END'
 []

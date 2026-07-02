@@ -185,6 +185,7 @@
 []
 
 [Outputs]
+  checkpoint = false
   exodus = true
   csv = true
   file_base = 'vs_atchem2_transport_building'

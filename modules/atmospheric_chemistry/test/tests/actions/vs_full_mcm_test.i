@@ -38,6 +38,7 @@
   []
 []
 [Outputs]
+  checkpoint = false
   csv = true
   execute_on = 'timestep_end'
   file_base = 'vs_full_mcm_test'

@@ -215,6 +215,7 @@ advected_interp_method = 'average'
 []
 
 [Outputs]
+  checkpoint = false
   csv = true
   file_base = 'vs_F0AM_tutorial5_ns_fv_heat'
 []

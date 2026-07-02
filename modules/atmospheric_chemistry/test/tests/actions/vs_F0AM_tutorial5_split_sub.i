@@ -40,5 +40,6 @@
 []
 
 [Outputs]
+  checkpoint = false
   csv = true
 []

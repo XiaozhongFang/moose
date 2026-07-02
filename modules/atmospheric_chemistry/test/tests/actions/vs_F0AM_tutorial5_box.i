@@ -41,6 +41,7 @@
 []
 
 [Outputs]
+  checkpoint = false
   csv = true
   execute_on = 'timestep_end'
   hide = 'A C RO2'
