@@ -341,7 +341,7 @@ box-mode simulations, achieving dramatic speedups over the default MOOSE LU solv
 | Feature | Description |
 |---------|-------------|
 | Standalone ODE integrator | PETSc TS (BDF / ARKIMEX / SUNDIALS), adaptive step size, 28-32× speedup |
-| Configuration | `integrator = petsc_ts` with `petsc_ts_type`, `petsc_ts_rtol`, `petsc_ts_atol` |
+| Configuration | `box_solver = true` with `box_solver_type`, `box_solver_rtol`, `box_solver_atol` |
 | Limitation | Box mode only; coupled mode with transport triggers input parsing error |
 
 For the S1 chamber test case (610 species, 1974 reactions, 3h simulation):

@@ -18,10 +18,10 @@
   lamp_flux_file = 'ExampleLightFlux.txt'
   bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
   jfac = 1.0
-  petsc_ts = true
-  petsc_ts_type = arkimex
-  petsc_ts_rtol = 1e-2
-  petsc_ts_atol = 1e-6
+  box_solver = true
+  box_solver_type = arkimex
+  box_solver_rtol = 1e-2
+  box_solver_atol = 1e-6
 []
 
 [ICs]

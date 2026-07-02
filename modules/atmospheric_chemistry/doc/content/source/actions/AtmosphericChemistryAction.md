@@ -102,18 +102,29 @@ The [!param](/AtmosphericChemistry/family_names),
 chemical family conservation via DAE slack variables. See the
 [`MCMFamilyConstraint` documentation](MCMFamilyConstraint.md) for details.
 
-### PETSc TS Standalone Integrator
+### Box ODE Solver (box mode only)
 
-New parameters available since implementation:
+The `box_solver` parameters configure the **embedded chemical ODE solver** inside
+`MCMBoxModel`.  This is separate from the outer `[Executioner]` time integration:
 
-- `petsc_ts` (bool, default: false): Enable PETSc TS standalone integrator for box mode.
-- `petsc_ts_type` (enum: bdf|arkimex|sundials, default: bdf): TS integrator type.
-- `petsc_ts_rtol` (real, default: 1e-6): Relative tolerance.
-- `petsc_ts_atol` (real, default: 1e-10): Absolute tolerance.
+| What | Controls |
+|------|----------|
+| `[Executioner]` `scheme = 'bdf2'` | MOOSE outer time step advancement |
+| `box_solver = true` | Embedded ODE solver for chemical subsystem within each time step |
 
-When `petsc_ts = true` and `mode = box`, the MCMBoxModel handles integration via
-PETSc TS, achieving 28-32× speedup over the MOOSE LU solver for the S1 chamber case.
-Coupled mode with `petsc_ts = true` triggers an error at input parsing time.
+Parameters:
+
+- `box_solver` (bool, default: false): Enable standalone ODE solver for box mode chemistry.
+  When `true`, `MCMBoxModel::execute()` handles the ODE integration via PETSc TS,
+  bypassing MOOSE's Newton solver for the chemical subsystem.
+- `box_solver_type` (enum: bdf|arkimex|..., default: bdf): ODE solver type. `bdf` (variable-order BDF,
+  closest to MATLAB ode15s) is recommended.
+- `box_solver_rtol` (real, default: 1e-6): Relative tolerance for the adaptive integrator.
+- `box_solver_atol` (real, default: 1e-10): Absolute tolerance for the adaptive integrator.
+
+When `box_solver = true` and `mode = box`, the chemical ODE integration achieves
+28-32× speedup over the default MOOSE LU solver for the S1 chamber case.
+Coupled mode with `box_solver = true` triggers an input parsing error.
 
 ## Example Input File Syntax
 

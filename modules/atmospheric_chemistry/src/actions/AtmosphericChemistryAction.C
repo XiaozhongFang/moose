@@ -107,21 +107,27 @@ AtmosphericChemistryAction::validParams()
       "Default false (standard MCM chemistry). Set true for F0AM-compatible "
       "RO2 termination or when comparing against F0AM reference outputs.");
 
-  // --- PETSc TS standalone integrator ---
-  params.addParam<bool>("petsc_ts", false,
-      "Enable PETSc TS standalone integrator for box mode (mode=box only). "
-      "Bypasses MOOSE's Newton solver and uses PETSc TS with internal adaptive "
-      "stepping for the ODE integration. When true, ODETimeDerivative and "
-      "ChemistryODEKernel are NOT created — MCMBoxModel::execute() handles "
-      "the integration and directly updates the solution.");
+  // --- Box ODE solver (internal integrator for box mode chemistry) ---
+  // These parameters configure the embedded ODE solver inside MCMBoxModel,
+  // NOT the outer MOOSE Executioner / TimeIntegrator.  The Executioner
+  // controls the global time step; box_solver controls how chemistry is
+  // integrated within each time step.
+  params.addParam<bool>("box_solver", false,
+      "Enable standalone ODE solver for box mode chemistry (mode=box only). "
+      "When true, MCMBoxModel::execute() handles the chemical ODE integration "
+      "internally (via PETSc TS) and bypasses MOOSE's Newton solver for the "
+      "chemical subsystem. ODETimeDerivative is not created — no MOOSE-level "
+      "time integration of chemistry. When false (default), ChemistryODEKernel "
+      "provides residuals/Jacobians to MOOSE's Newton solver.");
   MooseEnum ts_type_enum("bdf arkimex eimex rosw mimex beuler cn rk theta ssp sundials", "bdf");
-  params.addParam<MooseEnum>("petsc_ts_type", ts_type_enum,
-      "PETSc TS integrator type for standalone mode: 'bdf' (default), "
-      "'arkimex' (adaptive IMEX), or 'sundials' (CVODE via SUNDIALS).");
-  params.addParam<Real>("petsc_ts_rtol", 1e-6,
-      "Relative tolerance for PETSc TS adaptive integrator.");
-  params.addParam<Real>("petsc_ts_atol", 1e-10,
-      "Absolute tolerance for PETSc TS adaptive integrator.");
+  params.addParam<MooseEnum>("box_solver_type", ts_type_enum,
+      "ODE solver type for box mode: 'bdf' (variable-order BDF, default, "
+      "closest to MATLAB ode15s), 'arkimex' (adaptive IMEX), "
+      "'sundials' (CVODE via SUNDIALS, if compiled).");
+  params.addParam<Real>("box_solver_rtol", 1e-6,
+      "Relative tolerance for the box ODE solver's adaptive integrator.");
+  params.addParam<Real>("box_solver_atol", 1e-10,
+      "Absolute tolerance for the box ODE solver's adaptive integrator.");
 
   // --- Family conservation (F0AM DAE method) ---
   params.addParam<std::vector<std::string>>("family_names", {},
@@ -148,7 +154,7 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
     _mechanism_file(getParam<std::string>("mechanism_file")),
     _mode(getParam<MooseEnum>("mode")),
     _include_transport(getParam<bool>("include_transport")),
-    _use_petsc_ts(getParam<bool>("petsc_ts"))
+    _use_box_solver(getParam<bool>("box_solver"))
 {
   // Reject absolute paths — prevents reading arbitrary system files via
   // malicious mechanism_file / photolysis_file parameters.
@@ -157,10 +163,10 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   if (!_mechanism_file.empty() && _mechanism_file[0] == '/')
     mooseError("AtmosphericChemistry: mechanism_file must be relative, got absolute: ", _mechanism_file);
 
-  // Validate: petsc_ts requires box mode
-  if (_use_petsc_ts && _mode != "box")
-    mooseError("AtmosphericChemistry: petsc_ts=true requires mode=box. "
-               "Coupled mode cannot use standalone PETSc TS integration.");
+  // Validate: box_solver requires box mode
+  if (_use_box_solver && _mode != "box")
+    mooseError("AtmosphericChemistry: box_solver=true requires mode=box. "
+               "Coupled mode cannot use standalone ODE solver integration.");
 
   // Parse the .fac mechanism file via MechanismLoader (shared with MCMBoxModel)
   std::string mcm_ver = getParam<MooseEnum>("mcm_version");
@@ -395,21 +401,21 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<Real>("albedo") = getParam<Real>("albedo");
   params.set<Real>("o3column") = getParam<Real>("o3column");
   params.set<Real>("altitude") = getParam<Real>("altitude");
-  // PETSc TS standalone integrator parameters
-  params.set<MooseEnum>("integrator") = _use_petsc_ts ? MooseEnum("moose petsc_ts", "petsc_ts") : MooseEnum("moose petsc_ts", "moose");
-  if (_use_petsc_ts)
+  // Box ODE solver parameters (forwarded to MCMBoxModel)
+  params.set<MooseEnum>("box_solver_mode") = _use_box_solver ? MooseEnum("moose_implicit petsc_ts", "petsc_ts") : MooseEnum("moose_implicit petsc_ts", "moose_implicit");
+  if (_use_box_solver)
   {
-    params.set<MooseEnum>("petsc_ts_type") = getParam<MooseEnum>("petsc_ts_type");
-    params.set<Real>("petsc_ts_rtol") = getParam<Real>("petsc_ts_rtol");
-    params.set<Real>("petsc_ts_atol") = getParam<Real>("petsc_ts_atol");
+    params.set<MooseEnum>("solver_type") = getParam<MooseEnum>("box_solver_type");
+    params.set<Real>("solver_rtol") = getParam<Real>("box_solver_rtol");
+    params.set<Real>("solver_atol") = getParam<Real>("box_solver_atol");
   }
   _problem->addUserObject("MCMBoxModel", "box_model", params);
   _console << "AtmosphericChemistry (box): Created MCMBoxModel UserObject" << std::endl;
-  if (_use_petsc_ts)
-    _console << "AtmosphericChemistry (box): PETSc TS standalone integrator enabled "
-             << "(type=" << getParam<MooseEnum>("petsc_ts_type")
-             << ", rtol=" << getParam<Real>("petsc_ts_rtol")
-             << ", atol=" << getParam<Real>("petsc_ts_atol") << ")" << std::endl;
+  if (_use_box_solver)
+    _console << "AtmosphericChemistry (box): Box ODE solver enabled "
+             << "(type=" << getParam<MooseEnum>("box_solver_type")
+             << ", rtol=" << getParam<Real>("box_solver_rtol")
+             << ", atol=" << getParam<Real>("box_solver_atol") << ")" << std::endl;
 }
 
 void
@@ -489,7 +495,7 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
   {
     // ODETimeDerivative: contributes du/dt to the residual.
     // Skipped in PETSc TS mode — the TS handles time integration directly.
-    if (!_use_petsc_ts)
+    if (!_use_box_solver)
     {
       auto td_params = _factory.getValidParams("ODETimeDerivative");
       td_params.set<NonlinearVariableName>("variable") = _species[j];
@@ -525,19 +531,19 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
 
   // ── Logging ──
   {
-    std::string mode_label = _use_petsc_ts ? "PETSc TS" : "MOOSE implicit";
+    std::string mode_label = _use_box_solver ? "PETSc TS" : "MOOSE implicit";
     _console << "AtmosphericChemistry (box): " << mode_label << " — "
              << "created ChemistryODEKernel for " << _species.size() << " species";
     if (_ro2_diagnostic_enabled)
       _console << " + RO2";
-    if (!_use_petsc_ts)
+    if (!_use_box_solver)
       _console << " + ODETimeDerivative";
     _console << std::endl;
   }
 
   // ── Set sparse Jacobian coupling pattern (MOOSE implicit mode only) ──
   // PETSc TS mode bypasses MOOSE's nonlinear solver — no coupling matrix needed.
-  if (!_use_petsc_ts)
+  if (!_use_box_solver)
   {
     std::map<std::string, unsigned int> sp_idx;
     for (unsigned int i = 0; i < _species.size(); ++i)

@@ -17,10 +17,10 @@
   lamp_flux_file = 'ExampleLightFlux.txt'
   bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
   jfac = 1.0
-  petsc_ts = true
-  petsc_ts_type = bdf
-  petsc_ts_rtol = 1e-1
-  petsc_ts_atol = 1e-4
+  box_solver = true
+  box_solver_type = bdf
+  box_solver_rtol = 1e-1
+  box_solver_atol = 1e-4
 []
 [ICs]
   [C5H8_ic] type = ScalarConstantIC variable = C5H8 value = 2.47e11 []

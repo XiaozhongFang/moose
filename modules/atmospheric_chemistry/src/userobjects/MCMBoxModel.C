@@ -234,18 +234,18 @@ MCMBoxModel::validParams()
   params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units, used by HYBRID scheme");
   params.addParam<Real>("altitude", 0.0, "Altitude in meters, used by HYBRID scheme");
 
-  MooseEnum integrator_enum("moose petsc_ts", "moose");
-  params.addParam<MooseEnum>("integrator", integrator_enum,
-      "ODE integrator for box mode: 'moose' (default, through MOOSE's Newton solver) "
+  MooseEnum integrator_enum("moose_implicit petsc_ts", "moose_implicit");
+  params.addParam<MooseEnum>("box_solver_mode", integrator_enum,
+      "Box ODE solver mode: 'moose_implicit' (default, through MOOSE's Newton solver) "
       "or 'petsc_ts' (PETSc TS, bypasses MOOSE solver for chemistry)");
 
   MooseEnum ts_type_enum("bdf arkimex eimex rosw mimex beuler cn rk theta ssp sundials", "bdf");
-  params.addParam<MooseEnum>("petsc_ts_type", ts_type_enum,
-      "PETSc TS integrator type: 'bdf' (default), 'arkimex', or 'sundials' (CVODE).");
-  params.addParam<Real>("petsc_ts_rtol", 1e-6,
-      "Relative tolerance for PETSc TS adaptive integrator.");
-  params.addParam<Real>("petsc_ts_atol", 1e-10,
-      "Absolute tolerance for PETSc TS adaptive integrator.");
+  params.addParam<MooseEnum>("solver_type", ts_type_enum,
+      "ODE solver type: 'bdf' (default), 'arkimex', or 'sundials' (CVODE).");
+  params.addParam<Real>("solver_rtol", 1e-6,
+      "Relative tolerance for the ODE solver's adaptive integrator.");
+  params.addParam<Real>("solver_atol", 1e-10,
+      "Absolute tolerance for the ODE solver's adaptive integrator.");
 
   params.addClassDescription(
       "Centralized box model UserObject for atmospheric chemistry ODE systems.");
@@ -282,7 +282,7 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _cached_bottomup_T(0.0),
     _cached_bottomup_P(0.0),
     _bottomup_j_valid(false),
-    _use_petsc_ts(getParam<MooseEnum>("integrator") == "petsc_ts")
+    _use_box_solver(getParam<MooseEnum>("box_solver_mode") == "petsc_ts")
 {
   // Load Hybrid table reader if photolysis scheme is HYBRID
   auto scheme = getParam<MooseEnum>("photolysis_scheme");
@@ -308,7 +308,7 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
   // Create the box integrator strategy — must be done in the constructor
   // because ChemistryODEKernel accesses getIntegrator() during its own
   // construction (before initialize() is called).
-  if (_use_petsc_ts)
+  if (_use_box_solver)
     _integrator = std::make_unique<PetscTSIntegrator>(*this);
   else
     _integrator = std::make_unique<MooseImplicitIntegrator>(*this);
@@ -384,7 +384,7 @@ MCMBoxModel::initialize()
     }
 
     // Initialize PETSc TS integrator if box mode uses standalone TS integration
-    if (_use_petsc_ts)
+    if (_use_box_solver)
     {
       _console << "MCMBoxModel: setting up PETSc TS..." << std::endl;
       setupPETScTS();
@@ -1587,10 +1587,10 @@ MCMBoxModel::setupPETScTS()
 {
   PetscErrorCode ierr;
 
-  // Load TS parameters from input
-  _ts_type = std::string(getParam<MooseEnum>("petsc_ts_type"));
-  _ts_rtol = getParam<Real>("petsc_ts_rtol");
-  _ts_atol = getParam<Real>("petsc_ts_atol");
+  // Load ODE solver parameters
+  _solver_type = std::string(getParam<MooseEnum>("solver_type"));
+  _solver_rtol = getParam<Real>("solver_rtol");
+  _solver_atol = getParam<Real>("solver_atol");
 
   // Helper macro for error checking without PetscCheck (which returns a value)
   // and without requiring MPI_Comm (use PETSC_COMM_SELF for sequential TS).
@@ -1606,35 +1606,23 @@ MCMBoxModel::setupPETScTS()
   // reactions involving i.  This matches the Jacobian sparsity pattern from
   // computeJacobianTriplets.
   PetscInt n = static_cast<PetscInt>(_n_species);
-  std::vector<PetscInt> nnz_per_row(n, 0);
-  for (unsigned int r = 0; r < _n_reactions; ++r)
-  {
-    const int i0 = _iG[r][0], i1 = _iG[r][1], i2 = _iG[r][2];
-    // Collect unique reactant species indices
-    std::set<unsigned int> reactants;
-    if (i0 >= 0) reactants.insert((unsigned int)i0);
-    if (i1 >= 0) reactants.insert((unsigned int)i1);
-    if (i2 >= 0) reactants.insert((unsigned int)i2);
-    // For each product species in this reaction, add entries for all reactants
-    _stoich.forEachInRow(r, [&](int s, Real) {
-      nnz_per_row[s] += reactants.size();
-    });
-  }
-  // Cap at n (can't exceed total columns) and add 1 for diagonal
-  PetscInt total_nnz = 0, max_nnz = 0;
-  for (PetscInt i = 0; i < n; ++i) {
-    nnz_per_row[i] = std::min(nnz_per_row[i] + 1, n);
-    total_nnz += nnz_per_row[i];
-    if (nnz_per_row[i] > max_nnz) max_nnz = nnz_per_row[i];
-  }
+  // Preallocate each row for ALL columns (dense-lite).  610 species ×
+  // 610 entries ≈ 3 MB; even full MCM (5832 species) is ≈ 272 MB.
+  // The alternative (stoichiometry-based preallocation) is fragile because
+  // tsRHSJacobian may produce entries outside the reaction-product pattern
+  // (chain-rule intermediates), and MatSetOption(MAT_NEW_NONZERO_ALLOCATION_ERR,
+  // PETSC_FALSE) may be reset by TSSetFromOptions.
+  std::vector<PetscInt> nnz_per_row(n, n);
   _console << "MCMBoxModel: Jacobian AIJ preallocation: " << n << "×" << n
-           << ", avg nnz/row=" << (total_nnz / n) << ", max=" << max_nnz << std::endl;
+           << " (" << (n * n * (PetscInt)sizeof(PetscScalar) / (1024*1024))
+           << " MB)" << std::endl;
   PETSC_TRY(MatCreateSeqAIJ(PETSC_COMM_SELF, n, n, 0, nnz_per_row.data(), &_ts_J));
-  PETSC_TRY(MatSetOption(_ts_J, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE));
   PETSC_TRY(MatSetFromOptions(_ts_J));
+  // Also disable the strict allocation check as a safety net.
+  PETSC_TRY(MatSetOption(_ts_J, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE));
 
   PETSC_TRY(TSSetRHSJacobian(_ts, _ts_J, _ts_J, tsRHSJacobian, this));
-  PETSC_TRY(TSSetType(_ts, _ts_type.c_str()));
+  PETSC_TRY(TSSetType(_ts, _solver_type.c_str()));
 
   // For ARKIMEX, configure as fully implicit with 4th order scheme
   {
@@ -1647,16 +1635,19 @@ MCMBoxModel::setupPETScTS()
     }
   }
 
-  PETSC_TRY(TSSetTolerances(_ts, _ts_atol, nullptr, _ts_rtol, nullptr));
+  PETSC_TRY(TSSetTolerances(_ts, _solver_atol, nullptr, _solver_rtol, nullptr));
   // Allow unlimited SNES failures (retry with smaller step), matching extchem.c
   PETSC_TRY(TSSetMaxSNESFailures(_ts, -1));
   PETSC_TRY(TSSetSolution(_ts, _ts_X));
   PETSC_TRY(TSSetFromOptions(_ts));
+  // Re-assert after TSSetFromOptions, which may reset matrix options via
+  // the TS's internal option processing (especially under TSType sundials).
+  PETSC_TRY(MatSetOption(_ts_J, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE));
 
 #undef PETSC_TRY
 
   _console << "MCMBoxModel: PETSc TS initialized (" << _n_species << " species, type="
-           << _ts_type << ", rtol=" << _ts_rtol << ", atol=" << _ts_atol << ")" << std::endl;
+           << _solver_type << ", rtol=" << _solver_rtol << ", atol=" << _solver_atol << ")" << std::endl;
 }
 
 void

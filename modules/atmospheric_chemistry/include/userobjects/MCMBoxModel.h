@@ -523,12 +523,12 @@ protected:
   std::unique_ptr<BoxIntegrator> _integrator;
 
   // -- PETSc TS members --
-  bool _use_petsc_ts = false;
+  bool _use_box_solver = false;
   TS _ts = nullptr;
   Vec _ts_X = nullptr;
   Mat _ts_J = nullptr;
-  PetscReal _ts_rtol = 1e-6;
-  PetscReal _ts_atol = 1e-10;
-  std::string _ts_type = "bdf";
+  PetscReal _solver_rtol = 1e-6;
+  PetscReal _solver_atol = 1e-10;
+  std::string _solver_type = "bdf";
 };
 
