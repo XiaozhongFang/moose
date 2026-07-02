@@ -681,8 +681,9 @@ MCMBoxModel::loadMechanism(const ParsedMechanism & mech, bool use_limiting_reage
   _species_names = mech.species;
   _reaction_names = mech.reaction_names;
 
-  // Build RO2 species index list from parser's explicit ro2_species
+  // Build RO2 species index list and name list from parser's explicit ro2_species
   _ro2_indices.clear();
+  _ro2_species_names = mech.ro2_species;
   for (const auto & ro2_name : mech.ro2_species)
   {
     auto it = std::find(_species_names.begin(), _species_names.end(), ro2_name);

@@ -1,99 +1,156 @@
 #!/usr/bin/env python3
-"""Compare RO2 species detected from a .fac mechanism with the MCM reference list.
+"""Run the atmospheric_chemistry module to extract RO2 species names from a
+.fac mechanism file.
 
 Usage:
-    # Compare against reference list using pre-extracted RO2 file:
-    python3 check_ro2.py <ref_file> [detected_file]
+    cd <work_dir>
+    python3 check_ro2.py <mechanism.fac> [-o ro2_species.txt]
 
-    # Extract RO2 species directly from a .fac mechanism file:
-    python3 check_ro2.py <ref_file> --fac <mechanism.fac> [-o ro2_detected.txt]
+The script runs from the current working directory (or the output file's
+directory if -o is given), generates a minimal MOOSE input, runs
+atmospheric_chemistry-opt (expected at ../atmospheric_chemistry-opt
+relative to the script), and parses the RO2_SPECIES(N): name1,name2,...
+line from the console output.
 
-    ref_file:     path to peroxy-radicals reference (e.g., peroxy-radicals_v3.3.1.dat)
-    detected_file: path to ro2_detected.txt (default: ro2_detected.txt)
-
-The RO2 detection from .fac extracts all species in the VARIABLE block whose
-names end with 'O2' (MCM peroxy radical naming convention).
+Examples:
+    python3 ~/git_repo/moose/modules/atmospheric_chemistry/scripts/check_ro2.py \
+        ~/git_repo/moose/modules/atmospheric_chemistry/doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac \
+        -o ro2_secies.txt
 """
-import argparse, sys, re
+import argparse, subprocess, sys, re, os, tempfile
 from pathlib import Path
 
 
-def extract_ro2_from_fac(fac_file):
-    """Extract RO2 species from the VARIABLE block of a .fac file."""
-    with open(fac_file) as f:
-        content = f.read()
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_BINARY = str(SCRIPT_DIR.parent / "atmospheric_chemistry-opt")
 
-    # Find VARIABLE block: starts with VARIABLE, ends at first '%' or lone ';'
-    m = re.search(r'VARIABLE\s*\n(.*?)(?=\n\s*[%;]|\n\s*$)', content, re.DOTALL | re.IGNORECASE)
-    if not m:
-        print(f"ERROR: no VARIABLE block found in {fac_file}", file=sys.stderr)
-        sys.exit(1)
 
-    var_block = m.group(1)
-    # Use same detection logic as MCMFacsimileParser (name-based heuristic):
-    # - Species ending in "O2" (excluding known false positives)
-    # - Species containing "RO2"
-    non_ro2 = {'HO2', 'NO2', 'SO2', 'H2O2', 'O2', 'N2O2',
-               'NO3', 'HNO3', 'CO2', 'CLO2', 'CL2O2', 'BRO2'}
-    all_species = re.findall(r'\b(\w+)\b', var_block)
-    ro2_set = set()
-    for sp in all_species:
-        if sp in non_ro2:
-            continue
-        if (len(sp) >= 3 and sp.endswith('O2')) or 'RO2' in sp:
-            ro2_set.add(sp)
-    return sorted(ro2_set)
+def run_module_get_ro2(fac_file, binary, workdir):
+    """Run atmospheric_chemistry-opt in workdir and extract RO2 species names."""
+    fac_path = str(Path(os.path.expanduser(fac_file)).resolve())
+    bin_path = str(Path(binary).resolve())
+
+    if not os.path.exists(bin_path):
+        raise FileNotFoundError(f"binary not found: {bin_path}")
+    if not os.path.exists(fac_path):
+        raise FileNotFoundError(f"mechanism file not found: {fac_path}")
+    if not os.path.isdir(workdir):
+        os.makedirs(workdir, exist_ok=True)
+
+    # mechanism_file must be relative to workdir
+    rel_path = os.path.relpath(fac_path, workdir)
+    input_content = (
+        "[Mesh]\n"
+        "  [gen]\n"
+        "    type = GeneratedMeshGenerator\n"
+        "    dim = 1\n"
+        "    nx = 1\n"
+        "  []\n"
+        "[]\n"
+        "\n"
+        "[AtmosphericChemistry]\n"
+        "  mode = box\n"
+        "  mechanism_file = '" + rel_path + "'\n"
+        "  temperature = 298.0\n"
+        "  air_density = 2.46e19\n"
+        "  photolysis_scheme = MCM_SZA\n"
+        "  jfac = 1.0\n"
+        "[]\n"
+        "\n"
+        "[VectorPostprocessors]\n"
+        "  [ro2_list]\n"
+        "    type = MCMRO2ListPostprocessor\n"
+        "    box_model = box_model\n"
+        "  []\n"
+        "[]\n"
+        "\n"
+        "[Executioner]\n"
+        "  type = Transient\n"
+        "  dt = 1\n"
+        "  end_time = 1\n"
+        "  nl_max_its = 1\n"
+        "[]\n"
+        "\n"
+        "[Outputs]\n"
+        "  console = true\n"
+        "  csv = false\n"
+        "[]\n"
+    )
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.i', dir=workdir,
+                                     delete=False) as f:
+        f.write(input_content)
+        input_path = f.name
+
+    try:
+        result = subprocess.run(
+            [bin_path, '-i', os.path.basename(input_path)],
+            cwd=workdir,
+            capture_output=True, text=True, timeout=300
+        )
+
+        # Try to find RO2_SPECIES(N): name1,name2,... in stdout
+        m = re.search(r'RO2_SPECIES\((\d+)\):\s*(\S+)', result.stdout)
+        if m:
+            return int(m.group(1)), m.group(2).split(',')
+
+        # Fallback: search the full output (stdout + stderr) for species names
+        full_output = result.stdout + '\n' + result.stderr
+        # Look for "Detected N RO2 species" as a fallback indicator
+        m2 = re.search(r'Detected\s+(\d+)\s+RO2\s+species', full_output)
+        if m2:
+            print(f"[parser found {m2.group(1)} RO2 species, but RO2_SPECIES "
+                  "line not emitted — check MCMRO2ListPostprocessor setup]",
+                  file=sys.stderr)
+        else:
+            print("[no RO2 detection output found — module may have failed "
+                  "before parsing]", file=sys.stderr)
+            print("=== STDOUT (last 1000 chars) ===", file=sys.stderr)
+            print(result.stdout[-1000:], file=sys.stderr)
+            print("=== STDERR (last 1000 chars) ===", file=sys.stderr)
+            print(result.stderr[-1000:], file=sys.stderr)
+        return 0, []
+    finally:
+        if os.path.exists(input_path):
+            os.unlink(input_path)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compare RO2 species lists (from .fac or pre-extracted file)")
-    parser.add_argument("ref_file", help="Path to peroxy-radicals reference file")
-    parser.add_argument("detected_file", nargs="?", default=None,
-                        help="Path to detected RO2 file (default: ro2_detected.txt)")
-    parser.add_argument("--fac", help="Extract RO2 directly from .fac mechanism file")
-    parser.add_argument("-o", "--output", help="Save detected RO2 to file")
+        description="Extract RO2 species from a .fac mechanism via the module")
+    parser.add_argument("mechanism",
+                        help="Path to .fac mechanism file")
+    parser.add_argument("-o", "--output", default=None,
+                        help="Output file (default: print to stdout, "
+                        "workdir = current directory)")
     args = parser.parse_args()
 
-    ref_path = Path(args.ref_file)
-    if not ref_path.exists():
-        print(f"RO2 reference file not found: {ref_path}")
-        sys.exit(1)
-
-    with open(ref_path) as f:
-        ref_set = set(l.strip() for l in f if l.strip())
-
-    # Determine detected set
-    if args.fac:
-        det_set = set(extract_ro2_from_fac(args.fac))
-        if args.output:
-            with open(args.output, 'w') as f:
-                for s in sorted(det_set):
-                    f.write(s + '\n')
-            print(f"Wrote {len(det_set)} RO2 species to {args.output}")
-    elif args.detected_file:
-        det_path = Path(args.detected_file)
-        if not det_path.exists():
-            print(f"Detected file not found: {det_path}")
-            sys.exit(1)
-        with open(det_path) as f:
-            det_set = set(l.strip() for l in f if l.strip())
+    if args.output:
+        workdir = os.path.dirname(os.path.abspath(args.output))
     else:
-        det_path = Path("ro2_detected.txt")
-        if not det_path.exists():
-            print(f"Detected file not found: {det_path}")
-            print("Use --fac <mechanism.fac> to extract RO2 from a .fac file.")
-            sys.exit(1)
-        with open(det_path) as f:
-            det_set = set(l.strip() for l in f if l.strip())
+        workdir = os.getcwd()
 
-    missing = det_set - ref_set
-    extra = ref_set - det_set
-    print(f"Detected: {len(det_set)}, Reference: {len(ref_set)}")
-    print(f"Missing from reference: {len(missing)}")
-    if missing:
-        print("\n".join(sorted(missing)[:20]))
-    print(f"In reference but not detected: {len(extra)}")
+    count, names = run_module_get_ro2(args.mechanism, DEFAULT_BINARY, workdir)
+
+    # Sort alphabetically for reproducible output
+    names = sorted(names)
+
+    if args.output:
+        with open(args.output, 'w') as f:
+            for s in names:
+                f.write(s + '\n')
+        print(f"Wrote {count} RO2 species to {args.output}")
+    else:
+        # Aligned column output
+        max_len = max((len(s) for s in names), default=0)
+        cols = max(1, 80 // (max_len + 2))
+        print(f"RO2 species ({count}):")
+        for i, s in enumerate(names, 1):
+            print(f"  {s:{max_len}}", end="")
+            if i % cols == 0:
+                print()
+        if len(names) % cols:
+            print()
 
 
 if __name__ == "__main__":

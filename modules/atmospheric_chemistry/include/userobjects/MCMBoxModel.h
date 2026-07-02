@@ -292,6 +292,11 @@ public:
   const std::vector<std::string> & speciesNames() const { return _species_names; }
   const std::vector<std::string> & reactionNames() const { return _reaction_names; }
 
+  /** Get RO2 (peroxy radical) species name list. */
+  const std::vector<std::string> & getRO2Species() const { return _ro2_species_names; }
+  /** Get RO2 species indices in the species vector. */
+  const std::vector<unsigned int> & getRO2Indices() const { return _ro2_indices; }
+
   /** Populate internal matrices from a ParsedMechanism. */
   void loadMechanism(const ParsedMechanism & mech, bool use_limiting_reagent = false);
 
@@ -473,6 +478,8 @@ protected:
 
   /// RO2 species indices in the species vector (built from parser's ro2_species)
   std::vector<unsigned int> _ro2_indices;
+  /// RO2 species names (built from parser's ro2_species)
+  std::vector<std::string> _ro2_species_names;
 
   /// Cached BottomUp J-values (recomputed only on T/P change)
   mutable std::map<std::string, Real> _cached_bottomup_j;

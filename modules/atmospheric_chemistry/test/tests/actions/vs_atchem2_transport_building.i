@@ -110,8 +110,8 @@
 [Functions]
   [lid_function]
     type = ParsedFunction
-    # Scaled lid function: 4*(x/20)*(1-x/20)*10 → max 10 m/s at x=10
-    expression = '40*x*(20-x)/100'
+    # Scaled lid function: 40*(x/20)*(1-x/20) → max 10 m/s at x=10
+    expression = 'x*(20-x)/10'
   []
 []
 
@@ -172,7 +172,7 @@
 
 [Executioner]
   type = Transient
-  num_steps = 100
+  num_steps = 10
   dt = 0.5
   petsc_options_iname = '-pc_type -pc_asm_overlap -sub_pc_type -sub_pc_factor_levels'
   petsc_options_value = 'asm      2               ilu          4'

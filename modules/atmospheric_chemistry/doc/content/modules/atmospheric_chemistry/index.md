@@ -144,17 +144,14 @@ The parser detects peroxy radical (RO₂) species using the same logic as AtChem
 explicit `RO2 = CH3O2 + ...` section in `.kpp` files, or O₂-suffix heuristic (excluding
 known false positives: HO2, NO2, SO2, H2O2 etc.).
 
-Extract and validate the RO₂ list standalone:
+Extract the RO₂ list via the actual module (uses `MCMRO2ListPostprocessor` console output):
 
 ```bash
-# Extract RO2 from a .fac mechanism and compare against MCM reference
-python3 scripts/check_ro2.py \
-    doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_v3.3.1.dat \
-    --fac mechanism.fac \
-    -o ro2_detected.txt
+# Run the module to extract RO2 species names from a .fac mechanism
+python3 scripts/check_ro2.py mechanism.fac -o ro2_species.txt
 ```
 
-Output: `ro2_detected.txt` (one species per line) + comparison summary (detected / missing / extra).
+Output: `ro2_species.txt` (one species per line, alphabetically sorted).
 
 ## Chemical Mechanism Files
 
@@ -289,7 +286,7 @@ The comparison scripts convert MOOSE's molec/cm³ output to ppb using
 | Script | Purpose |
 |--------|---------|
 | `scripts/kpp_to_fac.py` | Convert `.kpp` → `.fac` |
-| `scripts/check_ro2.py` | Extract / validate RO2 species list against MCM reference |
+| `scripts/check_ro2.py` | Run the module to extract RO2 species names from a .fac mechanism via `MCMRO2ListPostprocessor`. Usage: `check_ro2.py <mechanism.fac> [-o output.txt]` |
 | `scripts/generate_atchem2_gold.py` | Generate gold CSV from AtChem2 reference output |
 | `scripts/plot_atchem2.py` | Plot MOOSE vs AtChem2 comparison (3×3 grid PDF) |
 | `scripts/plot_vs_f0am.py` | Plot MOOSE vs analytical solution for F0AM tutorial |
@@ -372,6 +369,7 @@ For the S1 chamber test case (610 species, 1974 reactions, 3h simulation):
 - [`MCMPhotolysisPostprocessor`](source/postprocessors/MCMPhotolysisPostprocessor.md) — Individual photolysis J-values
 - [`MCMRO2Kernel`](source/kernels/MCMRO2Kernel.md) — RO2 algebraic kernel (pins RO2 to sum of peroxy radicals)
 - [`MCMRO2Postprocessor`](source/postprocessors/MCMRO2Postprocessor.md) — Total peroxy radical (RO2) concentration
+- [`MCMRO2ListPostprocessor`](source/postprocessors/MCMRO2ListPostprocessor.md) — RO2 species count for CSVDiff validation
 - [`MCMFamilyConstraint`](source/userobjects/MCMFamilyConstraint.md) — Chemical family conservation (DAE method)
 - [`MCMFamilyScalarKernel`](source/kernels/MCMFamilyScalarKernel.md) — Family conservation ScalarKernel (DAE slack variable)
 - [`MCMReactionRatePostprocessor`](source/postprocessors/MCMReactionRatePostprocessor.md) — Single reaction rate output

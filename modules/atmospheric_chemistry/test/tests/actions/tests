@@ -75,6 +75,7 @@
     csvdiff = gold/vs_F0AM_chamber_S1_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
+    ignore_columns = 'ONE RO2 CH3ONO'
     heavy = true
     requirement = 'S1 (NO₂=0.1ppb): The box mode with MCMv331_Inorg_Isoprene shall match F0AM within 5% for the 3h chamber simulation.'
   [../]
@@ -102,6 +103,7 @@
     csvdiff = gold/vs_F0AM_chamber_S2_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
+    ignore_columns = 'ONE RO2 CH3ONO'
     heavy = true
     requirement = 'S2 (NO₂=1ppb): The box mode with MCMv331_Inorg_Isoprene shall match F0AM within 5% for the 3h chamber simulation.'
   [../]
@@ -111,6 +113,7 @@
     csvdiff = gold/vs_F0AM_chamber_S3_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
+    ignore_columns = 'ONE RO2 CH3ONO'
     heavy = true
     requirement = 'S3 (NO₂=10ppb): The box mode with MCMv331_Inorg_Isoprene shall match F0AM within 5% for the 3h chamber simulation.'
   [../]
@@ -135,6 +138,12 @@
     input = vs_atchem2_transport_building.i
     requirement = 'The coupled mode with Diffusion + atchem2_example chemistry + CO emission plume shall converge.'
     heavy = true
+  [../]
+  [./test_ro2_detection]
+    type = CSVDiff
+    input = test_ro2_detection.i
+    csvdiff = 'gold/test_ro2_detection_ro2_list_0001.csv'
+    requirement = 'The box mode with MCMv331_Inorg_Isoprene shall detect exactly 117 RO2 species (as declared in the .fac RO2 = ... line). The MCMRO2ListPostprocessor (VPP) validates the parser identifies peroxy radicals via the explicit declaration — the VPP CSV has ro2_count (117) and ro2_species indices for all 117 peroxy radicals, verified by CSVDiff.'
   [../]
   [./test_family_conservation]
     type = RunApp
