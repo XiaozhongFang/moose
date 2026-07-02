@@ -304,6 +304,14 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
       mooseError("MCMBoxModel: lamp_flux_file is required when photolysis_scheme=BOTTOMUP");
     loadBottomUpData(data_dir, flux_file);
   }
+
+  // Create the box integrator strategy — must be done in the constructor
+  // because ChemistryODEKernel accesses getIntegrator() during its own
+  // construction (before initialize() is called).
+  if (_use_petsc_ts)
+    _integrator = std::make_unique<PetscTSIntegrator>(*this);
+  else
+    _integrator = std::make_unique<MooseImplicitIntegrator>(*this);
 }
 
 MCMBoxModel::~MCMBoxModel()
@@ -1510,10 +1518,12 @@ MCMBoxModel::checkConvergence(const std::vector<Real> & Cp, const std::vector<Re
 void
 MCMBoxModel::execute()
 {
-  // PETSc TS mode: integrate chemistry at TIMESTEP_END, bypassing MOOSE's solver.
-  // No kernels (ODETimeDerivative / ChemistryODEKernel) exist in this mode —
-  // MOOSE's solve is a no-op (residual=0), and this execute() sets the solution.
-  if (!_use_petsc_ts || _n_species == 0)
+  // Self-driven mode (PETSc TS): integrate chemistry at TIMESTEP_END,
+  // bypassing MOOSE's solver.  ChemistryODEKernel residuals are 0 and this
+  // execute() sets the solution directly.
+  // MOOSE-driven mode: no-op — ChemistryODEKernel provides residuals/Jacobians
+  // and the Newton solver handles the integration.
+  if (!_integrator->selfDriven() || _n_species == 0)
     return;
 
   // Get current and previous times from FEProblemBase

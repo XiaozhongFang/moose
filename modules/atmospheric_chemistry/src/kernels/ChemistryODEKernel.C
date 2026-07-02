@@ -8,6 +8,7 @@
 //* https://www.gnu.org/licenses/lgpl-2.1.html
 
 #include "ChemistryODEKernel.h"
+#include "MCMBoxModel.h"
 #include "MooseVariableScalar.h"
 #include "FEProblemBase.h"
 
@@ -24,16 +25,17 @@ ChemistryODEKernel::validParams()
   params.addRequiredParam<std::vector<VariableName>>(
       "species_variables", "Names of all species ScalarVariables (in species order)");
   params.addClassDescription(
-      "ODE kernel that computes chemical source terms from MCMBoxModel. "
-      "One instance per species in box mode (mode=box).");
+      "ODE kernel that computes chemical source terms via BoxIntegrator. "
+      "One instance per species in box mode (mode=box). "
+      "Delegates all residual/Jacobian evaluation to the integrator strategy.");
   return params;
 }
 
 ChemistryODEKernel::ChemistryODEKernel(const InputParameters & params)
   : ODEKernel(params),
-    _box_model(getUserObject<MCMBoxModel>("box_model")),
+    _integrator(getUserObject<MCMBoxModel>("box_model").getIntegrator()),
     _species_idx(getParam<unsigned int>("species_index")),
-    _ppb_to_molec(_box_model.ppbToMolec())
+    _ppb_to_molec(getUserObject<MCMBoxModel>("box_model").ppbToMolec())
 {
   // Access scalar variables directly from the FEProblemBase, bypassing the
   // ScalarCoupleable framework since species names are dynamic (not known
@@ -53,15 +55,10 @@ ChemistryODEKernel::ChemistryODEKernel(const InputParameters & params)
 void
 ChemistryODEKernel::reinit()
 {
-  // PETSc TS mode: skip cache invalidation — MCMBoxModel::execute() handles integration
-  if (_box_model.usePETScTS())
-    return;
-
-  // Invalidate caches so the next Newton iteration uses fresh photolysis
-  // and Jacobian.  _dirty flag is set; cache rebuild only happens once
-  // on the first getDCdt() call (609 remaining calls find _dirty=false).
-  _box_model.markDirty();
-  _box_model.setCurrentTime(_t);
+  // Delegate to the integrator strategy.
+  //   MooseImplicitIntegrator: invalidates caches, updates time for photolysis.
+  //   PetscTSIntegrator: no-op (self-driven mode, integration handled separately).
+  _integrator.reinit(_t);
 }
 
 const std::vector<Real> &
@@ -86,12 +83,9 @@ ChemistryODEKernel::_buildC() const
 Real
 ChemistryODEKernel::computeQpResidual()
 {
-  // PETSc TS mode: chemical source handled by MCMBoxModel::execute()
-  if (_box_model.usePETScTS())
-    return 0.0;
-
   // R = -dC/dt  (ODEKernel convention: R = du/dt - f, chemical source is f)
-  Real dCdt = _box_model.getDCdt(_species_idx, _buildC());
+  // In self-driven (PETSc TS) mode, the integrator returns 0.0.
+  Real dCdt = _integrator.computeResidual(_species_idx, _buildC());
   // If user variable stores ppb, convert dC/dt from molec/cm³/s back to ppb/s
   if (_ppb_to_molec != 1.0)
     dCdt /= _ppb_to_molec;
@@ -101,17 +95,13 @@ ChemistryODEKernel::computeQpResidual()
 Real
 ChemistryODEKernel::computeQpJacobian()
 {
-  // PETSc TS mode: Jacobian handled by MCMBoxModel::execute()
-  if (_box_model.usePETScTS())
-    return 0.0;
-  return -_box_model.getJacobianDiagonal(_species_idx, _buildC());
+  // In self-driven (PETSc TS) mode, the integrator returns 0.0.
+  return -_integrator.computeJacobianDiagonal(_species_idx, _buildC());
 }
 
 Real
 ChemistryODEKernel::computeQpOffDiagJacobianScalar(unsigned int jvar)
 {
-  // PETSc TS mode: Jacobian handled by MCMBoxModel::execute()
-  if (_box_model.usePETScTS())
-    return 0.0;
-  return -_box_model.getJacobianOffDiagonal(_species_idx, jvar, _buildC());
+  // In self-driven (PETSc TS) mode, the integrator returns 0.0.
+  return -_integrator.computeJacobianOffDiagonal(_species_idx, jvar, _buildC());
 }

@@ -3,31 +3,43 @@
 !syntax description /ScalarKernels/ChemistryODEKernel
 
 `ChemistryODEKernel` is a ScalarKernel (specifically an ODEKernel) that bridges
-MOOSE's ScalarVariable system to the [`MCMBoxModel`](MCMBoxModel.md) computation
-engine for 0-D atmospheric chemistry box models.
+MOOSE's ScalarVariable system to the [`BoxIntegrator`](BoxIntegrator.md) strategy
+interface for 0-D atmospheric chemistry box models.
 
-One instance per chemical species. During each residual/Jacobian evaluation, the
-first kernel instance triggers a full-system dC/dt computation on the MCMBoxModel
-(via its caching interface), and subsequent instances return cached results.
+One instance per chemical species. All residual and Jacobian evaluation is
+delegated to the [`BoxIntegrator`](BoxIntegrator.md), which encapsulates the
+integration strategy (MOOSE implicit or PETSc TS). The kernel has zero
+mode-specific branching.
+
+In MOOSE implicit mode, the first kernel instance triggers a full-system dC/dt
+computation on the [`MCMBoxModel`](MCMBoxModel.md) via its caching interface,
+and subsequent instances return cached results. In PETSc TS mode, the integrator
+returns zero for all evaluations and the full-system solve is handled by
+`MCMBoxModel::execute()`.
 
 ## Residual
 
 $$R = -\frac{dC_s}{dt}$$
 
-where $dC_s/dt$ is the chemical source term for species $s$ computed by MCMBoxModel.
+where $dC_s/dt$ is the chemical source term for species $s$ provided by the
+`BoxIntegrator`.
 
 ## Jacobian
 
-The analytical Jacobian is provided by MCMBoxModel's sparse Jacobian cache:
+The analytical Jacobian is delegated to the `BoxIntegrator`:
 - Diagonal: $\partial R_s / \partial C_s$
 - Off-diagonal: $\partial R_s / \partial C_j$
 
-## Caching
+## Caching (MOOSE implicit mode)
 
-The kernel calls `MCMBoxModel::markDirty()` in `reinit()`, which invalidates the
-internal cache. The first call to `getDCdt()` or `getJacobian*()` triggers a fresh
-full-system computation. Subsequent calls within the same evaluation return cached
-values, avoiding redundant $O(N^2)$ work.
+The kernel calls `BoxIntegrator::reinit()` at the start of each timestep. In
+MOOSE implicit mode, this invalidates the `MCMBoxModel` cache via
+`markDirty()`/`setCurrentTime()`. The first call to `computeResidual()` or
+`computeJacobian*()` triggers a fresh full-system computation. Subsequent
+calls within the same evaluation return cached values, avoiding redundant
+$O(N^2)$ work.
+
+In PETSc TS mode, `reinit()` is a no-op — the integrator handles all state.
 
 ## Example Input File Syntax
 

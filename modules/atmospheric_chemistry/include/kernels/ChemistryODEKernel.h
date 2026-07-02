@@ -10,18 +10,21 @@
 #pragma once
 
 #include "ODEKernel.h"
-#include "MCMBoxModel.h"
+
+#include <memory>
 
 class MooseVariableScalar;
+class BoxIntegrator;
 
 /**
  * ODE kernel that bridges MOOSE's ScalarVariable system to the
- * MCMBoxModel computation engine for atmospheric chemistry box models.
+ * BoxIntegrator strategy for atmospheric chemistry box models.
  *
- * One instance per chemical species. Uses MCMBoxModel's cached
- * single-species interface (getDCdt / getJacobianDiagonal /
- * getJacobianOffDiagonal) to avoid redundant full-system computations
- * across kernels.
+ * One instance per chemical species. Delegates all residual and
+ * Jacobian evaluation to the BoxIntegrator — the kernel is agnostic
+ * about whether the integrator runs in MOOSE-implicit or PETSc TS mode.
+ * In self-driven (PETSc TS) mode, the integrator returns 0 for all
+ * evaluations; MCMBoxModel::execute() handles the full-system solve.
  *
  * The residual follows the ODEKernel convention:
  *   R = du/dt - f(u, t) = 0
@@ -29,7 +32,8 @@ class MooseVariableScalar;
  *
  * Accesses species ScalarVariable values directly from the SubProblem
  * (bypasses the ScalarCoupleable framework since species names are
- * dynamic and not known at compile time).
+ * dynamic and not known at compile time).  Unit conversion (ppb ↔
+ * molec/cm³) is applied per the `units` parameter.
  */
 class ChemistryODEKernel : public ODEKernel
 {
@@ -43,7 +47,7 @@ public:
   virtual Real computeQpOffDiagJacobianScalar(unsigned int jvar) override;
 
 protected:
-  const MCMBoxModel & _box_model;
+  const BoxIntegrator & _integrator;
   const unsigned int _species_idx;
   /// ppb → molec/cm³ conversion factor (M/1e9), valid when box_model uses ppb units
   const Real _ppb_to_molec;

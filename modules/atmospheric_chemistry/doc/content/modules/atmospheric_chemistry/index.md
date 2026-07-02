@@ -355,8 +355,10 @@ For the S1 chamber test case (610 species, 1974 reactions, 3h simulation):
 ## Objects
 
 - [`AtmosphericChemistryAction`](source/actions/AtmosphericChemistryAction.md) — Unified Action (box / coupled modes)
+- [`MechanismLoader`](source/utils/MechanismLoader.md) — Standalone mechanism loading utility (path resolution + .fac parsing + photolysis set loading)
+- [`BoxIntegrator`](source/utils/BoxIntegrator.md) — Strategy interface for box-model integration (MOOSE implicit / PETSc TS)
 - [`MCMBoxModel`](source/userobjects/MCMBoxModel.md) — 0-D chemical ODE engine with caching interface, pluggable sparse matrix backends (CSR/COO/DENSE/CSC), and optional F0AM-style limiting-reagent (LR) formulation for RO₂ termination
-- [`ChemistryODEKernel`](source/kernels/ChemistryODEKernel.md) — Box mode ScalarKernel bridge to MCMBoxModel
+- [`ChemistryODEKernel`](source/kernels/ChemistryODEKernel.md) — Box mode ScalarKernel bridge to BoxIntegrator strategy
 - [`ChemicalSourceKernel`](source/kernels/ChemicalSourceKernel.md) — FEM chemical source with analytical Jacobian + CSR sparse reactant matrix
 - [`MCMRatesMaterial`](source/materials/MCMRatesMaterial.md) — Runtime rate evaluation (coupled mode) with roof_open photolysis switch
 - [`MCMConstraintKernel`](source/kernels/MCMConstraintKernel.md) — Fixed-species constraint

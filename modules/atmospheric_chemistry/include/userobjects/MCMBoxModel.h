@@ -17,11 +17,14 @@
 #include "FunctionParserUtils.h"
 #include <petscts.h>
 
+#include "BoxIntegrator.h"
+
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <functional>
 #include <map>
+#include <memory>
 
 /**
  * Lightweight sparse stoichiometric matrix with pluggable storage format.
@@ -191,9 +194,11 @@ public:
   void execute() override;
   void finalize() override {}
 
+  // -- Box integrator strategy (MOOSE implicit or PETSc TS) --
+  /** Access the box integrator for per-species residual/Jacobian evaluation */
+  const BoxIntegrator & getIntegrator() const { return *_integrator; }
+
   // -- PETSc TS standalone integrator (box mode only) --
-  /** Whether PETSc TS mode is active */
-  bool usePETScTS() const { return _use_petsc_ts; }
   /** Initialize PETSc TS context */
   void setupPETScTS();
   /** Run one PETSc TS step from t0 to t1, update _ts_X in-place */
@@ -513,6 +518,9 @@ protected:
 
   /// Build the sparse Jacobian cache from the current _cached_C
   void _buildJacobianCache() const;
+
+  // -- Box integrator strategy --
+  std::unique_ptr<BoxIntegrator> _integrator;
 
   // -- PETSc TS members --
   bool _use_petsc_ts = false;

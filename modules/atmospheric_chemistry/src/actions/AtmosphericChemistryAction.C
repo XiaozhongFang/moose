@@ -8,16 +8,14 @@
 //* https://www.gnu.org/licenses/lgpl-2.1.html
 
 #include "AtmosphericChemistryAction.h"
-#include "MCMFacsimileParser.h"
+#include "MechanismLoader.h"
 #include "AddVariableAction.h"
 #include "FEProblem.h"
-#include "pcrecpp.h"
 #include "libmesh/coupling_matrix.h"
 
-#include <fstream>
-#include <sstream>
 #include <algorithm>
 #include <set>
+#include <unordered_map>
 
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_variable");
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryAction, "add_user_object");
@@ -164,54 +162,24 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
     mooseError("AtmosphericChemistry: petsc_ts=true requires mode=box. "
                "Coupled mode cannot use standalone PETSc TS integration.");
 
-  // Parse the .fac mechanism file via MCMFacsimileParser (shared with MCMBoxModel)
-  MCMFacsimileParser parser;
-
+  // Parse the .fac mechanism file via MechanismLoader (shared with MCMBoxModel)
   std::string mcm_ver = getParam<MooseEnum>("mcm_version");
-  parser.setMCMVersion(mcm_ver);
-
   std::string photo_path = getParam<std::string>("mcm_photolysis_file");
   if (!photo_path.empty() && photo_path[0] == '/')
     mooseError("AtmosphericChemistry: mcm_photolysis_file must be relative, got absolute: ", photo_path);
   std::string peroxy_path =
       "doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_" + mcm_ver + ".dat";
-  {
-    std::ifstream test_file(photo_path);
-    if (!test_file.good())
-    {
-      auto input_files = _app.getInputFileNames();
-      for (auto & input_file : input_files)
-      {
-        auto pos = input_file.find_last_of("/\\");
-        if (pos != std::string::npos)
-        {
-          std::string resolved = input_file.substr(0, pos) + "/" + photo_path;
-          test_file.open(resolved);
-          if (test_file.good()) { photo_path = resolved; break; }
-        }
-      }
-      if (!test_file.good())
-      {
-        auto pos = _mechanism_file.find_last_of("/\\");
-        if (pos != std::string::npos)
-        {
-          auto bname_pos = photo_path.find_last_of("/\\");
-          std::string base = (bname_pos != std::string::npos)
-                               ? photo_path.substr(bname_pos + 1)
-                               : photo_path;
-          std::string resolved = _mechanism_file.substr(0, pos) + "/" + base;
-          test_file.open(resolved);
-          if (test_file.good()) photo_path = resolved;
-        }
-      }
-    }
-  }
 
-  ParsedMechanism mech = parser.parse(_mechanism_file, photo_path, peroxy_path);
+  auto input_files = _app.getInputFileNames();
+  MechanismData data = MechanismLoader::load(
+      _mechanism_file, photo_path, mcm_ver, peroxy_path, input_files);
 
-  _species = mech.species;
-  _ro2_species = mech.ro2_species;
-  for (auto & r : mech.reactions)
+  // ── Copy from MechanismData to Action members ────────────────────────────
+  _species = data.species;
+  _ro2_species = data.ro2_species;
+
+  // Convert MechanismData::Reaction → Action::Reaction (same fields)
+  for (auto & r : data.reactions)
   {
     Reaction rx;
     rx.rate_expression = r.rate_expression;
@@ -219,37 +187,41 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
     rx.products = r.products;
     _reactions.push_back(rx);
   }
+  _stoichiometric_matrix = data.stoichiometric_matrix;
 
-  _stoichiometric_matrix = mech.stoichiometry;
-
-  for (unsigned int i = 0; i < mech.coefficient_names.size(); ++i)
+  for (unsigned int i = 0; i < data.eval_order.size(); ++i)
   {
-    _rate_coefficients[mech.coefficient_names[i]] = mech.coefficient_expressions[i];
-    _converted_coefficients[mech.coefficient_names[i]] = mech.coefficient_expressions[i];
-    _coefficient_names.insert(mech.coefficient_names[i]);
+    _rate_coefficients[data.eval_order[i]] = data.rate_coefficients.at(data.eval_order[i]);
+    _converted_coefficients[data.eval_order[i]] = data.converted_coefficients.at(data.eval_order[i]);
+    _coefficient_names.insert(data.eval_order[i]);
   }
-  _eval_order = mech.coefficient_names;
+  _eval_order = data.eval_order;
+  _reaction_rate_expressions = data.reaction_rate_expressions;
 
-  _reaction_rate_expressions.resize(mech.reactions.size());
-  for (unsigned int i = 0; i < mech.reactions.size(); ++i)
-    _reaction_rate_expressions[i] = mech.reactions[i].rate_expression;
-
-  for (unsigned int i = 0; i < mech.j_numbers.size(); ++i)
+  // Photolysis (mechanism-referenced J<N> only)
+  for (unsigned int i = 0; i < data.j_numbers.size(); ++i)
   {
-    std::string jkey = "J<" + std::to_string(mech.j_numbers[i]) + ">";
-    _photolysis_rates[jkey] = 0.0;
-    _j_CL[jkey] = mech.j_CL[i];
-    _j_CMM[jkey] = mech.j_CMM[i];
-    _j_CNN[jkey] = mech.j_CNN[i];
+    std::string jkey = "J<" + std::to_string(data.j_numbers[i]) + ">";
+    _j_CL[jkey] = data.j_CL[i];
+    _j_CMM[jkey] = data.j_CMM[i];
+    _j_CNN[jkey] = data.j_CNN[i];
   }
 
+  // Base variables (TEMP, M, O2, N2, H2O + photolysis J<N> references)
   _base_variables = {"TEMP", "M", "O2", "N2", "H2O"};
-  for (auto & [jname, _] : _photolysis_rates)
+  for (auto & [jname, _] : _j_CL)
     _base_variables.insert(jname);
+
+  // Resolved photo path + full photolysis set
+  _resolved_photo_path = data.resolved_photo_path;
+  _j_numbers_all = data.j_numbers_all;
+  _j_cl_all = data.j_cl_values;
+  _j_cmm_all = data.j_cmm_values;
+  _j_cnn_all = data.j_cnn_values;
 
   _console << "AtmosphericChemistry: Parsed " << _species.size() << " species, "
            << _rate_coefficients.size() << " rate coefficients, " << _reactions.size()
-           << " reactions, " << _photolysis_rates.size() << " photolysis J<N> references"
+           << " reactions, " << _j_CL.size() << " photolysis J<N> references"
            << " from " << _mechanism_file << " (mode=" << _mode << ")" << std::endl;
 
   // Compute RO2 diagnostic availability at construction time
@@ -506,28 +478,6 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
   // Build the species_variables list for ChemistryODEKernel (includes RO2 for coupling)
   std::vector<VariableName> species_vars(_species.begin(), _species.end());
 
-  // PETSc TS mode: create ChemistryODEKernel (short-circuits to zero in TS mode)
-  // for each species.  No ODETimeDerivative — it would overwrite the CVODE
-  // solution during MOOSE's Newton solve.
-  if (_use_petsc_ts)
-  {
-    for (unsigned int j = 0; j < _species.size(); ++j)
-    {
-      auto chem_params = _factory.getValidParams("ChemistryODEKernel");
-      chem_params.set<NonlinearVariableName>("variable") = _species[j];
-      chem_params.set<UserObjectName>("box_model") = "box_model";
-      chem_params.set<unsigned int>("species_index") = j;
-      chem_params.set<std::vector<VariableName>>("species_variables") = species_vars;
-      _problem->addScalarKernel("ChemistryODEKernel", "chem_" + _species[j], chem_params);
-    }
-    // Set coupling matrix for ChemistryODEKernel (even though short-circuited,
-    // MOOSE needs it for the sparse Jacobian structure)
-    _console << "AtmosphericChemistry (box): PETSc TS mode active — "
-             << "created ChemistryODEKernel (short-circuited) for "
-             << _species.size() << " species" << std::endl;
-    return;
-  }
-
   // If families are active, identify slack variable indices to skip
   // (MCMFamilyScalarKernel replaces ChemistryODEKernel for slack species)
   std::set<std::string> slack_species;
@@ -537,17 +487,24 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
 
   for (unsigned int j = 0; j < _species.size(); ++j)
   {
-    // ODETimeDerivative: contributes du/dt to the residual
-    auto td_params = _factory.getValidParams("ODETimeDerivative");
-    td_params.set<NonlinearVariableName>("variable") = _species[j];
-    _problem->addScalarKernel("ODETimeDerivative", "td_" + _species[j], td_params);
+    // ODETimeDerivative: contributes du/dt to the residual.
+    // Skipped in PETSc TS mode — the TS handles time integration directly.
+    if (!_use_petsc_ts)
+    {
+      auto td_params = _factory.getValidParams("ODETimeDerivative");
+      td_params.set<NonlinearVariableName>("variable") = _species[j];
+      _problem->addScalarKernel("ODETimeDerivative", "td_" + _species[j], td_params);
+    }
 
-    // For family slack variables, MCMFamilyScalarKernel is created separately.
-    // Skip ChemistryODEKernel here to avoid double-counting residuals.
+    // ChemistryODEKernel: contributes -dC/dt (chemical source).
+    // Created unconditionally — the BoxIntegrator strategy handles
+    // mode-specific behavior (real evaluation in MOOSE implicit mode,
+    // zero return in PETSc TS mode).
+    // For family slack variables, MCMFamilyScalarKernel is created
+    // separately.  Skip ChemistryODEKernel here to avoid double-counting.
     if (slack_species.count(_species[j]))
       continue;
 
-    // ChemistryODEKernel: contributes -dC/dt (chemical source)
     auto chem_params = _factory.getValidParams("ChemistryODEKernel");
     chem_params.set<NonlinearVariableName>("variable") = _species[j];
     chem_params.set<UserObjectName>("box_model") = "box_model";
@@ -564,14 +521,23 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
     ro2_params.set<UserObjectName>("box_model") = "box_model";
     ro2_params.set<std::vector<VariableName>>("species_variables") = species_vars;
     _problem->addScalarKernel("MCMRO2Kernel", "ro2_kernel", ro2_params);
-    _console << "AtmosphericChemistry (box): Created ODETimeDerivative + ChemistryODEKernel for "
-             << _species.size() << " species + RO2" << std::endl;
   }
-  else
-    _console << "AtmosphericChemistry (box): Created ODETimeDerivative + ChemistryODEKernel for "
-             << _species.size() << " species" << std::endl;
 
-  // ── Set sparse Jacobian coupling pattern ──
+  // ── Logging ──
+  {
+    std::string mode_label = _use_petsc_ts ? "PETSc TS" : "MOOSE implicit";
+    _console << "AtmosphericChemistry (box): " << mode_label << " — "
+             << "created ChemistryODEKernel for " << _species.size() << " species";
+    if (_ro2_diagnostic_enabled)
+      _console << " + RO2";
+    if (!_use_petsc_ts)
+      _console << " + ODETimeDerivative";
+    _console << std::endl;
+  }
+
+  // ── Set sparse Jacobian coupling pattern (MOOSE implicit mode only) ──
+  // PETSc TS mode bypasses MOOSE's nonlinear solver — no coupling matrix needed.
+  if (!_use_petsc_ts)
   {
     std::map<std::string, unsigned int> sp_idx;
     for (unsigned int i = 0; i < _species.size(); ++i)
@@ -642,62 +608,20 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   params.set<std::vector<std::string>>("coefficient_names") = coeff_names;
   params.set<std::vector<std::string>>("coefficient_expressions") = coeff_exprs;
 
-  std::vector<Real> j_cl_vals, j_cmm_vals, j_cnn_vals;
+  // Use the pre-resolved photolysis file path and pre-loaded full J<N>
+  // parameter set from MechanismLoader.  No need to re-resolve or re-read
+  // the photolysis file — the constructor already did this.
   std::vector<unsigned int> j_numbers_all;
+  std::vector<Real> j_cl_vals, j_cmm_vals, j_cnn_vals;
   {
-    // BOTTOMUP doesn't use MCM photolysis parameters — skip file loading.
     auto scheme = getParam<MooseEnum>("photolysis_scheme");
     if (scheme != "BOTTOMUP")
     {
-    // Load ALL photolysis parameters from the MCM photolysis-rates file.
-    // The parser only transfers mechanism-referenced J<N>, but we need the
-    // full set for MCMPhotolysisPostprocessor output (e.g. J11-J61).
-    // Re-read the file here to get every J<N> entry.
-    std::string photo_path = getParam<std::string>("mcm_photolysis_file");
-    // Resolve relative paths (same logic as in the constructor)
-    {
-      std::ifstream test_file(photo_path);
-      if (!test_file.good())
-      {
-        auto input_files = _app.getInputFileNames();
-        for (auto & input_file : input_files)
-        {
-          auto pos = input_file.find_last_of("/\\");
-          if (pos != std::string::npos)
-          {
-            std::string resolved = input_file.substr(0, pos) + "/" + photo_path;
-            test_file.open(resolved);
-            if (test_file.good()) { photo_path = resolved; break; }
-          }
-        }
-      }
+      j_numbers_all = _j_numbers_all;
+      j_cl_vals = _j_cl_all;
+      j_cmm_vals = _j_cmm_all;
+      j_cnn_vals = _j_cnn_all;
     }
-    std::ifstream pfile(photo_path);
-    if (pfile.good())
-    {
-      std::string line;
-      std::getline(pfile, line); // skip header
-      while (std::getline(pfile, line))
-      {
-        if (line.empty() || line[0] == '#') continue;
-        // Convert Fortran D-notation (6.073D-05) → E-notation (6.073E-05)
-        std::replace(line.begin(), line.end(), 'D', 'E');
-        std::replace(line.begin(), line.end(), 'd', 'e');
-        // Parse "j l m n name tau" columns (we only need first 4)
-        std::istringstream iss(line);
-        unsigned int jn;
-        double cl, cmm, cnn;
-        std::string unused1, unused2;
-        if (iss >> jn >> cl >> cmm >> cnn)
-        {
-          j_numbers_all.push_back(jn);
-          j_cl_vals.push_back(cl);
-          j_cmm_vals.push_back(cmm);
-          j_cnn_vals.push_back(cnn);
-        }
-      }
-    }
-    } // if (scheme != "BOTTOMUP")
   }
   params.set<std::vector<unsigned int>>("j_numbers") = j_numbers_all;
   params.set<std::vector<Real>>("j_cl_values") = j_cl_vals;
@@ -730,37 +654,48 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
 void
 AtmosphericChemistryAction::actCoupledAddKernel()
 {
+  // ── Precompute species name → index mapping ──
+  // O(1) lookup per reactant instead of O(N_species) std::find.
+  std::unordered_map<std::string, unsigned int> species_name_to_idx;
+  species_name_to_idx.reserve(_species.size());
+  for (unsigned int i = 0; i < _species.size(); ++i)
+    species_name_to_idx[_species[i]] = i;
+
+  // ── Precompute species_reactants matrix (once, not per species) ──
+  // species_reactants[k] = [rxn_0, coeff_0, rxn_1, coeff_1, ...]
+  // Lists which reactions have species k as a reactant, used by
+  // ChemicalSourceKernel's off-diagonal Jacobian.
+  std::vector<std::vector<Real>> species_reactants(_species.size());
+  for (unsigned int r = 0; r < _reactions.size(); ++r)
+    for (auto & [coeff, name] : _reactions[r].reactants)
+    {
+      auto it = species_name_to_idx.find(name);
+      if (it != species_name_to_idx.end())
+      {
+        unsigned int sidx = it->second;
+        species_reactants[sidx].push_back(static_cast<Real>(r));
+        species_reactants[sidx].push_back(coeff);
+      }
+    }
+
+  // ── Precompute unit conversion and all_species list ──
+  auto u = getParam<MooseEnum>("units");
+  Real M = getParam<Real>("air_density");
+  Real unit_conversion = (u == "ppb") ? M / 1.0e9 : 1.0;
+  std::vector<VariableName> all_species(_species.begin(), _species.end());
+
   for (unsigned int j = 0; j < _species.size(); ++j)
   {
     auto td_params = _factory.getValidParams("TimeDerivative");
     td_params.set<NonlinearVariableName>("variable") = _species[j];
     _problem->addKernel("TimeDerivative", "td_" + _species[j], td_params);
 
-    std::vector<std::vector<Real>> species_reactants(_species.size());
-    for (unsigned int r = 0; r < _reactions.size(); ++r)
-      for (auto & [coeff, name] : _reactions[r].reactants)
-      {
-        auto it = std::find(_species.begin(), _species.end(), name);
-        if (it != _species.end())
-        {
-          unsigned int sidx = it - _species.begin();
-          species_reactants[sidx].push_back(static_cast<Real>(r));
-          species_reactants[sidx].push_back(coeff);
-        }
-      }
-
     auto src_params = _factory.getValidParams("ChemicalSourceKernel");
     src_params.set<NonlinearVariableName>("variable") = _species[j];
     src_params.set<std::vector<Real>>("stoichiometric_row") = _stoichiometric_matrix[j];
-    src_params.set<std::vector<VariableName>>("all_species") =
-        std::vector<VariableName>(_species.begin(), _species.end());
+    src_params.set<std::vector<VariableName>>("all_species") = all_species;
     src_params.set<std::vector<std::vector<Real>>>("species_reactants") = species_reactants;
-    // Pass unit conversion factor for ppb support
-    {
-      auto u = getParam<MooseEnum>("units");
-      Real M = getParam<Real>("air_density");
-      src_params.set<Real>("unit_conversion") = (u == "ppb") ? M / 1.0e9 : 1.0;
-    }
+    src_params.set<Real>("unit_conversion") = unit_conversion;
     _problem->addKernel("ChemicalSourceKernel", "src_" + _species[j], src_params);
   }
   _console << "AtmosphericChemistry (coupled): Created TimeDerivative + ChemicalSourceKernel for "

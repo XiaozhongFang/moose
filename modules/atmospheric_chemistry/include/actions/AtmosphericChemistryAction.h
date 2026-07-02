@@ -34,7 +34,7 @@
  *     kernels via include_transport.
  *     Suitable for spatially-resolved simulations (5--50 species).
  *
- * Parses MCM Facsimile (.fac) mechanism files via MCMFacsimileParser.
+ * Parses MCM Facsimile (.fac) mechanism files via MechanismLoader.
  * Replaces the deprecated MCMFacsimileAction.
  */
 class AtmosphericChemistryAction : public Action
@@ -75,7 +75,6 @@ protected:
   const std::string _mechanism_file;
   std::vector<std::string> _species;
   std::map<std::string, std::string> _rate_coefficients;
-  std::map<std::string, Real> _photolysis_rates;
   std::map<std::string, Real> _j_CL, _j_CMM, _j_CNN;
   std::vector<std::string> _ro2_species;
   std::vector<Reaction> _reactions;
@@ -85,6 +84,14 @@ protected:
   std::vector<std::string> _reaction_rate_expressions;
   std::set<std::string> _coefficient_names;
   std::set<std::string> _base_variables;
+
+  /// Resolved photolysis file path (reused across mode tasks)
+  std::string _resolved_photo_path;
+  /// Full photolysis parameter set (all J<N> entries from file)
+  std::vector<unsigned int> _j_numbers_all;
+  std::vector<Real> _j_cl_all;
+  std::vector<Real> _j_cmm_all;
+  std::vector<Real> _j_cnn_all;
 
   /// Mode: "box" or "coupled"
   const MooseEnum _mode;
