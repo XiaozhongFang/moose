@@ -12,6 +12,9 @@
 #include "FEProblemBase.h"
 #include "NonlinearSystemBase.h"
 #include "pcrecpp.h"
+#ifdef KPP_ENABLED
+#include "KppBoxIntegrator.h"
+#endif
 #include <algorithm>
 #include <regex>
 #include <sstream>
@@ -352,11 +355,13 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
         *this, _app, _solver_rtol, _solver_atol);
   else if (_use_kpp)
   {
-    // KPP integrator placeholder — KppBoxIntegrator will be used
-    // when compiled with KPP support.  Currently falls through to
-    // PetscTSIntegrator as a safe default for testing.
-    // TODO: Replace with KppBoxIntegrator in Phase 3
-    _integrator = std::make_unique<PetscTSIntegrator>(*this);
+#ifdef KPP_ENABLED
+    _integrator = std::make_unique<KppBoxIntegrator>(
+        _app, _solver_rtol, _solver_atol, _chem_solver);
+#else
+    mooseError("MCMBoxModel: chem_solver=", _chem_solver,
+               " requires KPP support.  Recompile with --enable-kpp.");
+#endif
   }
   else if (_use_box_solver)
     _integrator = std::make_unique<PetscTSIntegrator>(*this);
@@ -1661,11 +1666,12 @@ MCMBoxModel::execute()
       evaluateCoefficients();
     markDirty();
 
-    // KPP integration (handles internal substeps).
-    // KppBoxIntegrator will be implemented in Phase 3.
-    // For now this path is guarded by KPP_ENABLED so it cannot be reached.
-    _console << "MCMBoxModel: KPP integration not yet implemented" << std::endl;
+    // Call KPP INTEGRATE via KppBoxIntegrator.
+    KppBoxIntegrator * kpp_ptr =
+        static_cast<KppBoxIntegrator *>(_integrator.get());
+    kpp_ptr->solve(t_start, t_end, C);
 
+    // Write integrated state back to all ScalarVariable storage locations.
     NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
     NumericVector<Number> & sys_sol = *nl.system().solution;
     for (unsigned int i = 0; i < _n_species; ++i)
@@ -1686,8 +1692,7 @@ MCMBoxModel::execute()
 #else
     // KPP_ENABLED not defined — this path should never be reached because
     // the constructor validates _use_kpp requires KPP_ENABLED.
-    // If reached, fall through to PETSc TS as a safe default.
-    _console << "MCMBoxModel: KPP not enabled, falling back to PETSc TS" << std::endl;
+    mooseError("MCMBoxModel: KPP path reached but KPP_ENABLED not defined.");
 #endif
   }
 
