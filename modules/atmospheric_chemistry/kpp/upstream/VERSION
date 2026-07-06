@@ -1,0 +1,6 @@
+# KPP upstream version anchor
+# Run sync.sh to update after upstream releases.
+KPP_UPSTREAM_TAG=v2.5.0
+KPP_UPSTREAM_COMMIT=0000000000000000000000000000000000000000
+SYNC_DATE=2026-07-12
+LOCAL_CHANGES=no
