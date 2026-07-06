@@ -10,6 +10,7 @@
 #pragma once
 
 #include "Action.h"
+#include "MechanismLoader.h"
 
 #include <string>
 #include <vector>
@@ -46,16 +47,7 @@ public:
 
   virtual void act() override;
 
-  const std::string & getRateCoefficient(const std::string & name) const;
-
 protected:
-  struct Reaction
-  {
-    std::string rate_expression;
-    std::vector<std::pair<Real, std::string>> reactants;
-    std::vector<std::pair<Real, std::string>> products;
-  };
-
   /// Build the reactant index matrix for the Material (coupled mode only)
   std::vector<std::vector<Real>> buildReactantMatrix() const;
 
@@ -74,24 +66,10 @@ protected:
   /// System configuration parsed from .fac
   const std::string _mechanism_file;
   std::vector<std::string> _species;
-  std::map<std::string, std::string> _rate_coefficients;
-  std::map<std::string, Real> _j_CL, _j_CMM, _j_CNN;
   std::vector<std::string> _ro2_species;
-  std::vector<Reaction> _reactions;
-  std::vector<std::vector<Real>> _stoichiometric_matrix;
-  std::map<std::string, std::string> _converted_coefficients;
-  std::vector<std::string> _eval_order;
-  std::vector<std::string> _reaction_rate_expressions;
-  std::set<std::string> _coefficient_names;
-  std::set<std::string> _base_variables;
 
-  /// Resolved photolysis file path (reused across mode tasks)
-  std::string _resolved_photo_path;
-  /// Full photolysis parameter set (all J<N> entries from file)
-  std::vector<unsigned int> _j_numbers_all;
-  std::vector<Real> _j_cl_all;
-  std::vector<Real> _j_cmm_all;
-  std::vector<Real> _j_cnn_all;
+  /// Full mechanism data (from MechanismLoader), used by coupled mode tasks
+  MechanismData _mech_data;
 
   /// Mode: "box" or "coupled"
   const MooseEnum _mode;

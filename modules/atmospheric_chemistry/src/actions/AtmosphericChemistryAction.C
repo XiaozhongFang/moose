@@ -232,54 +232,20 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   MechanismData data = MechanismLoader::load(
       _mechanism_file, photo_path, mcm_ver, peroxy_path, input_files);
 
-  // ── Copy from MechanismData to Action members ────────────────────────────
+  // ── Store mechanism data ─────────────────────────────────────────────────
+  _mech_data = data;
   _species = data.species;
   _ro2_species = data.ro2_species;
 
-  // Convert MechanismData::Reaction → Action::Reaction (same fields)
-  for (auto & r : data.reactions)
-  {
-    Reaction rx;
-    rx.rate_expression = r.rate_expression;
-    rx.reactants = r.reactants;
-    rx.products = r.products;
-    _reactions.push_back(rx);
-  }
-  _stoichiometric_matrix = data.stoichiometric_matrix;
-
-  for (unsigned int i = 0; i < data.eval_order.size(); ++i)
-  {
-    _rate_coefficients[data.eval_order[i]] = data.rate_coefficients.at(data.eval_order[i]);
-    _converted_coefficients[data.eval_order[i]] = data.converted_coefficients.at(data.eval_order[i]);
-    _coefficient_names.insert(data.eval_order[i]);
-  }
-  _eval_order = data.eval_order;
-  _reaction_rate_expressions = data.reaction_rate_expressions;
-
-  // Photolysis (mechanism-referenced J<N> only)
-  for (unsigned int i = 0; i < data.j_numbers.size(); ++i)
-  {
-    std::string jkey = "J<" + std::to_string(data.j_numbers[i]) + ">";
-    _j_CL[jkey] = data.j_CL[i];
-    _j_CMM[jkey] = data.j_CMM[i];
-    _j_CNN[jkey] = data.j_CNN[i];
-  }
-
-  // Base variables (TEMP, M, O2, N2, H2O + photolysis J<N> references)
-  _base_variables = {"TEMP", "M", "O2", "N2", "H2O"};
-  for (auto & [jname, _] : _j_CL)
-    _base_variables.insert(jname);
-
-  // Resolved photo path + full photolysis set
-  _resolved_photo_path = data.resolved_photo_path;
-  _j_numbers_all = data.j_numbers_all;
-  _j_cl_all = data.j_cl_values;
-  _j_cmm_all = data.j_cmm_values;
-  _j_cnn_all = data.j_cnn_values;
+  // Base variables (used for logging only)
+  std::set<std::string> base_vars = {"TEMP", "M", "O2", "N2", "H2O"};
+  for (auto jn : data.j_numbers)
+    base_vars.insert("J<" + std::to_string(jn) + ">");
 
   _console << "AtmosphericChemistry: Parsed " << _species.size() << " species, "
-           << _rate_coefficients.size() << " rate coefficients, " << _reactions.size()
-           << " reactions, " << _j_CL.size() << " photolysis J<N> references"
+           << data.eval_order.size() << " rate coefficients, "
+           << data.reactions.size() << " reactions, "
+           << base_vars.size() - 5 << " photolysis J<N> references"
            << " from " << _mechanism_file << " (mode=" << _mode << ")" << std::endl;
 
   // Compute RO2 diagnostic availability at construction time
@@ -335,22 +301,15 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   }
 }
 
-const std::string &
-AtmosphericChemistryAction::getRateCoefficient(const std::string & name) const
-{
-  static const std::string empty;
-  auto it = _rate_coefficients.find(name);
-  return (it != _rate_coefficients.end()) ? it->second : empty;
-}
-
 std::vector<std::vector<Real>>
 AtmosphericChemistryAction::buildReactantMatrix() const
 {
   std::vector<std::vector<Real>> matrix;
-  for (size_t i = 0; i < _reactions.size(); ++i)
+  const auto & reactions = _mech_data.reactions;
+  for (size_t i = 0; i < reactions.size(); ++i)
   {
     std::vector<Real> row;
-    for (auto & [coeff, name] : _reactions[i].reactants)
+    for (auto & [coeff, name] : reactions[i].reactants)
     {
       auto it = std::find(_species.begin(), _species.end(), name);
       if (it != _species.end())
@@ -633,11 +592,11 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
     for (unsigned int i = 0; i < _species.size(); ++i)
     {
       (*cm)(i, i) = 1;
-      for (unsigned int r = 0; r < _reactions.size(); ++r)
+      for (unsigned int r = 0; r < _mech_data.reactions.size(); ++r)
       {
-        if (std::abs(_stoichiometric_matrix[i][r]) < 1.0e-30)
+        if (std::abs(_mech_data.stoichiometric_matrix[i][r]) < 1.0e-30)
           continue;
-        for (const auto & reactant_pair : _reactions[r].reactants)
+        for (const auto & reactant_pair : _mech_data.reactions[r].reactants)
         {
           auto it = sp_idx.find(reactant_pair.second);
           if (it != sp_idx.end())
@@ -682,31 +641,30 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
   params.set<std::vector<std::string>>("species_list") = _species;
   params.set<std::vector<VariableName>>("species_variables") =
       std::vector<VariableName>(_species.begin(), _species.end());
-  params.set<std::vector<std::string>>("reaction_rate_expressions") = _reaction_rate_expressions;
+  params.set<std::vector<std::string>>("reaction_rate_expressions") =
+      _mech_data.reaction_rate_expressions;
   params.set<std::vector<std::vector<Real>>>("reactant_matrix") = buildReactantMatrix();
 
   std::vector<std::string> coeff_names, coeff_exprs;
-  for (auto & name : _eval_order)
+  for (auto & name : _mech_data.eval_order)
   {
     coeff_names.push_back(name);
-    coeff_exprs.push_back(_converted_coefficients[name]);
+    coeff_exprs.push_back(_mech_data.converted_coefficients.at(name));
   }
   params.set<std::vector<std::string>>("coefficient_names") = coeff_names;
   params.set<std::vector<std::string>>("coefficient_expressions") = coeff_exprs;
 
-  // Use the pre-resolved photolysis file path and pre-loaded full J<N>
-  // parameter set from MechanismLoader.  No need to re-resolve or re-read
-  // the photolysis file — the constructor already did this.
+  // Use the pre-loaded full J<N> parameter set from MechanismLoader.
   std::vector<unsigned int> j_numbers_all;
   std::vector<Real> j_cl_vals, j_cmm_vals, j_cnn_vals;
   {
     auto scheme = getParam<MooseEnum>("photolysis_scheme");
     if (scheme != "BOTTOMUP")
     {
-      j_numbers_all = _j_numbers_all;
-      j_cl_vals = _j_cl_all;
-      j_cmm_vals = _j_cmm_all;
-      j_cnn_vals = _j_cnn_all;
+      j_numbers_all = _mech_data.j_numbers_all;
+      j_cl_vals = _mech_data.j_cl_values;
+      j_cmm_vals = _mech_data.j_cmm_values;
+      j_cnn_vals = _mech_data.j_cnn_values;
     }
   }
   params.set<std::vector<unsigned int>>("j_numbers") = j_numbers_all;
@@ -734,7 +692,7 @@ AtmosphericChemistryAction::actCoupledAddMaterial()
 
   _problem->addMaterial("MCMRatesMaterial", "mcm_rates_material", params);
   _console << "AtmosphericChemistry (coupled): Created MCMRatesMaterial with "
-           << _reactions.size() << " reactions" << std::endl;
+           << _mech_data.reactions.size() << " reactions" << std::endl;
 }
 
 void
@@ -752,8 +710,8 @@ AtmosphericChemistryAction::actCoupledAddKernel()
   // Lists which reactions have species k as a reactant, used by
   // ChemicalSourceKernel's off-diagonal Jacobian.
   std::vector<std::vector<Real>> species_reactants(_species.size());
-  for (unsigned int r = 0; r < _reactions.size(); ++r)
-    for (auto & [coeff, name] : _reactions[r].reactants)
+  for (unsigned int r = 0; r < _mech_data.reactions.size(); ++r)
+    for (auto & [coeff, name] : _mech_data.reactions[r].reactants)
     {
       auto it = species_name_to_idx.find(name);
       if (it != species_name_to_idx.end())
@@ -778,7 +736,7 @@ AtmosphericChemistryAction::actCoupledAddKernel()
 
     auto src_params = _factory.getValidParams("ChemicalSourceKernel");
     src_params.set<NonlinearVariableName>("variable") = _species[j];
-    src_params.set<std::vector<Real>>("stoichiometric_row") = _stoichiometric_matrix[j];
+    src_params.set<std::vector<Real>>("stoichiometric_row") = _mech_data.stoichiometric_matrix[j];
     src_params.set<std::vector<VariableName>>("all_species") = all_species;
     src_params.set<std::vector<std::vector<Real>>>("species_reactants") = species_reactants;
     src_params.set<Real>("unit_conversion") = unit_conversion;
