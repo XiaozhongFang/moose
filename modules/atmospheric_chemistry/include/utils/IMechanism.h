@@ -100,7 +100,7 @@ public:
       Real t,
       const std::vector<Real> & C,
       const PhysParams & params,
-      std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const;
+      std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const = 0;
 
   /// Compute per-species production and loss rates.
   virtual SpeciesRates computeSpeciesRates(
@@ -111,4 +111,68 @@ public:
   /// ppb → molec/cm³ conversion factor.
   virtual Real ppbToMolec() const { return 1.0; }
   virtual bool unitsPPB() const { return false; }
+
+  ///@{
+  /// Solar parameter accessors (for postprocessors).
+  virtual Real getSolarCosX() const { return 0.0; }
+  virtual Real getSolarSecX() const { return 0.0; }
+  virtual Real getSolarLHA() const { return 0.0; }
+  virtual Real getSolarSinLD() const { return 0.0; }
+  virtual Real getSolarCosLD() const { return 0.0; }
+  virtual Real getSolarEQT() const { return 0.0; }
+  virtual Real getDeclination() const { return 0.0; }
+  ///@}
+
+  /// ROOF (chamber cover) switch. CLOSED = all photolysis rates forced to zero.
+  virtual void setRoofOpen(bool open) = 0;
+  virtual bool isRoofOpen() const = 0;
+
+  /// Set JFAC scaling factor (light intensity multiplier).
+  virtual void setJFac(Real jfac) = 0;
+
+  /// Invalidate BottomUp J-value cache.
+  virtual void invalidatePhotolysisCache() = 0;
+
+  /// Mark internal cache as dirty.
+  virtual void markDirty() const = 0;
+
+  /// Set current simulation time (seconds since midnight).
+  virtual void setCurrentTime(Real t) const = 0;
+
+  /// Get a single photolysis J value by 1-based J number.
+  virtual Real getJValue(unsigned int j_number) const = 0;
+
+  /// Get the number of photolysis J variables.
+  virtual unsigned int nJValues() const = 0;
+
+  /// Compute RO2 sum (peroxy radical total) from concentration vector.
+  virtual Real getRO2Sum(const std::vector<Real> & C) const = 0;
+
+  /// Compute rate (k * prod(reactants)) for a single reaction.
+  virtual Real reactionRate(unsigned int r, const std::vector<Real> & C) const = 0;
+
+  /// Compute net rate contribution of reaction r to species s.
+  virtual Real speciesReactionRate(unsigned int s, unsigned int r,
+                                    const std::vector<Real> & C) const = 0;
+
+  /// Compute total loss rate for species s.
+  virtual Real speciesLossRate(unsigned int s, const std::vector<Real> & C) const = 0;
+
+  /// Compute total production rate for species s.
+  virtual Real speciesProductionRate(unsigned int s, const std::vector<Real> & C) const = 0;
+
+  /// Compute all reaction rates as a vector.
+  virtual void allReactionRates(const std::vector<Real> & C,
+                                 std::vector<Real> & rates) const = 0;
+
+  /// Get dC/dt for a single species (cached).
+  virtual Real getDCdt(unsigned int idx, const std::vector<Real> & C) const = 0;
+
+  /// Get diagonal Jacobian element (cached).
+  virtual Real getJacobianDiagonal(unsigned int idx,
+                                    const std::vector<Real> & C) const = 0;
+
+  /// Get off-diagonal Jacobian element (cached).
+  virtual Real getJacobianOffDiagonal(unsigned int i, unsigned int j,
+                                       const std::vector<Real> & C) const = 0;
 };

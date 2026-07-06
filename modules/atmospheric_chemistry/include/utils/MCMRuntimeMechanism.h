@@ -12,6 +12,9 @@
 #include "IMechanism.h"
 #include "FunctionParserUtils.h"
 #include "StoichMatrix.h"
+#include "JCalibrator.h"
+#include "HybridJTableReader.h"
+#include "BottomUpJIntegrator.h"
 
 #include <vector>
 #include <string>
@@ -141,6 +144,18 @@ public:
 
   /** Get cached solar zenith angle cosine. */
   Real getSolarCosX() const { return _solar_cosx; }
+  /** Get cached solar secant (1/cosx). */
+  Real getSolarSecX() const { return _solar_secx; }
+  /** Get cached local hour angle (radians). */
+  Real getSolarLHA() const { return _solar_lha; }
+  /** Get sin(lat)*sin(dec). */
+  Real getSolarSinLD() const { return _solar_sinld; }
+  /** Get cos(lat)*cos(dec). */
+  Real getSolarCosLD() const { return _solar_cosld; }
+  /** Get equation of time. */
+  Real getSolarEQT() const { return _solar_eqt; }
+  /** Get solar declination (radians). */
+  Real getDeclination() const { return _declination; }
 
   /** Set solar parameters (replaces MCMBoxModel::setSolarCycle). */
   void setSolarParams(Real lat, Real lon, int day, int month, int year);
@@ -179,19 +194,32 @@ public:
   /** Calculate cos(SZA) with caching (internal). */
   Real calculateCosSZA(Real t) const;
 
-private:
-  // ===== Core computation methods =====
+  // ===== Public computation methods (needed by MCMBoxModel) =====
 
-  /** Compute dC/dt for all species. */
+  /** Evaluate all rate coefficients (fparser evaluation + photolysis J).
+   *  Called automatically by computeRHS/getDCdt when dirty, but also
+   *  callable directly when coefficients need to be pre-computed before
+   *  a series of evaluations (e.g., at timestep midpoint in PETSc TS mode). */
+  void evaluateCoefficients();
+
+  /** Compute dC/dt using the current (already-evaluated) rate coefficients.
+   *  Unlike computeRHS(), this does NOT re-evaluate rate coefficients —
+   *  it uses the cached _k from the most recent evaluateCoefficients() call.
+   *  This is the hot-path for PETSc TS internal steps where coefficients
+   *  are constant across the timestep. */
   void computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) const;
 
-  /** Compute Jacobian as (row, col, val) triplets. */
+  /** Compute Jacobian as (row, col, val) triplets using current coefficients. */
   void computeJacobianTriplets(
       const std::vector<Real> & C,
       std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const;
 
-  /** Evaluate all rate coefficients (fparser evaluation + photolysis J). */
-  void evaluateCoefficients();
+  /** Build the sparse Jacobian cache from _cached_C.
+   *  Called automatically by getJacobianDiagonal/getJacobianOffDiagonal. */
+  void _buildJacobianCache() const;
+
+private:
+  // ===== Core computation methods =====
 
   /** Set up fparser for coefficient and reaction expressions. */
   void setupFparser(const ParsedMechanism & mech);
@@ -199,9 +227,6 @@ private:
   /** Compile a fast pre-compiled handler (bypass fparser). */
   FastHandler compileFastHandler(const std::string & expr,
                                    const std::vector<unsigned int> & var_indices) const;
-
-  /** Build the sparse Jacobian cache from _cached_C. */
-  void _buildJacobianCache() const;
 
   /** Load mechanism data from ParsedMechanism. */
   void loadMechanism(const ParsedMechanism & mech,
