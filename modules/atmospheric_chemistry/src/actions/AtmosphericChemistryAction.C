@@ -566,8 +566,9 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
   for (unsigned int j = 0; j < _species.size(); ++j)
   {
     // ODETimeDerivative: contributes du/dt to the residual.
-    // Skipped in PETSc TS mode — the TS handles time integration directly.
-    if (!_use_box_solver)
+    // Only created in moose_implicit mode.
+    // petsc_ts / sundials / kpp_* all self-drive time integration.
+    if (std::string(_chem_solver) == "moose_implicit")
     {
       auto td_params = _factory.getValidParams("ODETimeDerivative");
       td_params.set<NonlinearVariableName>("variable") = _species[j];
@@ -603,19 +604,26 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
 
   // ── Logging ──
   {
-    std::string mode_label = _use_box_solver ? "PETSc TS" : "MOOSE implicit";
+    std::string solver_str(_chem_solver);
+    std::string mode_label =
+        (solver_str == "moose_implicit") ? "MOOSE implicit"
+      : (solver_str == "sundials")      ? "SUNDIALS CVODE"
+      : (solver_str == "kpp_rosenbrock" || solver_str == "kpp_sdirk"
+         || solver_str == "kpp_runge_kutta") ? "KPP " + solver_str
+      : "PETSc TS";
     _console << "AtmosphericChemistry (box): " << mode_label << " — "
              << "created ChemistryODEKernel for " << _species.size() << " species";
     if (_ro2_diagnostic_enabled)
       _console << " + RO2";
-    if (!_use_box_solver)
+    if (std::string(_chem_solver) == "moose_implicit")
       _console << " + ODETimeDerivative";
     _console << std::endl;
   }
 
   // ── Set sparse Jacobian coupling pattern (MOOSE implicit mode only) ──
-  // PETSc TS mode bypasses MOOSE's nonlinear solver — no coupling matrix needed.
-  if (!_use_box_solver)
+  // petsc_ts / sundials / kpp_* all bypass MOOSE's nonlinear solver —
+  // no coupling matrix needed.
+  if (std::string(_chem_solver) == "moose_implicit")
   {
     std::map<std::string, unsigned int> sp_idx;
     for (unsigned int i = 0; i < _species.size(); ++i)
