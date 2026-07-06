@@ -110,7 +110,7 @@ AtmosphericChemistryAction::validParams()
   // --- 化学求解器选择（替代 box_solver*，v2.0 后移除旧参数） ---
   MooseEnum solver_enum(
       "moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
-      "petsc_ts");
+      "moose_implicit");
   params.addParam<MooseEnum>("chem_solver", solver_enum,
       "Chemical ODE solver backend for box mode:\n"
       "  moose_implicit  — MOOSE Newton solver owns the integration\n"

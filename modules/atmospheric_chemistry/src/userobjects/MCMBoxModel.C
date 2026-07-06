@@ -247,6 +247,16 @@ MCMBoxModel::validParams()
   params.addParam<Real>("solver_atol", 1e-10,
       "Absolute tolerance for the ODE solver's adaptive integrator.");
 
+  // --- Parameters forwarded from AtmosphericChemistryAction ---
+  MooseEnum solver_enum(
+      "moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
+      "petsc_ts");
+  params.addParam<MooseEnum>("chem_solver", solver_enum,
+      "Chemical solver backend (forwarded from AtmosphericChemistryAction).");
+  MooseEnum mech_fmt("MCM_FACSIMILE KPP", "MCM_FACSIMILE");
+  params.addParam<MooseEnum>("mechanism_format", mech_fmt,
+      "Mechanism format (forwarded from AtmosphericChemistryAction).");
+
   params.addClassDescription(
       "Centralized box model UserObject for atmospheric chemistry ODE systems.");
   return params;
@@ -1695,10 +1705,18 @@ MCMBoxModel::setupPETScTS()
 
   PETSC_TRY(TSCreate(PETSC_COMM_SELF, &_ts));
   PETSC_TRY(TSSetProblemType(_ts, TS_NONLINEAR));
-  // Set options prefix to 'chem_' so TS only reads -chem_ts_* options.
-  // This prevents the Executioner's petsc_options_iname (which uses -ts_*)
-  // from leaking into the chemical ODE solver.
-  PETSC_TRY(TSSetOptionsPrefix(_ts, "chem_"));
+  // NOTE: TSSetOptionsPrefix is deliberately NOT used here.
+  //
+  // Setting an options prefix would prevent the TS's internal linear solver
+  // (KSP/PC) from reading the Executioner's petsc_options_iname settings
+  // (e.g. -pc_type lu -pc_factor_shift_type NONZERO), which are essential
+  // for convergence on stiff chemical systems.
+  //
+  // The TS type is set explicitly via TSSetType() and tolerances via
+  // TSSetTolerances(), so the primary risk of executioner-side -ts_*
+  // options leaking in is mitigated by code-level overrides.  The user
+  // controls the chemical solver via the chem_solver/chem_solver_type
+  // parameters in the [AtmosphericChemistry] block.
   PETSC_TRY(TSSetRHSFunction(_ts, nullptr, tsRHSFunction, this));
   PETSC_TRY(VecCreateSeq(PETSC_COMM_SELF, _n_species, &_ts_X));
 
