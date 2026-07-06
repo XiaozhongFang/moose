@@ -107,27 +107,46 @@ AtmosphericChemistryAction::validParams()
       "Default false (standard MCM chemistry). Set true for F0AM-compatible "
       "RO2 termination or when comparing against F0AM reference outputs.");
 
-  // --- Box ODE solver (internal integrator for box mode chemistry) ---
-  // These parameters configure the embedded ODE solver inside MCMBoxModel,
-  // NOT the outer MOOSE Executioner / TimeIntegrator.  The Executioner
-  // controls the global time step; box_solver controls how chemistry is
-  // integrated within each time step.
-  params.addParam<bool>("box_solver", false,
-      "Enable standalone ODE solver for box mode chemistry (mode=box only). "
-      "When true, MCMBoxModel::execute() handles the chemical ODE integration "
-      "internally (via PETSc TS) and bypasses MOOSE's Newton solver for the "
-      "chemical subsystem. ODETimeDerivative is not created — no MOOSE-level "
-      "time integration of chemistry. When false (default), ChemistryODEKernel "
-      "provides residuals/Jacobians to MOOSE's Newton solver.");
+  // --- 化学求解器选择（替代 box_solver*，v2.0 后移除旧参数） ---
+  MooseEnum solver_enum(
+      "moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
+      "petsc_ts");
+  params.addParam<MooseEnum>("chem_solver", solver_enum,
+      "Chemical ODE solver backend for box mode:\n"
+      "  moose_implicit  — MOOSE Newton solver owns the integration\n"
+      "  petsc_ts        — PETSc TS (BDF/ARKIMEX, default)\n"
+      "  sundials        — SUNDIALS CVODE (if compiled with SUNDIALS)\n"
+      "  kpp_rosenbrock  — KPP Rosenbrock (if compiled with KPP)\n"
+      "  kpp_sdirk       — KPP SDIRK (if compiled with KPP)\n"
+      "  kpp_runge_kutta — KPP Runge-Kutta (if compiled with KPP)");
+
+  params.addParam<Real>("chem_solver_rtol", 1e-6,
+      "Relative tolerance for the chemical ODE solver's adaptive integrator.\n"
+      "Formerly box_solver_rtol.");
+  params.addParam<Real>("chem_solver_atol", 1e-10,
+      "Absolute tolerance for the chemical ODE solver's adaptive integrator.\n"
+      "Formerly box_solver_atol.");
+  MooseEnum chem_type_enum(
+      "bdf arkimex eimex rosw mimex beuler cn rk theta ssp", "bdf");
+  params.addParam<MooseEnum>("chem_solver_type", chem_type_enum,
+      "ODE solver type (petsc_ts only): 'bdf' (default), 'arkimex', etc.\n"
+      "Ignored for sundials and kpp_* solvers.\n"
+      "Formerly box_solver_type.");
+
+  // --- (已废弃) 旧式 box ODE 求解器参数 ---
   MooseEnum ts_type_enum("bdf arkimex eimex rosw mimex beuler cn rk theta ssp sundials", "bdf");
-  params.addParam<MooseEnum>("box_solver_type", ts_type_enum,
-      "ODE solver type for box mode: 'bdf' (variable-order BDF, default, "
-      "closest to MATLAB ode15s), 'arkimex' (adaptive IMEX), "
-      "'sundials' (CVODE via SUNDIALS, if compiled).");
-  params.addParam<Real>("box_solver_rtol", 1e-6,
-      "Relative tolerance for the box ODE solver's adaptive integrator.");
-  params.addParam<Real>("box_solver_atol", 1e-10,
-      "Absolute tolerance for the box ODE solver's adaptive integrator.");
+  params.addDeprecatedParam<bool>("box_solver", false,
+      "Use 'chem_solver' instead. This parameter is deprecated.",
+      "box_solver is deprecated. Use 'chem_solver' instead.");
+  params.addDeprecatedParam<MooseEnum>("box_solver_type", ts_type_enum,
+      "Use 'chem_solver_type' instead.",
+      "box_solver_type is deprecated. Use 'chem_solver_type' instead.");
+  params.addDeprecatedParam<Real>("box_solver_rtol", 1e-6,
+      "Use 'chem_solver_rtol' instead.",
+      "box_solver_rtol is deprecated. Use 'chem_solver_rtol' instead.");
+  params.addDeprecatedParam<Real>("box_solver_atol", 1e-10,
+      "Use 'chem_solver_atol' instead.",
+      "box_solver_atol is deprecated. Use 'chem_solver_atol' instead.");
 
   // --- Family conservation (F0AM DAE method) ---
   params.addParam<std::vector<std::string>>("family_names", {},
