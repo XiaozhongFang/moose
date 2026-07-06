@@ -1695,6 +1695,10 @@ MCMBoxModel::setupPETScTS()
 
   PETSC_TRY(TSCreate(PETSC_COMM_SELF, &_ts));
   PETSC_TRY(TSSetProblemType(_ts, TS_NONLINEAR));
+  // Set options prefix to 'chem_' so TS only reads -chem_ts_* options.
+  // This prevents the Executioner's petsc_options_iname (which uses -ts_*)
+  // from leaking into the chemical ODE solver.
+  PETSC_TRY(TSSetOptionsPrefix(_ts, "chem_"));
   PETSC_TRY(TSSetRHSFunction(_ts, nullptr, tsRHSFunction, this));
   PETSC_TRY(VecCreateSeq(PETSC_COMM_SELF, _n_species, &_ts_X));
 
