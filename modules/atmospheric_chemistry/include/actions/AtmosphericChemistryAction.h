@@ -98,8 +98,12 @@ protected:
 
   /// Include transport in coupled mode
   const bool _include_transport;
-  /// PETSc TS standalone integrator for box mode
-  const bool _use_box_solver;
+  /// Chemical solver backend (derived from chem_solver + box_solver fallback)
+  MooseEnum _chem_solver;
+  /// Mechanism format (derived from mechanism_format parameter)
+  const MooseEnum _mechanism_format;
+  /// PETSc TS standalone integrator for box mode (derived from _chem_solver)
+  bool _use_box_solver;
 
   /// Whether RO2 diagnostic variable should be created (computed once in constructor)
   bool _ro2_diagnostic_enabled;

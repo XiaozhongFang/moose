@@ -173,7 +173,9 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
     _mechanism_file(getParam<std::string>("mechanism_file")),
     _mode(getParam<MooseEnum>("mode")),
     _include_transport(getParam<bool>("include_transport")),
-    _use_box_solver(getParam<bool>("box_solver"))
+    _chem_solver(getParam<MooseEnum>("chem_solver")),
+    _mechanism_format(getParam<MooseEnum>("mechanism_format")),
+    _use_box_solver(false)
 {
   // Reject absolute paths — prevents reading arbitrary system files via
   // malicious mechanism_file / photolysis_file parameters.
@@ -182,10 +184,41 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   if (!_mechanism_file.empty() && _mechanism_file[0] == '/')
     mooseError("AtmosphericChemistry: mechanism_file must be relative, got absolute: ", _mechanism_file);
 
-  // Validate: box_solver requires box mode
+  // ---- 读取 chem_solver（优先）或回退到旧的 box_solver ----
+  if (parameters().isParamSetByUser("box_solver"))
+  {
+    _console << "WARNING: 'box_solver' is deprecated. "
+             << "Use 'chem_solver=" << _chem_solver << "' instead.\n";
+    if (getParam<bool>("box_solver"))
+      _chem_solver = "petsc_ts";
+  }
+
+  // ---- 从 chem_solver 派生 _use_box_solver ----
+  _use_box_solver = (std::string(_chem_solver) != "moose_implicit");
+
+  // ---- 非法组合校验 ----
   if (_use_box_solver && _mode != "box")
-    mooseError("AtmosphericChemistry: box_solver=true requires mode=box. "
-               "Coupled mode cannot use standalone ODE solver integration.");
+    mooseError("AtmosphericChemistry: standalone chemical solvers "
+               "(chem_solver != moose_implicit) require mode=box.");
+
+  // KPP 求解器需要 mechanism_format=KPP
+  bool is_kpp_solver = (std::string(_chem_solver) == "kpp_rosenbrock" ||
+                        std::string(_chem_solver) == "kpp_sdirk" ||
+                        std::string(_chem_solver) == "kpp_runge_kutta");
+  if (is_kpp_solver && std::string(_mechanism_format) != "KPP")
+    mooseError("AtmosphericChemistry: chem_solver=", _chem_solver,
+               " requires mechanism_format=KPP, got ",
+               _mechanism_format, ".");
+
+  // KPP 求解器需要编译时 KPP 支持
+  if (is_kpp_solver)
+  {
+#ifndef KPP_ENABLED
+    mooseError("AtmosphericChemistry: chem_solver=", _chem_solver,
+               " requires KPP support. "
+               "Recompile with --enable-kpp.");
+#endif
+  }
 
   // Parse the .fac mechanism file via MechanismLoader (shared with MCMBoxModel)
   std::string mcm_ver = getParam<MooseEnum>("mcm_version");
