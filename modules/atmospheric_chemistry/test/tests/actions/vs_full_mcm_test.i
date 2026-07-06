@@ -13,10 +13,10 @@
   air_density = 2.46e19
   press = 1013.0
   photolysis_scheme = MCM_SZA
-  box_solver = true
-  box_solver_type = bdf
-  box_solver_rtol = 1e-1
-  box_solver_atol = 1e-4
+  chem_solver = petsc_ts
+  chem_solver_type = bdf
+  chem_solver_rtol = 1e-1
+  chem_solver_atol = 1e-4
   default_ic = 1.0e6
 []
 [Executioner]
