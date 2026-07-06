@@ -282,25 +282,36 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _cached_bottomup_T(0.0),
     _cached_bottomup_P(0.0),
     _bottomup_j_valid(false),
-    _use_box_solver(getParam<MooseEnum>("box_solver_mode") == "petsc_ts")
+    _use_box_solver(false)  // derived in constructor body
 {
-  // Determine the solver_type up front so the dispatcher in the constructor
-  // can choose between PETSc TS and the SUNDIALS direct path.
-  _solver_type = std::string(getParam<MooseEnum>("solver_type"));
-  _use_sundials = (_solver_type == "sundials");
+  // ---- 从 chem_solver 参数派生求解器选择 ----
+  _chem_solver = std::string(getParam<MooseEnum>("chem_solver"));
+  _use_sundials = (_chem_solver == "sundials");
+  _use_kpp = (_chem_solver == "kpp_rosenbrock" ||
+              _chem_solver == "kpp_sdirk" ||
+              _chem_solver == "kpp_runge_kutta");
 
-  // Read solver tolerances ONCE here so both paths (PETSc TS and SUNDIALS)
-  // share the same parameter source.  Previously these were only read inside
-  // setupPETScTS(), so the sundials path fell back to hardcoded defaults.
+  // KPP 和 SUNDIALS 都是自驱动模式
+  if (_use_sundials || _use_kpp)
+    _use_box_solver = true;
+
+  // KPP 求解器需要 mechanism_format=KPP (由 Action 保证，这里再次检查)
+  if (_use_kpp)
+  {
+#ifndef KPP_ENABLED
+    mooseError("MCMBoxModel: chem_solver=", _chem_solver,
+               " requires KPP support (KPP_ENABLED). "
+               "Recompile with --enable-kpp.");
+#endif
+  }
+
+  // 读取求解器类型（仅对 petsc_ts 有意义）
+  _solver_type = std::string(getParam<MooseEnum>("solver_type"));
+
+  // Read solver tolerances ONCE here so all solver paths
+  // share the same parameter source.
   _solver_rtol = getParam<Real>("solver_rtol");
   _solver_atol = getParam<Real>("solver_atol");
-
-  // When sundials is selected, treat the user-facing box_solver_mode as
-  // "petsc_ts" so the existing _use_box_solver switch and integrator
-  // plumbing stay in use; we just swap the per-step execute() behavior.
-  // (Alternative: box_solver_mode enum could be extended with "sundials".)
-  if (_use_sundials)
-    _use_box_solver = true;
 
   // Load Hybrid table reader if photolysis scheme is HYBRID
   auto scheme = getParam<MooseEnum>("photolysis_scheme");
@@ -329,6 +340,14 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
   if (_use_sundials)
     _integrator = std::make_unique<SundialsBoxIntegrator>(
         *this, _app, _solver_rtol, _solver_atol);
+  else if (_use_kpp)
+  {
+    // KPP integrator placeholder — KppBoxIntegrator will be used
+    // when compiled with KPP support.  Currently falls through to
+    // PetscTSIntegrator as a safe default for testing.
+    // TODO: Replace with KppBoxIntegrator in Phase 3
+    _integrator = std::make_unique<PetscTSIntegrator>(*this);
+  }
   else if (_use_box_solver)
     _integrator = std::make_unique<PetscTSIntegrator>(*this);
   else

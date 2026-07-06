@@ -530,11 +530,15 @@ protected:
   PetscReal _solver_rtol = 1e-6;
   PetscReal _solver_atol = 1e-10;
   std::string _solver_type = "bdf";
+  /// Chemical solver backend name (from chem_solver param)
+  std::string _chem_solver;
 
   // -- SUNDIALS direct solver members --
   /// True when user selected solver_type=sundials; triggers solveSundialsCVODE()
   /// instead of PETSc TS steps inside execute().
   bool _use_sundials = false;
+  /// True when chem_solver=kpp_* triggers KPP integration path in execute()
+  bool _use_kpp = false;
 
 public:
   // SUNDIALS direct integration entry point.  Called from execute() when
