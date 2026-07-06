@@ -10,10 +10,12 @@
 #pragma once
 
 #include "Moose.h"
+#include "ConsoleStreamInterface.h"
 
 #include <vector>
 #include <memory>
 
+class MooseApp;
 class MCMBoxModel;
 
 /**
@@ -134,3 +136,101 @@ public:
 private:
   const MCMBoxModel & _box;
 };
+
+// SundialsBoxIntegrator is declared only when SUNDIALS is available at build
+// time.  When HAVE_SUNDIALS is undefined it is opaque (not declared) — the
+// sundials solver path simply cannot be selected.
+//
+// When SUNDIALS IS available, pull in the types this header needs so the
+// method signature resolves.  This header is included from unity builds that
+// combine every .C file — if we don't bring the types along, compilation
+// fails for translation units that combine sundials code with non-sundials
+// code (MCMLifetimePostprocessor.C, ChemistryODEKernel.C, etc.).
+#if defined(HAVE_SUNDIALS)
+#include <sundials/sundials_types.h>    // sunrealtype, sunindextype, SUNContext
+#include <sundials/sundials_matrix.h>  // SUNMatrix
+#include <nvector/nvector_serial.h>    // N_Vector (defines N_Vector)
+#endif
+
+#if defined(HAVE_SUNDIALS)
+
+/**
+ * SUNDIALS CVODE/ARKODE integrator: wraps MCMBoxModel for full-system integration
+ * using the standalone SUNDIALS library (bypassing PETSc TS).
+ *
+ * Available only when MOOSE is compiled with SUNDIALS support (preprocessor guard
+ * HAVE_SUNDIALS). computeResidual/Jacobian*() return 0 — same no-op contract as
+ * PetscTSIntegrator. selfDriven() === true so MCMBoxModel::execute() dispatches
+ * to solveSundialsCVODE() instead of runPETScStep().
+ *
+ * The actual SUNDIALS solve is implemented in BoxIntegrator.C.
+ */
+class SundialsBoxIntegrator : public BoxIntegrator, public ConsoleStreamInterface
+{
+public:
+  SundialsBoxIntegrator(const MCMBoxModel & box_model,
+                         MooseApp & app,
+                         Real rtol = 1e-6,
+                         Real atol = 1e-10)
+    : BoxIntegrator(),
+      ConsoleStreamInterface(app),
+      _box(box_model),
+      _rtol(rtol),
+      _atol(atol)
+  {}
+  ~SundialsBoxIntegrator() override = default;
+
+  Real computeResidual(unsigned int /*species_idx*/,
+                        const std::vector<Real> & /*C*/) const override { return 0.0; }
+
+  Real computeJacobianDiagonal(unsigned int /*species_idx*/,
+                                const std::vector<Real> & /*C*/) const override { return 0.0; }
+
+  Real computeJacobianOffDiagonal(unsigned int /*species_idx*/,
+                                   unsigned int /*jvar*/,
+                                   const std::vector<Real> & /*C*/) const override { return 0.0; }
+
+  void reinit(Real /*time*/) const override {}
+  bool selfDriven() const override { return true; }
+  Real ppbToMolec() const override { return 1.0; }
+
+  /**
+   * Advance the chemistry by one MOOSE timestep using SUNDIALS CVODE.
+   *
+   * @param t0  Start time of the current step (s).
+   * @param t1  End time of the current step (s).
+   * @param C   On entry: current species concentrations (molec/cm³).
+   *            On exit: integrated species concentrations at t1.
+   */
+  void solveSundialsCVODE(Real t0, Real t1, std::vector<Real> & C) const;
+
+private:
+  const MCMBoxModel & _box;
+  const Real _rtol;
+  const Real _atol;
+
+  /** SUNDIALS RHS callback: reads N_Vector y, writes dy/dt into dy. */
+  static int sundialsRHSF(sunrealtype t, N_Vector y, N_Vector dy, void *user_data);
+
+  /**
+   * Analytical Jacobian callback for SUNDIALS (CVodeSetJacFn).
+   *
+   * Matches the KPP/F0AM/AtChem2 pattern: the chemistry-aware Jacobian
+   * ∂(dC_i/dt)/∂C_j is computed by chain rule over the reaction network
+   * (_iG stoichiometry + _k rate coefficients) and written directly into
+   * the dense SUNMatrix J.
+   *
+   * Signature required by SUNDIALS:
+   *   int Jac(sunrealtype t, N_Vector y, N_Vector fy, SUNMatrix J,
+   *            void *user_data, N_Vector tmp1, N_Vector tmp2, N_Vector tmp3);
+   *
+   * This replaces SUNDIALS' built-in finite-difference Jacobian, which is
+   * too fragile on the extremely stiff MCM mechanism (600+ species, 30+
+   * orders-of-magnitude spread in lifetimes) and caused Newton divergence.
+   */
+  static int sundialsJacFn(sunrealtype t, N_Vector y, N_Vector fy,
+                            SUNMatrix J, void *user_data,
+                            N_Vector tmp1, N_Vector tmp2, N_Vector tmp3);
+};
+
+#endif // HAVE_SUNDIALS

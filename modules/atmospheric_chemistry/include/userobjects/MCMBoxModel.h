@@ -530,5 +530,15 @@ protected:
   PetscReal _solver_rtol = 1e-6;
   PetscReal _solver_atol = 1e-10;
   std::string _solver_type = "bdf";
+
+  // -- SUNDIALS direct solver members --
+  /// True when user selected solver_type=sundials; triggers solveSundialsCVODE()
+  /// instead of PETSc TS steps inside execute().
+  bool _use_sundials = false;
+
+public:
+  // SUNDIALS direct integration entry point.  Called from execute() when
+  // _use_sundials is true and _integrator->selfDriven() is true.
+  void solveSundialsCVODEWrapper(Real t0, Real t1, std::vector<Real> & C);
 };
 

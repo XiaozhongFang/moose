@@ -284,6 +284,24 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _bottomup_j_valid(false),
     _use_box_solver(getParam<MooseEnum>("box_solver_mode") == "petsc_ts")
 {
+  // Determine the solver_type up front so the dispatcher in the constructor
+  // can choose between PETSc TS and the SUNDIALS direct path.
+  _solver_type = std::string(getParam<MooseEnum>("solver_type"));
+  _use_sundials = (_solver_type == "sundials");
+
+  // Read solver tolerances ONCE here so both paths (PETSc TS and SUNDIALS)
+  // share the same parameter source.  Previously these were only read inside
+  // setupPETScTS(), so the sundials path fell back to hardcoded defaults.
+  _solver_rtol = getParam<Real>("solver_rtol");
+  _solver_atol = getParam<Real>("solver_atol");
+
+  // When sundials is selected, treat the user-facing box_solver_mode as
+  // "petsc_ts" so the existing _use_box_solver switch and integrator
+  // plumbing stay in use; we just swap the per-step execute() behavior.
+  // (Alternative: box_solver_mode enum could be extended with "sundials".)
+  if (_use_sundials)
+    _use_box_solver = true;
+
   // Load Hybrid table reader if photolysis scheme is HYBRID
   auto scheme = getParam<MooseEnum>("photolysis_scheme");
   if (scheme == "HYBRID")
@@ -308,7 +326,10 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
   // Create the box integrator strategy — must be done in the constructor
   // because ChemistryODEKernel accesses getIntegrator() during its own
   // construction (before initialize() is called).
-  if (_use_box_solver)
+  if (_use_sundials)
+    _integrator = std::make_unique<SundialsBoxIntegrator>(
+        *this, _app, _solver_rtol, _solver_atol);
+  else if (_use_box_solver)
     _integrator = std::make_unique<PetscTSIntegrator>(*this);
   else
     _integrator = std::make_unique<MooseImplicitIntegrator>(*this);
@@ -316,7 +337,9 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
 
 MCMBoxModel::~MCMBoxModel()
 {
-  // Clean up PETSc TS objects (safe if never initialized — pointers are null)
+  // Clean up PETSc TS objects (safe if never initialized — pointers are null).
+  // The sundials path never creates PETSc TS/Vec/Mat, so these will all be null
+  // in that case and the cleanup is a no-op.
   if (_ts_J) { CHKERRABORT(PETSC_COMM_SELF, MatDestroy(&_ts_J)); _ts_J = nullptr; }
   if (_ts_X) { CHKERRABORT(PETSC_COMM_SELF, VecDestroy(&_ts_X)); _ts_X = nullptr; }
   if (_ts)   { CHKERRABORT(PETSC_COMM_SELF, TSDestroy(&_ts));   _ts = nullptr; }
@@ -383,8 +406,16 @@ MCMBoxModel::initialize()
       _console << "MCMBoxModel: Dilution enabled, kdil = " << dilute << " /s" << std::endl;
     }
 
-    // Initialize PETSc TS integrator if box mode uses standalone TS integration
-    if (_use_box_solver)
+    // Initialize the per-step solver.  For sundials, the SUNDIALS context is
+    // built on the fly inside SundialsBoxIntegrator::solveSundialsCVODE() per
+    // time step — no persistent setup needed here.
+    if (_use_sundials)
+    {
+      _console << "MCMBoxModel: SUNDIALS direct solver will be used ("
+               << _n_species << " species, rtol=" << _solver_rtol
+               << ", atol=" << _solver_atol << ")" << std::endl;
+    }
+    else if (_use_box_solver)
     {
       _console << "MCMBoxModel: setting up PETSc TS..." << std::endl;
       setupPETScTS();
@@ -1518,9 +1549,9 @@ MCMBoxModel::checkConvergence(const std::vector<Real> & Cp, const std::vector<Re
 void
 MCMBoxModel::execute()
 {
-  // Self-driven mode (PETSc TS): integrate chemistry at TIMESTEP_END,
-  // bypassing MOOSE's solver.  ChemistryODEKernel residuals are 0 and this
-  // execute() sets the solution directly.
+  // Self-driven mode (PETSc TS or SUNDIALS): integrate chemistry at
+  // TIMESTEP_END, bypassing MOOSE's solver.  ChemistryODEKernel residuals are 0
+  // and this execute() sets the solution directly.
   // MOOSE-driven mode: no-op — ChemistryODEKernel provides residuals/Jacobians
   // and the Newton solver handles the integration.
   if (!_integrator->selfDriven() || _n_species == 0)
@@ -1528,14 +1559,62 @@ MCMBoxModel::execute()
 
   // Get current and previous times from FEProblemBase
   FEProblemBase & fe_problem = static_cast<FEProblemBase &>(_subproblem);
-  PetscReal t_end = fe_problem.time();
-  PetscReal dt = fe_problem.dt();
-  PetscReal t_start = t_end - dt;
+  Real t_end = fe_problem.time();
+  Real dt = fe_problem.dt();
+  Real t_start = t_end - dt;
 
   // Skip initial call at t=0 (no step yet)
   if (t_start < 0.0 || dt <= 0.0)
     return;
 
+  // ---- SUNDIALS direct path (solver_type = sundials) ----
+  if (_use_sundials)
+  {
+    // Build std::vector<Real> concentration from ScalarVariable values.
+    std::vector<Real> C(_n_species);
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      C[i] = sv.sln()[0];
+    }
+
+    // Evaluate rate coefficients at the step midpoint so time-invariant
+    // photolysis parameters (BottomUp) match the behavior of the PETSc path.
+    // Then mark the dC/dt cache dirty so the first RHS evaluation during
+    // SUNDIALS integration recomputes _cached_dC from the fresh _k.
+    _t = 0.5 * (t_start + t_end);
+    if (!_coeff_parsers.empty())
+      evaluateCoefficients();
+    markDirty();
+
+    // Call SUNDIALS CVODE wrapper.  Inside each internal RHS evaluation the
+    // callback reads _y (state), calls getDCdt() which computes from the
+    // cached _k + _cached_dC (computed once per step), and returns dy/dt.
+    SundialsBoxIntegrator * sundials_ptr =
+        static_cast<SundialsBoxIntegrator *>(_integrator.get());
+    sundials_ptr->solveSundialsCVODE(t_start, t_end, C);
+
+    // Write integrated state back to all ScalarVariable storage locations.
+    NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
+    NumericVector<Number> & sys_sol = *nl.system().solution;
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      dof_id_type dof = sv.dofIndices()[0];
+      sv.setValue(0, C[i]);
+      sys_sol.set(dof, C[i]);
+      nl.solution().set(dof, C[i]);
+    }
+    sys_sol.close();
+    nl.solution().close();
+    *const_cast<NumericVector<Number> *>(nl.currentSolution()) = nl.solution();
+
+    _console << "MCMBoxModel: SUNDIALS step t=[" << t_start << "," << t_end
+             << "] dt=" << dt << " completed" << std::endl;
+    return;
+  }
+
+  // ---- PETSc TS path (solver_type = bdf/arkimex/eimex/...) ----
   // Build concentration vector from ScalarVariable values (source of truth
   // for ICs and persistent state — the NL solution vector may not be
   // populated until after the first solve).
@@ -1587,10 +1666,9 @@ MCMBoxModel::setupPETScTS()
 {
   PetscErrorCode ierr;
 
-  // Load ODE solver parameters
-  _solver_type = std::string(getParam<MooseEnum>("solver_type"));
-  _solver_rtol = getParam<Real>("solver_rtol");
-  _solver_atol = getParam<Real>("solver_atol");
+  // ODE solver parameters (_solver_type/_rtol/_atol) are read once in the
+  // constructor so both PETSc TS and SUNDIALS paths share the same source.
+  // (Kept here: the values are valid across all TS solver types.)
 
   // Helper macro for error checking without PetscCheck (which returns a value)
   // and without requiring MPI_Comm (use PETSC_COMM_SELF for sequential TS).
@@ -1601,23 +1679,26 @@ MCMBoxModel::setupPETScTS()
   PETSC_TRY(TSSetRHSFunction(_ts, nullptr, tsRHSFunction, this));
   PETSC_TRY(VecCreateSeq(PETSC_COMM_SELF, _n_species, &_ts_X));
 
-  // Use sparse AIJ matrix for Jacobian with preallocation from stoichiometry.
-  // For each species row i, preallocate for all unique reactant species in
-  // reactions involving i.  This matches the Jacobian sparsity pattern from
-  // computeJacobianTriplets.
+  // Use sparse AIJ matrix for Jacobian.  Pre-allocate DENSE because MCM
+  // mechanisms are densely interconnected (most rows touch most columns).
+  // The previous value nz = n interpreted by PETSc as "n non-zeros per row
+  // in diagonal positions"; the actual Jacobian has >> n non-zeros per row
+  // for full-MCM, which caused "New nonzero at (i,j)" mallocs.
+  //
+  // For 610 species: 610×610 ≈ 3 MB.
+  // For full MCM (~5800 species): ~272 MB.
+  // Jacobian matrix — use dense because MCM mechanisms are densely
+  // interconnected.  Pre-allocating as sparse (MatCreateSeqAIJ) with too few
+  // entries per row causes PETSc to throw "New nonzero at (i,j)" mallocs
+  // once the real Jacobian non-zeros exceed the pre-allocated budget.
+  // Dense matrices have no such limitation.
   PetscInt n = static_cast<PetscInt>(_n_species);
-  // Preallocate the DIAGONAL portion (all rows are local in seq mode).
-  // nz = n means every row gets slots for all n columns — dense preallocation.
-  // For 610 species this is 610×610 ≈ 3 MB; for full MCM (5832) ≈ 272 MB.
-  // Must use nz > 0 (not 0) because with nz=0 the nnz[] array is interpreted
-  // as OFF-DIAGONAL preallocation, leaving the diagonal with 0 slots.
-  _console << "MCMBoxModel: Jacobian dense preallocation: " << n << "×" << n
-           << " (" << (n * n * (PetscInt)sizeof(PetscScalar) / (1024*1024))
+  _console << "MCMBoxModel: Jacobian matrix: " << n << "×" << n
+           << " (dense; "
+           << (static_cast<std::size_t>(n) * n * sizeof(PetscScalar) / (1024*1024))
            << " MB)" << std::endl;
-  PETSC_TRY(MatCreateSeqAIJ(PETSC_COMM_SELF, n, n, n, nullptr, &_ts_J));
+  PETSC_TRY(MatCreateSeqDense(PETSC_COMM_SELF, n, n, nullptr, &_ts_J));
   PETSC_TRY(MatSetFromOptions(_ts_J));
-  // Also disable strict allocation check as a safety net.
-  PETSC_TRY(MatSetOption(_ts_J, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE));
 
   PETSC_TRY(TSSetRHSJacobian(_ts, _ts_J, _ts_J, tsRHSJacobian, this));
   PETSC_TRY(TSSetType(_ts, _solver_type.c_str()));
@@ -1778,4 +1859,19 @@ MCMBoxModel::tsRHSJacobian(TS /*ts*/, PetscReal /*t*/, Vec C, Mat Amat, Mat Pmat
 
   PetscCall(VecRestoreArrayRead(C, &c_arr));
   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ===== SUNDIALS direct solver dispatcher =====
+
+void
+MCMBoxModel::solveSundialsCVODEWrapper(Real t0, Real t1, std::vector<Real> & C)
+{
+  // This public entry forwards to the SundialsBoxIntegrator member via the
+  // BoxIntegrator unique_ptr.  Called only when _use_sundials is true.
+  SundialsBoxIntegrator * sundials_ptr =
+      static_cast<SundialsBoxIntegrator *>(_integrator.get());
+  if (!sundials_ptr)
+    mooseError("MCMBoxModel: _use_sundials is true but _integrator is not a "
+               "SundialsBoxIntegrator — this should not happen.");
+  sundials_ptr->solveSundialsCVODE(t0, t1, C);
 }
