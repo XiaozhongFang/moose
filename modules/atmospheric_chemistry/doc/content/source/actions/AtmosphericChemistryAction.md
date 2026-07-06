@@ -102,29 +102,52 @@ The [!param](/AtmosphericChemistry/family_names),
 chemical family conservation via DAE slack variables. See the
 [`MCMFamilyConstraint` documentation](MCMFamilyConstraint.md) for details.
 
-### Box ODE Solver (box mode only)
+### Chemical Solver (box mode only)
 
-The `box_solver` parameters configure the **embedded chemical ODE solver** inside
-`MCMBoxModel`.  This is separate from the outer `[Executioner]` time integration:
+The `chem_solver` parameter selects the embedded chemical ODE solver inside
+`MCMBoxModel`. This is separate from the outer `[Executioner]` time integration:
 
 | What | Controls |
 |------|----------|
-| `[Executioner]` `scheme = 'bdf2'` | MOOSE outer time step advancement |
-| `box_solver = true` | Embedded ODE solver for chemical subsystem within each time step |
+| `[Executioner]` | Outer time step advancement + linear solver (`-pc_type lu`, etc.) |
+| `chem_solver` | Chemical ODE integration within each time step |
 
 Parameters:
 
-- `box_solver` (bool, default: false): Enable standalone ODE solver for box mode chemistry.
-  When `true`, `MCMBoxModel::execute()` handles the ODE integration via PETSc TS,
-  bypassing MOOSE's Newton solver for the chemical subsystem.
-- `box_solver_type` (enum: bdf|arkimex|..., default: bdf): ODE solver type. `bdf` (variable-order BDF,
-  closest to MATLAB ode15s) is recommended.
-- `box_solver_rtol` (real, default: 1e-6): Relative tolerance for the adaptive integrator.
-- `box_solver_atol` (real, default: 1e-10): Absolute tolerance for the adaptive integrator.
+- `chem_solver` (enum, default: `moose_implicit`):
+  - `moose_implicit` — MOOSE Newton solver owns the integration (default)
+  - `petsc_ts` — PETSc TS (BDF/ARKIMEX), 28-32× speedup for box mode
+  - `sundials` — SUNDIALS CVODE (requires `--with-sundials`)
+  - `kpp_rosenbrock` — KPP Rosenbrock (requires `--enable-kpp`)
+  - `kpp_sdirk` — KPP SDIRK (requires `--enable-kpp`)
+  - `kpp_runge_kutta` — KPP Runge-Kutta (requires `--enable-kpp`)
+- `chem_solver_type` (enum: bdf|arkimex|..., default: bdf): ODE solver type for `petsc_ts` only.
+- `chem_solver_rtol` (real, default: 1e-6): Relative tolerance for the adaptive integrator.
+- `chem_solver_atol` (real, default: 1e-10): Absolute tolerance for the adaptive integrator.
 
-When `box_solver = true` and `mode = box`, the chemical ODE integration achieves
-28-32× speedup over the default MOOSE LU solver for the S1 chamber case.
-Coupled mode with `box_solver = true` triggers an input parsing error.
+> **Note:** The old `box_solver`, `box_solver_type`, `box_solver_rtol`, and `box_solver_atol`
+> parameters are **deprecated**. Use `chem_solver*` instead. Forward-compatible aliases
+> remain available but emit a deprecation warning.
+
+### Mechanism Format
+
+The `mechanism_format` parameter selects the RHS/Jacobian source:
+
+- `MCM_FACSIMILE` (default): Runtime `.fac` parsing via `MCMFacsimileParser`
+- `KPP`: Pre-generated KPP Fortran code (requires `--enable-kpp`)
+
+Not all `(mechanism_format, chem_solver)` combinations are valid:
+
+| mechanism_format | chem_solver | Valid |
+|-----------------|-------------|-------|
+| `MCM_FACSIMILE` | `moose_implicit` | ✅ |
+| `MCM_FACSIMILE` | `petsc_ts` | ✅ |
+| `MCM_FACSIMILE` | `sundials` | ✅ |
+| `MCM_FACSIMILE` | `kpp_*` | ❌ |
+| `KPP` | `moose_implicit` | ❌ |
+| `KPP` | `petsc_ts` | ❌ |
+| `KPP` | `sundials` | ❌ |
+| `KPP` | `kpp_*` | ✅ |
 
 ## Example Input File Syntax
 

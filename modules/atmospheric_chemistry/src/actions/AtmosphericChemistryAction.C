@@ -107,14 +107,14 @@ AtmosphericChemistryAction::validParams()
       "Default false (standard MCM chemistry). Set true for F0AM-compatible "
       "RO2 termination or when comparing against F0AM reference outputs.");
 
-  // --- 化学求解器选择（替代 box_solver*，v2.0 后移除旧参数） ---
+  // --- Chemical solver selection (replaces box_solver*; remove legacy params in v2.0) ---
   MooseEnum solver_enum(
       "moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
       "moose_implicit");
   params.addParam<MooseEnum>("chem_solver", solver_enum,
       "Chemical ODE solver backend for box mode:\n"
       "  moose_implicit  — MOOSE Newton solver owns the integration\n"
-      "  petsc_ts        — PETSc TS (BDF/ARKIMEX, default)\n"
+      "  petsc_ts        — PETSc TS (BDF/ARKIMEX)\n"
       "  sundials        — SUNDIALS CVODE (if compiled with SUNDIALS)\n"
       "  kpp_rosenbrock  — KPP Rosenbrock (if compiled with KPP)\n"
       "  kpp_sdirk       — KPP SDIRK (if compiled with KPP)\n"
@@ -133,7 +133,7 @@ AtmosphericChemistryAction::validParams()
       "Ignored for sundials and kpp_* solvers.\n"
       "Formerly box_solver_type.");
 
-  // --- (已废弃) 旧式 box ODE 求解器参数 ---
+  // --- (Deprecated) legacy box ODE solver parameters ---
   MooseEnum ts_type_enum("bdf arkimex eimex rosw mimex beuler cn rk theta ssp sundials", "bdf");
   params.addDeprecatedParam<bool>("box_solver", false,
       "Use 'chem_solver' instead. This parameter is deprecated.",
@@ -184,7 +184,7 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
   if (!_mechanism_file.empty() && _mechanism_file[0] == '/')
     mooseError("AtmosphericChemistry: mechanism_file must be relative, got absolute: ", _mechanism_file);
 
-  // ---- 读取 chem_solver（优先）或回退到旧的 box_solver ----
+  // ---- Read chem_solver (preferred) with fallback to legacy box_solver ----
   if (parameters().isParamSetByUser("box_solver"))
   {
     _console << "WARNING: 'box_solver' is deprecated. "
@@ -193,15 +193,15 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
       _chem_solver = "petsc_ts";
   }
 
-  // ---- 从 chem_solver 派生 _use_box_solver ----
+  // ---- Derive _use_box_solver from chem_solver ----
   _use_box_solver = (std::string(_chem_solver) != "moose_implicit");
 
-  // ---- 非法组合校验 ----
+  // ---- Invalid combination validation ----
   if (_use_box_solver && _mode != "box")
     mooseError("AtmosphericChemistry: standalone chemical solvers "
                "(chem_solver != moose_implicit) require mode=box.");
 
-  // KPP 求解器需要 mechanism_format=KPP
+  // KPP solvers require mechanism_format=KPP
   bool is_kpp_solver = (std::string(_chem_solver) == "kpp_rosenbrock" ||
                         std::string(_chem_solver) == "kpp_sdirk" ||
                         std::string(_chem_solver) == "kpp_runge_kutta");
@@ -210,7 +210,7 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
                " requires mechanism_format=KPP, got ",
                _mechanism_format, ".");
 
-  // KPP 求解器需要编译时 KPP 支持
+  // KPP solvers require KPP_ENABLED compile flag
   if (is_kpp_solver)
   {
 #ifndef KPP_ENABLED
@@ -457,7 +457,7 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<MooseEnum>("chem_solver") = _chem_solver;
   params.set<MooseEnum>("mechanism_format") = _mechanism_format;
 
-  // 读取容差（新参数优先，旧参数回退）
+  // Read tolerances (new param preferred, legacy fallback)
   Real rtol = parameters().isParamSetByUser("chem_solver_rtol")
       ? getParam<Real>("chem_solver_rtol")
       : getParam<Real>("box_solver_rtol");
@@ -467,7 +467,7 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<Real>("solver_rtol") = rtol;
   params.set<Real>("solver_atol") = atol;
 
-  // solver_type 只对 petsc_ts 有意义
+  // solver_type only meaningful for petsc_ts
   if (std::string(_chem_solver) == "petsc_ts")
   {
     params.set<MooseEnum>("solver_type") =
@@ -477,7 +477,7 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   }
   else
   {
-    // 非 PETSc TS 求解器 — 传递 solver 名给 MCMBoxModel 自行解析
+    // Non-PETSc-TS solvers — pass solver name for MCMBoxModel to interpret
     std::string solver_str(_chem_solver);
     params.set<MooseEnum>("solver_type") =
         MooseEnum("moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",

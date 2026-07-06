@@ -294,18 +294,18 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _bottomup_j_valid(false),
     _use_box_solver(false)  // derived in constructor body
 {
-  // ---- 从 chem_solver 参数派生求解器选择 ----
+  // ---- Derive solver selection from chem_solver parameter ----
   _chem_solver = std::string(getParam<MooseEnum>("chem_solver"));
   _use_sundials = (_chem_solver == "sundials");
   _use_kpp = (_chem_solver == "kpp_rosenbrock" ||
               _chem_solver == "kpp_sdirk" ||
               _chem_solver == "kpp_runge_kutta");
 
-  // KPP 和 SUNDIALS 都是自驱动模式
+  // Both KPP and SUNDIALS are self-driven modes
   if (_use_sundials || _use_kpp)
     _use_box_solver = true;
 
-  // KPP 求解器需要 mechanism_format=KPP (由 Action 保证，这里再次检查)
+  // KPP solvers need mechanism_format=KPP (enforced by Action, double-check here)
   if (_use_kpp)
   {
 #ifndef KPP_ENABLED
@@ -315,7 +315,7 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
 #endif
   }
 
-  // 读取求解器类型（仅对 petsc_ts 有意义）
+  // Read solver type (only meaningful for petsc_ts)
   _solver_type = std::string(getParam<MooseEnum>("solver_type"));
 
   // Read solver tolerances ONCE here so all solver paths
