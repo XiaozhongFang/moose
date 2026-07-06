@@ -32,11 +32,9 @@ ifneq ($(wildcard $(SUNDIALS_DIR)/include/cvode/cvode.h),)
 endif
 
 # KPP support (optional, requires --enable-kpp at configure time)
+ADDITIONAL_CPPFLAGS += -I$(APPLICATION_DIR)/kpp/adapter -I$(APPLICATION_DIR)/kpp/runtime
 ifneq ($(KPP_ENABLED),)
-  ADDITIONAL_CPPFLAGS += -I$(APPLICATION_DIR)/kpp/adapter -I$(APPLICATION_DIR)/kpp/runtime
   ADDITIONAL_CPPFLAGS += -DKPP_ENABLED
-  # KppBoxIntegrator.C is in kpp/adapter/ — need to add to source list
-  APPLICATION_SRCS += $(APPLICATION_DIR)/kpp/adapter/KppBoxIntegrator.C
 endif
 
 # framework
