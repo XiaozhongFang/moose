@@ -1,0 +1,12 @@
+# kpp/generated/.gitignore
+# This directory contains auto-generated KPP mechanism code.
+# Regenerate with: kpp/bin/kpp <mech>.kpp <output_name>
+# See README.md for details.
+
+# Ignore everything in this directory...
+*
+# ...including hidden files
+.*
+# ...except the files listed below
+!.gitignore
+!README.md
