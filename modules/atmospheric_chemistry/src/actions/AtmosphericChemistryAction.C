@@ -453,21 +453,41 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<Real>("albedo") = getParam<Real>("albedo");
   params.set<Real>("o3column") = getParam<Real>("o3column");
   params.set<Real>("altitude") = getParam<Real>("altitude");
-  // Box ODE solver parameters (forwarded to MCMBoxModel)
-  params.set<MooseEnum>("box_solver_mode") = _use_box_solver ? MooseEnum("moose_implicit petsc_ts", "petsc_ts") : MooseEnum("moose_implicit petsc_ts", "moose_implicit");
-  if (_use_box_solver)
+  // ---- 通过 chem_solver 传递给 MCMBoxModel ----
+  params.set<MooseEnum>("chem_solver") = _chem_solver;
+  params.set<MooseEnum>("mechanism_format") = _mechanism_format;
+
+  // 读取容差（新参数优先，旧参数回退）
+  Real rtol = parameters().isParamSetByUser("chem_solver_rtol")
+      ? getParam<Real>("chem_solver_rtol")
+      : getParam<Real>("box_solver_rtol");
+  Real atol = parameters().isParamSetByUser("chem_solver_atol")
+      ? getParam<Real>("chem_solver_atol")
+      : getParam<Real>("box_solver_atol");
+  params.set<Real>("solver_rtol") = rtol;
+  params.set<Real>("solver_atol") = atol;
+
+  // solver_type 只对 petsc_ts 有意义
+  if (std::string(_chem_solver) == "petsc_ts")
   {
-    params.set<MooseEnum>("solver_type") = getParam<MooseEnum>("box_solver_type");
-    params.set<Real>("solver_rtol") = getParam<Real>("box_solver_rtol");
-    params.set<Real>("solver_atol") = getParam<Real>("box_solver_atol");
+    params.set<MooseEnum>("solver_type") =
+        parameters().isParamSetByUser("chem_solver_type")
+            ? getParam<MooseEnum>("chem_solver_type")
+            : getParam<MooseEnum>("box_solver_type");
   }
+  else
+  {
+    // 非 PETSc TS 求解器 — 传递 solver 名给 MCMBoxModel 自行解析
+    std::string solver_str(_chem_solver);
+    params.set<MooseEnum>("solver_type") =
+        MooseEnum("moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
+                  solver_str);
+  }
+
   _problem->addUserObject("MCMBoxModel", "box_model", params);
-  _console << "AtmosphericChemistry (box): Created MCMBoxModel UserObject" << std::endl;
-  if (_use_box_solver)
-    _console << "AtmosphericChemistry (box): Box ODE solver enabled "
-             << "(type=" << getParam<MooseEnum>("box_solver_type")
-             << ", rtol=" << getParam<Real>("box_solver_rtol")
-             << ", atol=" << getParam<Real>("box_solver_atol") << ")" << std::endl;
+  _console << "AtmosphericChemistry (box): Created MCMBoxModel UserObject"
+           << "\n  chem_solver=" << _chem_solver
+           << "\n  rtol=" << rtol << " atol=" << atol << std::endl;
 }
 
 void
