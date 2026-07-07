@@ -362,3 +362,4 @@ binaryoutput
 .reasonix/
 .qoder/
 .codegraph/
+node_modules/
