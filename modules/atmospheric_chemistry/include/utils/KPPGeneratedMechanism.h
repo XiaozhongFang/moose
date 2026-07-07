@@ -102,10 +102,11 @@ private:
 
   /// Fun(Y, FIX, RCONST, Ydot) — compute RHS
   using KppFunFn = void (*)(double[], double[], double[], double[]);
-  /// Jac_SP(Y, FIX, RCONST, JVS) — compute sparse Jacobian
+  /// Jac_SP(Y, FIX, RCONST, JVS) — compute sparse Jacobian into caller buffer
   using KppJacFn = void (*)(double[], double[], double[], double[]);
-  /// Initialize() — set up KPP global state
+  /// Initialize() / Update_RCONST — set up KPP global state
   using KppInitFn = void (*)(void);
+  using KppVoidFn = void (*)(void);
 
   // ===== Loaded function pointers =====
 
@@ -113,21 +114,27 @@ private:
   KppFunFn _fun;
   KppJacFn _jac;
   KppInitFn _init;
+  KppVoidFn _update_rconst;
 
   // ===== Pointers to KPP global variables (resolved via dlsym) =====
 
-  int * _kpp_nspec;
-  int * _kpp_nvar;
-  int * _kpp_nreact;
   double * _kpp_C;       // C[NSPEC] — concentration array
   double * _kpp_VAR;     // VAR[NVAR] — variable species array
   double * _kpp_FIX;     // FIX[] — fixed species
   double * _kpp_RCONST;  // RCONST[] — rate constants
 
+  // ===== Sparse Jacobian structure (resolved via dlsym from KPP .so) =====
+
+  int * _lu_irow;   // LU_IROW[NNZ] — row indices (1-based)
+  int * _lu_icol;   // LU_ICOL[NNZ] — column indices (1-based)
+  int * _lu_crow;   // LU_CROW[NVAR+1] — compressed row pointers (NNZ = LU_CROW[NVAR])
+
   // ===== Mechanism metadata =====
 
   unsigned int _n_species;
+  unsigned int _n_variable;
   unsigned int _n_reactions;
+  unsigned int _jac_nnz;
   std::vector<std::string> _species_names;
 
   // ===== Runtime state =====

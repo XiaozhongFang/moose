@@ -26,6 +26,8 @@ $(LIB): $(ADAPTER_SRC) $(realpath $(MECH))
 	sed -i 's/\._/$(MECH_NAME)_/g' $(OUT_DIR)/$(MECH_NAME)_*.c $(OUT_DIR)/$(MECH_NAME)_*.h 2>/dev/null || true
 	sed -i 's/\([0-9]\)\.\([0-9]*\)e\([^0-9+-]\)/\1.\2e0\3/g' $(OUT_DIR)/$(MECH_NAME)_*.c 2>/dev/null || true
 	printf '\nint kpp_get_nspec(void) { return NSPEC; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
+	printf '\nint kpp_get_nvar(void) { return NVAR; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
+	printf '\nint kpp_get_nreact(void) { return NREACT; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
 	set -e; for src in $(OUT_DIR)/$(MECH_NAME)_*.c; do \
 		base=$$(basename $$src); \
 		case $$base in *_mex_*) continue;; esac; \

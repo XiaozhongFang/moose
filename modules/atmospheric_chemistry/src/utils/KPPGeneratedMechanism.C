@@ -22,15 +22,18 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
     _fun(nullptr),
     _jac(nullptr),
     _init(nullptr),
-    _kpp_nspec(nullptr),
-    _kpp_nvar(nullptr),
-    _kpp_nreact(nullptr),
+    _update_rconst(nullptr),
     _kpp_C(nullptr),
     _kpp_VAR(nullptr),
     _kpp_FIX(nullptr),
     _kpp_RCONST(nullptr),
+    _lu_irow(nullptr),
+    _lu_icol(nullptr),
+    _lu_crow(nullptr),
     _n_species(0),
+    _n_variable(0),
     _n_reactions(0),
+    _jac_nnz(0),
     _roof_open(true),
     _jfac(1.0),
     _t(0.0),
@@ -57,28 +60,53 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
     mooseError(msg);
   }
 
-  // Resolve KPP global variable pointers
-  _kpp_nspec  = reinterpret_cast<int *>(dlsym(_lib_handle, "NSPEC"));
-  _kpp_nvar   = reinterpret_cast<int *>(dlsym(_lib_handle, "NVAR"));
-  _kpp_nreact = reinterpret_cast<int *>(dlsym(_lib_handle, "NREACT"));
-  _kpp_C      = reinterpret_cast<double *>(dlsym(_lib_handle, "C"));
-  _kpp_VAR    = reinterpret_cast<double *>(dlsym(_lib_handle, "VAR"));
-  _kpp_FIX    = reinterpret_cast<double *>(dlsym(_lib_handle, "FIX"));
-  _kpp_RCONST = reinterpret_cast<double *>(dlsym(_lib_handle, "RCONST"));
+  // Resolve KPP dimension accessors (injected by kpp/build/Makefile)
+  using GetIntFn = int (*)(void);
+  auto kpp_get_nspec_fn  = reinterpret_cast<GetIntFn>(dlsym(_lib_handle, "kpp_get_nspec"));
+  auto kpp_get_nvar_fn   = reinterpret_cast<GetIntFn>(dlsym(_lib_handle, "kpp_get_nvar"));
+  auto kpp_get_nreact_fn = reinterpret_cast<GetIntFn>(dlsym(_lib_handle, "kpp_get_nreact"));
 
-  if (!_kpp_nspec || !_kpp_nvar || !_kpp_nreact || !_kpp_C)
+  if (!kpp_get_nspec_fn)
   {
-    std::string msg = "KPPGeneratedMechanism: failed to resolve KPP global "
-                      "variables (NSPEC, NVAR, NREACT, C) from \"";
-    msg += lib_path + "\"";
+    std::string msg = "KPPGeneratedMechanism: failed to resolve KPP dimension";
+    msg += " function 'kpp_get_nspec' from \"" + lib_path + "\"";
     dlclose(_lib_handle);
     _lib_handle = nullptr;
     mooseError(msg);
   }
 
-  // Read mechanism dimensions
-  _n_species   = static_cast<unsigned int>(*_kpp_nspec);
-  _n_reactions = static_cast<unsigned int>(*_kpp_nreact);
+  _n_species   = static_cast<unsigned int>(kpp_get_nspec_fn());
+  _n_variable  = kpp_get_nvar_fn ? static_cast<unsigned int>(kpp_get_nvar_fn()) : _n_species;
+  _n_reactions = kpp_get_nreact_fn ? static_cast<unsigned int>(kpp_get_nreact_fn()) : 0;
+
+  // Resolve KPP global variable pointers
+  _kpp_C      = reinterpret_cast<double *>(dlsym(_lib_handle, "C"));
+  _kpp_VAR    = reinterpret_cast<double *>(dlsym(_lib_handle, "VAR"));
+  _kpp_FIX    = reinterpret_cast<double *>(dlsym(_lib_handle, "FIX"));
+  _kpp_RCONST = reinterpret_cast<double *>(dlsym(_lib_handle, "RCONST"));
+
+  if (!_kpp_C)
+  {
+    std::string msg = "KPPGeneratedMechanism: failed to resolve KPP global ";
+    msg += "array 'C' from \"" + lib_path + "\"";
+    dlclose(_lib_handle);
+    _lib_handle = nullptr;
+    mooseError(msg);
+  }
+
+  // Resolve sparse Jacobian structure (LU_*) — these are integral to
+  // KPP and should always be present in a compiled KPP library.
+  _lu_irow = reinterpret_cast<int *>(dlsym(_lib_handle, "LU_IROW"));
+  _lu_icol = reinterpret_cast<int *>(dlsym(_lib_handle, "LU_ICOL"));
+  _lu_crow = reinterpret_cast<int *>(dlsym(_lib_handle, "LU_CROW"));
+
+  if (!_lu_irow || !_lu_icol || !_lu_crow)
+    mooseError("KPPGeneratedMechanism: failed to resolve sparse Jacobian "
+               "structure (LU_IROW, LU_ICOL, LU_CROW) from \"",
+               lib_path, "\". Rebuild the KPP library.");
+
+  // NNZ = LU_CROW[NVAR] (total non-zero entries in the Jacobian)
+  _jac_nnz = _lu_crow[_n_variable];
 
   // Attempt to read species names from KPP's SPC_NAMES global.
   // KPP may export SPC_NAMES as char* SPC_NAMES[NSPEC][32] or similar.
@@ -242,36 +270,34 @@ KPPGeneratedMechanism::computeJacobian(
   //
   // We resolve these globals at runtime (they may not exist in all KPP versions).
 
-  // Resolve KPP sparse Jacobian globals
-  int * lu_nonzero = reinterpret_cast<int *>(dlsym(_lib_handle, "LU_NONZERO"));
-  int * lu_irow    = reinterpret_cast<int *>(dlsym(_lib_handle, "LU_IROW"));
-  int * lu_icol    = reinterpret_cast<int *>(dlsym(_lib_handle, "LU_ICOL"));
-  double * jvs     = reinterpret_cast<double *>(dlsym(_lib_handle, "JVS"));
+  // Resolve KPP sparse Jacobian function (Jac_SP) and LU structure.
+  // Jac_SP(Y, FIX, RCONST, JVS) evaluates the sparse Jacobian and writes
+  // to the caller-provided JVS array.  LU_IROW/LU_ICOL give the structure.
+  //
+  // NNZ = LU_CROW[NVAR] — pre-computed in constructor as _jac_nnz.
 
-  if (!lu_nonzero || !lu_irow || !lu_icol || !jvs)
+  if (!_jac || !_lu_irow || !_lu_icol || _jac_nnz == 0)
   {
-    // Fallback: compute Jacobian via finite differences using Fun()
-    // Since this is a scaffold, we just emit a warning and return empty.
     mooseDoOnce(mooseWarning(
-        "KPPGeneratedMechanism::computeJacobian: KPP sparse Jacobian globals "
-        "(LU_NONZERO, LU_IROW, LU_ICOL, JVS) not available. "
-        "Falling back to empty Jacobian."));
+        "KPPGeneratedMechanism::computeJacobian: KPP Jacobian not available. "
+        "Returning empty Jacobian."));
     J.clear();
     return;
   }
 
-  // Call KPP's Jac_SP() to fill JVS[]
-  _jac(_kpp_C, _kpp_FIX, _kpp_RCONST, jvs);
+  // Call KPP's Jac_SP() with our own JVS buffer
+  std::vector<double> jvs(_jac_nnz);
+  _jac(_kpp_C, _kpp_FIX, _kpp_RCONST, jvs.data());
 
   // Convert sparse Jacobian to triplet format
-  int nnz = *lu_nonzero;
+  int nnz = static_cast<int>(_jac_nnz);
   J.clear();
   J.reserve(static_cast<std::size_t>(nnz));
   for (int k = 0; k < nnz; ++k)
   {
     // KPP uses 1-based indexing; convert to 0-based
-    unsigned int row = static_cast<unsigned int>(lu_irow[k] - 1);
-    unsigned int col = static_cast<unsigned int>(lu_icol[k] - 1);
+    unsigned int row = static_cast<unsigned int>(_lu_irow[k] - 1);
+    unsigned int col = static_cast<unsigned int>(_lu_icol[k] - 1);
     Real val = static_cast<Real>(jvs[k]);
     J.emplace_back(row, col, val);
   }
