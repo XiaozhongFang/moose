@@ -1,0 +1,104 @@
+# Set here the desired C compiler and its optimization options
+CC   = gcc
+COPT = -O -Wall  
+
+# To create Matlab gateway routines
+# Note: use $(CC) as the mex C compiler
+MEX  = mex
+
+HEADERS = ._Global.h  ._Parameters.h  ._Sparse.h
+
+SPSRC = ._JacobianSP.c \
+	._HessianSP.c  \
+	._StoichiomSP.c
+
+SPOBJ = ._JacobianSP.o \
+	._HessianSP.o  \
+	._StoichiomSP.o
+
+
+SRC =   ._Main.c      ._Integrator.c   \
+	._Function.c  ._Initialize.c   \
+	._Jacobian.c  ._LinearAlgebra.c\
+	._Rates.c     ._Hessian.c      \
+	._Stoichiom.c ._Util.c         \
+	._Monitor.c
+
+OBJ =   ._Main.o      ._Integrator.o   \
+	._Function.o  ._Initialize.o   \
+	._Jacobian.o  ._LinearAlgebra.o\
+	._Rates.o     ._Hessian.o      \
+	._Stoichiom.o ._Util.o         \
+	._Monitor.o
+
+STOCHSRC = ._Stochastic.c 
+STOCHOBJ = ._Stochastic.o 
+
+all:    exe
+
+exe:	$(HEADERS) $(SPOBJ) $(OBJ)
+	$(CC) $(COPT) $(SPOBJ) $(OBJ) -lm -o ..exe	
+
+stochastic:$(HEADERS) $(SPOBJ) $(OBJ) $(STOCHOBJ)
+	$(CC) $(COPT) $(SPOBJ) $(OBJ) $(STOCHOBJ) -lm \
+	-o ._stochastic.exe	
+
+mex:    $(HEADERS) $(SPOBJ) $(OBJ)
+	$(MEX) CC#$(CC) -O ._mex_Fun.c     -lm $(SPOBJ) $(OBJ)
+	$(MEX) CC#$(CC) -O ._mex_Jac_SP.c  -lm $(SPOBJ) $(OBJ)
+	$(MEX) CC#$(CC) -O ._mex_Hessian.c -lm $(SPOBJ) $(OBJ)
+
+
+clean:
+	rm -f $(SPOBJ) $(OBJ) ..exe ._*.mexglx \
+	.*.dat *.csv
+
+distclean:
+	rm -f $(SPOBJ) $(OBJ) ..exe .*.dat \
+	._*.c ._*.h .*.log ._*.mexglx *.csv
+
+._Monitor.o: ._Monitor.c $(HEADERS)
+	$(CC) $(COPT) -c $<
+
+._JacobianSP.o: ._JacobianSP.c $(HEADERS)
+	$(CC) $(COPT) -c $<
+
+._HessianSP.o: ._HessianSP.c  $(HEADERS)
+	$(CC) $(COPT) -c $<
+
+._StoichiomSP.o: ._StoichiomSP.c $(HEADERS)
+	$(CC) $(COPT) -c $<
+
+._Main.o: ._Main.c ._Initialize.o $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._Integrator.o: ._Integrator.c  $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._Initialize.o: ._Initialize.c  $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._Function.o: ._Function.c  $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._Stochastic.o: ._Stochastic.c  $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._Jacobian.o: ._Jacobian.c  $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._LinearAlgebra.o: ._LinearAlgebra.c  $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._Rates.o: ._Rates.c  $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._Hessian.o:  ._Hessian.c $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._Stoichiom.o: ._Stoichiom.c  $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
+._Util.o: ._Util.c  $(HEADERS) $(SPOBJ)
+	$(CC) $(COPT) -c $<
+
