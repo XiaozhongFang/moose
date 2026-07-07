@@ -2,7 +2,7 @@
   [./kpp_small_strato]
     type = CSVDiff
     input = kpp_small_strato.i
-    csvdiff = kpp_small_strato.gold.csv
+    csvdiff = kpp_small_strato.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     heavy = true

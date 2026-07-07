@@ -2,7 +2,7 @@
   [./vs_F0AM_chamber_S1_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S1_box.i
-    csvdiff = vs_F0AM_chamber_S1_box.gold.csv
+    csvdiff = vs_F0AM_chamber_S1_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'
@@ -12,7 +12,7 @@
   [./vs_F0AM_chamber_S2_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S2_box.i
-    csvdiff = vs_F0AM_chamber_S2_box.gold.csv
+    csvdiff = vs_F0AM_chamber_S2_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'
@@ -28,7 +28,7 @@
   [./vs_F0AM_chamber_S3_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S3_box.i
-    csvdiff = vs_F0AM_chamber_S3_box.gold.csv
+    csvdiff = vs_F0AM_chamber_S3_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'

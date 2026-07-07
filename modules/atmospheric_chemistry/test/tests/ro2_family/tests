@@ -2,7 +2,7 @@
   [./test_ro2_detection]
     type = CSVDiff
     input = test_ro2_detection.i
-    csvdiff = test_ro2_detection.gold.csv
+    csvdiff = test_ro2_detection_ro2_list_0001.csv
     requirement = 'MCMv331_Inorg_Isoprene shall detect 117 RO2 species.'
   [../]
   [./test_family_conservation]
