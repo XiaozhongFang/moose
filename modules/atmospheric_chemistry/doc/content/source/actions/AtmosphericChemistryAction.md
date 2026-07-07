@@ -3,8 +3,13 @@
 !syntax description /AtmosphericChemistry/AtmosphericChemistryAction
 
 `AtmosphericChemistryAction` is the unified entry point for atmospheric chemistry
-simulations. It parses MCM (Master Chemical Mechanism) Facsimile-format (`.fac`)
-mechanism files and sets up the simulation system according to the selected `mode`.
+simulations. It supports two mechanism formats:
+
+- **`MCM_FACSIMILE`** (`.fac`): Standard MCM format, parsed by [`MechanismLoader`](MechanismLoader.md)
+- **`KPP`** (`.kpp`): Native KPP format, species extracted from `.spc` files
+
+The format is auto-detected: `chem_solver = kpp_*` or `.kpp` extension → KPP format;
+otherwise MCM_FACSIMILE is assumed.
 
 ## Modes
 
@@ -37,6 +42,40 @@ Creates a FEM transport + chemistry system for spatially-resolved simulations
    - [`TimeDerivative`](TimeDerivative.md) — time derivative term
    - [`ChemicalSourceKernel`](ChemicalSourceKernel.md) — chemical source with analytical Jacobian
    - Optional [`Diffusion`](Diffusion.md) (when `include_transport = true`)
+
+## Mechanism Formats
+
+### `MCM_FACSIMILE` (default)
+
+Standard MCM `.fac` format, parsed by [`MechanismLoader`](MechanismLoader.md).
+Used with `chem_solver = moose_implicit` or `petsc_ts`.
+
+### `KPP` (Kinetic Pre-Processor)
+
+Native KPP `.kpp` format. Species are extracted from `.spc` files via the
+`#DEFVAR` section. Requires `chem_solver = kpp_*` and `KPP_ENABLED=1` build.
+
+The chemistry is integrated by a pre-compiled KPP shared library loaded at
+runtime via `KPP_LIB` environment variable. Build the `.so` with:
+
+```bash
+make -f modules/atmospheric_chemistry/kpp/build/Makefile MECH=path/to/mech.kpp
+KPP_LIB=path/to/kpp_build_mech/libkpp_mech.so
+```
+
+Example:
+```moose
+[AtmosphericChemistry]
+  mode = box
+  mechanism_file = 'mechanism.kpp'    # .kpp → auto-detected as KPP format
+  chem_solver = kpp_rosenbrock
+[]
+```
+
+Format is auto-detected:
+- `chem_solver = kpp_*` → KPP format, or
+- File extension `.kpp` → KPP format
+- Otherwise → `MCM_FACSIMILE` (`.fac`)
 
 ## Photolysis Schemes
 
@@ -128,26 +167,6 @@ Parameters:
 > **Note:** The old `box_solver`, `box_solver_type`, `box_solver_rtol`, and `box_solver_atol`
 > parameters are **deprecated**. Use `chem_solver*` instead. Forward-compatible aliases
 > remain available but emit a deprecation warning.
-
-### Mechanism Format
-
-The `mechanism_format` parameter selects the RHS/Jacobian source:
-
-- `MCM_FACSIMILE` (default): Runtime `.fac` parsing via `MCMFacsimileParser`
-- `KPP`: Pre-generated KPP Fortran code (requires `--enable-kpp`)
-
-Not all `(mechanism_format, chem_solver)` combinations are valid:
-
-| mechanism_format | chem_solver | Valid |
-|-----------------|-------------|-------|
-| `MCM_FACSIMILE` | `moose_implicit` | ✅ |
-| `MCM_FACSIMILE` | `petsc_ts` | ✅ |
-| `MCM_FACSIMILE` | `sundials` | ✅ |
-| `MCM_FACSIMILE` | `kpp_*` | ❌ |
-| `KPP` | `moose_implicit` | ❌ |
-| `KPP` | `petsc_ts` | ❌ |
-| `KPP` | `sundials` | ❌ |
-| `KPP` | `kpp_*` | ✅ |
 
 ## Example Input File Syntax
 

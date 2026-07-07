@@ -4,7 +4,7 @@
 
 `BoxIntegrator` is an abstract strategy interface that decouples the chemical
 source-term evaluation from the integration strategy in box-mode simulations.
-It has two concrete implementations:
+It has four concrete implementations:
 
 - **`MooseImplicitIntegrator`** — Wraps `MCMBoxModel` for per-species residual/Jacobian
   evaluation in MOOSE-driven implicit mode. `computeResidual()` / `computeJacobian*()`
@@ -12,7 +12,15 @@ It has two concrete implementations:
 
 - **`PetscTSIntegrator`** — Returns zero for all residual/Jacobian evaluations
   (self-driven mode). The full-system integration is handled separately by
-  `MCMBoxModel::execute()` running PETSc TS.
+  `MCMBoxModel::execute()` running PETSc TS (BDF/ARKIMEX).
+
+- **`KppBoxIntegrator`** — Loads a pre-compiled KPP shared library via `dlopen`/`dlsym`
+  and calls `kpp_integrate()` to run KPP's Rosenbrock/SDIRK/Runge-Kutta integrator.
+  Self-driven mode. The `.so` is built from a `.kpp` mechanism file using
+  `kpp/build/Makefile`. Available only when compiled with `KPP_ENABLED=1`.
+
+- **`SundialsBoxIntegrator`** — Wraps SUNDIALS CVODE/ARKODE for the integration.
+  Self-driven mode. Available only when compiled with SUNDIALS support.
 
 ## Architecture
 
@@ -23,7 +31,10 @@ ChemistryODEKernel
 
 MCMBoxModel::execute()
   → BoxIntegrator::selfDriven()
-    → true:  run PETSc TS integration (PetscTSIntegrator)
+    → true:  run integrator-specific solve
+      → PetscTSIntegrator  → PETSc TS (BDF/ARKIMEX)
+      → KppBoxIntegrator   → KPP Rosenbrock (dlopen .so)
+      → SundialsBoxIntegrator → SUNDIALS CVODE/ARKODE
     → false: no-op (MooseImplicitIntegrator — MOOSE solver handles it)
 ```
 

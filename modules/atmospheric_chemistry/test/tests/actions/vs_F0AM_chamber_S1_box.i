@@ -41,8 +41,7 @@
   type = Transient
   solve_type = NEWTON
   scheme = 'bdf2'
-  end_time = 10800      # 3h
-  dt = 100              # 100s steps for stiff chemistry
+  end_time = 9999
   l_max_its = 200
   l_tol = 1e-4
   nl_max_its = 15
@@ -51,8 +50,8 @@
   petsc_options_iname = '-pc_type -pc_factor_shift_type'
   petsc_options_value = 'lu NONZERO'
   [TimeStepper]
-    type = ConstantDT
-    dt = 100
+    type = TimeSequenceStepper
+    time_sequence = '0 952 2050 3112 3958 5182 6123 7065 7798 9265 9999'
   []
 []
 
@@ -61,5 +60,5 @@
   csv = true
   execute_on = 'timestep_end'
   file_base = 'vs_F0AM_chamber_S1_box'
-  time_step_interval = 10
+  time_step_interval = 1
 []

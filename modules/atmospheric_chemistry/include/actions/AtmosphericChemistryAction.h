@@ -68,6 +68,9 @@ protected:
   std::vector<std::string> _species;
   std::vector<std::string> _ro2_species;
 
+  /// Parse KPP .spc files to extract species names (for mechanism_format=KPP)
+  std::vector<std::string> parseKPPSpecies(const std::string & kpp_file) const;
+
   /// Full mechanism data (from MechanismLoader), used by coupled mode tasks
   MechanismData _mech_data;
 
@@ -78,8 +81,6 @@ protected:
   const bool _include_transport;
   /// Chemical solver backend (derived from chem_solver + box_solver fallback)
   MooseEnum _chem_solver;
-  /// Mechanism format (derived from mechanism_format parameter)
-  const MooseEnum _mechanism_format;
   /// PETSc TS standalone integrator for box mode (derived from _chem_solver)
   bool _use_box_solver;
 

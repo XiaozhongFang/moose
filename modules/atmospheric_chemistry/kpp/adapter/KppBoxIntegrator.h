@@ -24,6 +24,7 @@ class KppBoxIntegrator : public BoxIntegrator, public ConsoleStreamInterface
 {
 public:
   KppBoxIntegrator(MooseApp & app,
+                   const std::string & mech_name,
                    Real rtol = 1e-4,
                    Real atol = 1e-6,
                    const std::string & solver_type = "rosenbrock");
@@ -34,7 +35,7 @@ public:
   Real computeResidual(unsigned int /*species_idx*/,
                         const std::vector<Real> & /*C*/) const override { return 0.0; }
   Real computeJacobianDiagonal(unsigned int /*species_idx*/,
-                                const std::vector<Real> & /*C*/) const override { return 0.0; }
+                                const std::vector<Real> & /*C*/) const override { return 1.0; }
   Real computeJacobianOffDiagonal(unsigned int /*species_idx*/,
                                    unsigned int /*jvar*/,
                                    const std::vector<Real> & /*C*/) const override { return 0.0; }

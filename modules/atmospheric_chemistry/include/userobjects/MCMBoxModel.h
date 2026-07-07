@@ -250,6 +250,10 @@ protected:
   std::vector<std::string> _species_names;
   std::vector<std::string> _reaction_names;
 
+  /// Saved initial concentrations (reloaded for self-driven integrators
+  /// before the TS solve, because the MOOSE Newton solver may clear ICs)
+  std::vector<Real> _initial_conc;
+
   /// Units: true = ppb, false = molec/cm³ (cached fallback)
   bool _units_ppb;
   /// ppb → molec/cm³ conversion factor (cached fallback)

@@ -210,8 +210,9 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
   else if (_use_kpp)
   {
 #ifdef KPP_ENABLED
+    std::string mech_path = getParam<std::string>("mechanism_file");
     _integrator = std::make_unique<KppBoxIntegrator>(
-        _app, _solver_rtol, _solver_atol, _chem_solver);
+        _app, mech_path, _solver_rtol, _solver_atol, _chem_solver);
 #else
     mooseError("MCMBoxModel: chem_solver=", _chem_solver,
                " requires KPP support.  Recompile with --enable-kpp.");
@@ -240,6 +241,49 @@ MCMBoxModel::initialize()
   if (_n_species > 0) return;
 
   std::string mech_file = getParam<std::string>("mechanism_file");
+
+  // KPP mode: mechanism is handled by KppBoxIntegrator (.so).
+  // Get species info from the ScalarVariables set up by the Action.
+  if (_use_kpp)
+  {
+    _console << "MCMBoxModel: KPP mode — using " << mech_file << std::endl;
+    // Count scalar variables and get their names from the system
+    _species_names.clear();
+    auto & sys = _subproblem.es().get_system(0);
+    unsigned int n_vars = sys.n_vars();
+    for (unsigned int i = 0; i < n_vars; ++i)
+    {
+      std::string vname = sys.variable_name(i);
+      if (sys.variable_type(i) == FEType(0, SCALAR))
+        _species_names.push_back(vname);
+    }
+    _n_species = _species_names.size();
+    _n_reactions = 0;
+    _console << "MCMBoxModel: Loaded " << _n_species << " species from KPP mechanism"
+             << std::endl;
+
+    // Apply default IC (if > 0) to uninitialized species.
+    {
+      Real default_ic = getParam<Real>("default_ic");
+      if (default_ic > 0.0)
+        for (const auto & sp_name : _species_names)
+        {
+          MooseVariableScalar & sv = _subproblem.getScalarVariable(0, sp_name);
+          if (sv.sln()[0] == 0.0)
+            sv.setValue(0, default_ic);
+        }
+    }
+
+    // Save initial concentrations for self-driven integrators.
+    _initial_conc.resize(_n_species, 0.0);
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      _initial_conc[i] = sv.sln()[0];
+    }
+    return;
+  }
+
   if (!mech_file.empty())
   {
     std::string photo_file = getParam<std::string>("photolysis_file");
@@ -294,6 +338,16 @@ MCMBoxModel::initialize()
       }
       _console << "MCMBoxModel: Set default_ic = " << default_ic
                << " molec/cm³ for uninitialized species" << std::endl;
+    }
+
+    // Save initial concentrations for self-driven integrators.
+    // The MOOSE Newton solve may clear the solution (u_old = 0 for the
+    // first step), so we must reload the ICs before running the TS.
+    _initial_conc.resize(_n_species, 0.0);
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      _initial_conc[i] = sv.sln()[0];
     }
 
     // Sync physical params to mechanism and pre-evaluate coefficients
@@ -394,6 +448,11 @@ MCMBoxModel::computeJacobianTriplets(
 Real
 MCMBoxModel::getDCdt(unsigned int idx, const std::vector<Real> & C) const
 {
+  // Lazy initialization: the framework may call getDCdt() (via computeResidual)
+  // before GeneralUserObject::initialize().  If the mechanism hasn't been
+  // loaded yet, force initialization now so chemistry runs on the first step.
+  if (_n_species == 0)
+    const_cast<MCMBoxModel*>(this)->initialize();
   if (!_mechanism) return 0.0;
   return _mechanism->getDCdt(idx, C);
 }
@@ -621,7 +680,19 @@ MCMBoxModel::execute()
   // and this execute() sets the solution directly.
   // MOOSE-driven mode: no-op — ChemistryODEKernel provides residuals/Jacobians
   // and the Newton solver handles the integration.
-  if (!_integrator->selfDriven() || _n_species == 0)
+  //
+  // Lazy initialization: GeneralUserObject default execute_on = TIMESTEP_END,
+  // so initialize() may not have been called before the first execute().
+  // Force initialization now so self-driven integrators have the mechanism
+  // available on the first step.
+  if (_n_species == 0)
+    const_cast<MCMBoxModel*>(this)->initialize();
+
+  if (!_integrator->selfDriven())
+    return;
+
+  // Still no mechanism?  No chemistry to run (e.g. test without mechanism_file).
+  if (_n_species == 0)
     return;
 
   // Get current and previous times from FEProblemBase
@@ -682,20 +753,19 @@ MCMBoxModel::execute()
   if (_use_kpp)
   {
 #ifdef KPP_ENABLED
-    // Build concentration vector from ScalarVariable values.
     std::vector<Real> C(_n_species);
     for (unsigned int i = 0; i < _n_species; ++i)
     {
       MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
       C[i] = sv.sln()[0];
+      // Fallback: reload initial concentration if Newton solve cleared it
+      if (C[i] == 0.0 && i < _initial_conc.size() && _initial_conc[i] > 0.0)
+        C[i] = _initial_conc[i];
     }
-
-    // Evaluate rate coefficients at the step midpoint (same as PETSc path).
-    _t = 0.5 * (t_start + t_end);
-    _mechanism->setCurrentTime(_t);
-    if (_mechanism)
-      static_cast<MCMRuntimeMechanism*>(_mechanism.get())->evaluateCoefficients();
-    _mechanism->markDirty();
+    _console << "MCMBoxModel: starting KPP step t=[" << t_start << "," << t_end
+             << "] nspec=" << _n_species
+             << " C[0]=" << (C.size() > 0 ? C[0] : 0.0)
+             << std::endl;
 
     // Call KPP INTEGRATE via KppBoxIntegrator.
     KppBoxIntegrator * kpp_ptr =
@@ -739,6 +809,10 @@ MCMBoxModel::execute()
     {
       MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
       x_arr[i] = sv.sln()[0];
+      // Fallback: if the MOOSE Newton solve cleared the solution (u_old=0
+      // for the first step), reload the initial concentration.
+      if (x_arr[i] == 0.0 && i < _initial_conc.size() && _initial_conc[i] > 0.0)
+        x_arr[i] = _initial_conc[i];
     }
     CHKERRABORT(PETSC_COMM_SELF, VecRestoreArray(_ts_X, &x_arr));
   }

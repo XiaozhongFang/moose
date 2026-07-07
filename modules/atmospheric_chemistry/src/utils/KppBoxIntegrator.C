@@ -6,6 +6,7 @@
 #include <string>
 
 KppBoxIntegrator::KppBoxIntegrator(MooseApp & app,
+                                     const std::string & mech_name,
                                      Real rtol,
                                      Real atol,
                                      const std::string & solver_type)
@@ -20,12 +21,28 @@ KppBoxIntegrator::KppBoxIntegrator(MooseApp & app,
     _kpp_set_conc(nullptr),
     _kpp_get_conc(nullptr)
 {
-  // Open the KPP shared library.
-  // The library name follows the convention libkpp_<mech>.so, where <mech>
-  // is the mechanism name.  For now the library path must be set via the
-  // KPP_LIB environment variable or a default search path.
-  const char * kpp_lib_path = std::getenv("KPP_LIB");
-  std::string lib_name = kpp_lib_path ? std::string(kpp_lib_path) : "libkpp_generated.so";
+  // Derive .so path: KPP_LIB env var takes precedence, then auto-discover
+  std::string lib_name;
+  const char * kpp_lib_env = std::getenv("KPP_LIB");
+  if (kpp_lib_env)
+  {
+    lib_name = kpp_lib_env;
+  }
+  else if (!mech_name.empty())
+  {
+    // Convention: <mech_dir>/kpp_build_<mech>/libkpp_<mech>.so
+    // mech_name is the full path to the .kpp file — strip extension for the name
+    auto slash = mech_name.find_last_of('/');
+    std::string dir = (slash != std::string::npos) ? mech_name.substr(0, slash + 1) : "";
+    std::string base = mech_name.substr(slash + 1);
+    auto dot = base.find_last_of('.');
+    if (dot != std::string::npos) base = base.substr(0, dot);
+    lib_name = dir + "kpp_build_" + base + "/libkpp_" + base + ".so";
+  }
+  else
+  {
+    lib_name = "libkpp_generated.so";
+  }
 
   _lib_handle = dlopen(lib_name.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!_lib_handle)
@@ -93,6 +110,9 @@ KppBoxIntegrator::solve(Real t0, Real t1, std::vector<Real> & C) const
   {
     _console << "KppBoxIntegrator: integration failed, ierr=" << ierr
              << " t=[" << t0 << "," << t1 << "]" << std::endl;
+    mooseError("KppBoxIntegrator: Rosenbrock integration failed with ierr=", ierr,
+               " at t=[", t0, ", ", t1, "]. "
+               "Check mechanism tolerances or initial conditions.");
   }
 
   // Read integrated concentration back from KPP global state

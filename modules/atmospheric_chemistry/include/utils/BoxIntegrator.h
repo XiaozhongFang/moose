@@ -109,8 +109,9 @@ private:
 /**
  * PETSc TS integrator: wraps MCMBoxModel for full-system integration.
  *
- * computeResidual/Jacobian*() return 0 — ChemistryODEKernel is a no-op.
- * solve() runs the PETSc TS integration via MCMBoxModel::runPETScStep().
+ * computeResidual/Jacobian*() return a tiny damping term (1e-20) to keep
+ * MOOSE's Jacobian non-singular.  The actual chemistry integration is
+ * handled by MCMBoxModel::runPETScStep() in execute().
  * Used in box mode when petsc_ts=true.
  */
 class PetscTSIntegrator : public BoxIntegrator
@@ -120,10 +121,12 @@ public:
   ~PetscTSIntegrator() override = default;
 
   Real computeResidual(unsigned int /*species_idx*/,
-                        const std::vector<Real> & /*C*/) const override { return 0.0; }
+                        const std::vector<Real> & /*C*/) const override
+  { return 0.0; }  // chemistry handled by execute(); no-op for MOOSE Newton
 
   Real computeJacobianDiagonal(unsigned int /*species_idx*/,
-                                const std::vector<Real> & /*C*/) const override { return 0.0; }
+                                const std::vector<Real> & /*C*/) const override
+  { return 0.0; }  // zero Jacobian — ChemistryODEKernel is a true no-op
 
   Real computeJacobianOffDiagonal(unsigned int /*species_idx*/,
                                    unsigned int /*jvar*/,

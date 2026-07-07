@@ -14,6 +14,8 @@
 #include "libmesh/coupling_matrix.h"
 
 #include <algorithm>
+#include <fstream>
+#include <functional>
 #include <set>
 #include <unordered_map>
 
@@ -37,9 +39,7 @@ AtmosphericChemistryAction::validParams()
   params.addRequiredParam<MooseEnum>("mode", mode_enum,
       "Simulation mode: 'box' for 0-D ODE ScalarVariable, 'coupled' for FEM transport+chemistry");
 
-  MooseEnum format_enum("MCM_FACSIMILE", "MCM_FACSIMILE");
-  params.addParam<MooseEnum>("mechanism_format", format_enum,
-      "Chemical mechanism format");
+  // Mechanism format auto-detected from chem_solver and file extension.
 
   params.addParam<bool>("include_transport", false,
       "Add Diffusion kernels for non-placeholder species (coupled mode only)");
@@ -174,7 +174,6 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
     _mode(getParam<MooseEnum>("mode")),
     _include_transport(getParam<bool>("include_transport")),
     _chem_solver(getParam<MooseEnum>("chem_solver")),
-    _mechanism_format(getParam<MooseEnum>("mechanism_format")),
     _use_box_solver(false)
 {
   // Reject absolute paths — prevents reading arbitrary system files via
@@ -201,52 +200,60 @@ AtmosphericChemistryAction::AtmosphericChemistryAction(const InputParameters & p
     mooseError("AtmosphericChemistry: standalone chemical solvers "
                "(chem_solver != moose_implicit) require mode=box.");
 
-  // KPP solvers require mechanism_format=KPP
-  bool is_kpp_solver = (std::string(_chem_solver) == "kpp_rosenbrock" ||
-                        std::string(_chem_solver) == "kpp_sdirk" ||
-                        std::string(_chem_solver) == "kpp_runge_kutta");
-  if (is_kpp_solver && std::string(_mechanism_format) != "KPP")
-    mooseError("AtmosphericChemistry: chem_solver=", _chem_solver,
-               " requires mechanism_format=KPP, got ",
-               _mechanism_format, ".");
+  // ---- Auto-detect mechanism format from chem_solver or file extension ----
+  bool is_kpp = (std::string(_chem_solver) == "kpp_rosenbrock" ||
+                 std::string(_chem_solver) == "kpp_sdirk" ||
+                 std::string(_chem_solver) == "kpp_runge_kutta");
+  if (!is_kpp && _mechanism_file.size() > 4 &&
+      _mechanism_file.substr(_mechanism_file.size() - 4) == ".kpp")
+    is_kpp = true;
 
-  // KPP solvers require KPP_ENABLED compile flag
-  if (is_kpp_solver)
+  // KPP format requires KPP_ENABLED compile flag
+  if (is_kpp)
   {
 #ifndef KPP_ENABLED
-    mooseError("AtmosphericChemistry: chem_solver=", _chem_solver,
+    mooseError("AtmosphericChemistry: ", _mechanism_file,
                " requires KPP support. "
                "Recompile with --enable-kpp.");
 #endif
   }
 
-  // Parse the .fac mechanism file via MechanismLoader (shared with MCMBoxModel)
-  std::string mcm_ver = getParam<MooseEnum>("mcm_version");
-  std::string photo_path = getParam<std::string>("mcm_photolysis_file");
-  if (!photo_path.empty() && photo_path[0] == '/')
-    mooseError("AtmosphericChemistry: mcm_photolysis_file must be relative, got absolute: ", photo_path);
-  std::string peroxy_path =
-      "doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_" + mcm_ver + ".dat";
+  // ── Parse mechanism based on format ──
+  if (is_kpp)
+  {
+    _species = parseKPPSpecies(_mechanism_file);
+    _console << "AtmosphericChemistry: Parsed " << _species.size()
+             << " species from " << _mechanism_file << " (KPP format, mode=" << _mode << ")" << std::endl;
+  }
+  else
+  {
+    // MCM_FACSIMILE format: use MechanismLoader
+    std::string mcm_ver = getParam<MooseEnum>("mcm_version");
+    std::string photo_path = getParam<std::string>("mcm_photolysis_file");
+    if (!photo_path.empty() && photo_path[0] == '/')
+      mooseError("AtmosphericChemistry: mcm_photolysis_file must be relative, got absolute: ", photo_path);
+    std::string peroxy_path =
+        "doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_" + mcm_ver + ".dat";
 
-  auto input_files = _app.getInputFileNames();
-  MechanismData data = MechanismLoader::load(
-      _mechanism_file, photo_path, mcm_ver, peroxy_path, input_files);
+    auto input_files = _app.getInputFileNames();
+    MechanismData data = MechanismLoader::load(
+        _mechanism_file, photo_path, mcm_ver, peroxy_path, input_files);
 
-  // ── Store mechanism data ─────────────────────────────────────────────────
-  _mech_data = data;
-  _species = data.species;
-  _ro2_species = data.ro2_species;
+    _mech_data = data;
+    _species = data.species;
+    _ro2_species = data.ro2_species;
 
-  // Base variables (used for logging only)
-  std::set<std::string> base_vars = {"TEMP", "M", "O2", "N2", "H2O"};
-  for (auto jn : data.j_numbers)
-    base_vars.insert("J<" + std::to_string(jn) + ">");
+    std::set<std::string> base_vars = {"TEMP", "M", "O2", "N2", "H2O"};
+    for (auto jn : data.j_numbers)
+      base_vars.insert("J<" + std::to_string(jn) + ">");
 
-  _console << "AtmosphericChemistry: Parsed " << _species.size() << " species, "
-           << data.eval_order.size() << " rate coefficients, "
-           << data.reactions.size() << " reactions, "
-           << base_vars.size() - 5 << " photolysis J<N> references"
-           << " from " << _mechanism_file << " (mode=" << _mode << ")" << std::endl;
+    _console << "AtmosphericChemistry: Parsed " << _species.size()
+             << " species, " << data.eval_order.size()
+             << " rate coefficients, " << data.reactions.size()
+             << " reactions, " << base_vars.size() - 5
+             << " photolysis J<N> references"
+             << " from " << _mechanism_file << " (mode=" << _mode << ")" << std::endl;
+  }
 
   // Compute RO2 diagnostic availability at construction time
   _ro2_warning_printed = false;
@@ -414,7 +421,6 @@ AtmosphericChemistryAction::actBoxAddUserObject()
   params.set<Real>("altitude") = getParam<Real>("altitude");
   // ---- 通过 chem_solver 传递给 MCMBoxModel ----
   params.set<MooseEnum>("chem_solver") = _chem_solver;
-  params.set<MooseEnum>("mechanism_format") = _mechanism_format;
 
   // Read tolerances (new param preferred, legacy fallback)
   Real rtol = parameters().isParamSetByUser("chem_solver_rtol")
@@ -524,9 +530,13 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
 
   for (unsigned int j = 0; j < _species.size(); ++j)
   {
-    // ODETimeDerivative: contributes du/dt to the residual.
-    // Only created in moose_implicit mode.
-    // petsc_ts / sundials / kpp_* all self-drive time integration.
+    // ODETimeDerivative: contributes du/dt to the residual and 1/dt to the
+    // Jacobian diagonal.  Only created in moose_implicit mode.
+    // Self-driven modes (petsc_ts, sundials, kpp_*) do NOT need
+    // ODETimeDerivative because the ChemistryODEKernel returns 0 residual
+    // and a tiny positive Jacobian diagonal (1e-12) to keep the system
+    // non-singular without introducing spurious time-derivative residuals
+    // that would shift the initial conditions.
     if (std::string(_chem_solver) == "moose_implicit")
     {
       auto td_params = _factory.getValidParams("ODETimeDerivative");
@@ -571,11 +581,8 @@ AtmosphericChemistryAction::actBoxAddScalarKernel()
          || solver_str == "kpp_runge_kutta") ? "KPP " + solver_str
       : "PETSc TS";
     _console << "AtmosphericChemistry (box): " << mode_label << " — "
-             << "created ChemistryODEKernel for " << _species.size() << " species";
-    if (_ro2_diagnostic_enabled)
-      _console << " + RO2";
-    if (std::string(_chem_solver) == "moose_implicit")
-      _console << " + ODETimeDerivative";
+             << "created ChemistryODEKernel + ODETimeDerivative for "
+             << _species.size() << " species";
     _console << std::endl;
   }
 
@@ -755,4 +762,105 @@ AtmosphericChemistryAction::actCoupledAddKernel()
     _problem->addAuxKernel("MCMRO2Aux", "ro2_aux", ro2_params);
     _console << "  Added RO2 AuxKernel (" << ro2_coupled.size() << " RO2 species)" << std::endl;
   }
+}
+
+// ---- KPP format species parser ----
+
+std::vector<std::string>
+AtmosphericChemistryAction::parseKPPSpecies(const std::string & kpp_file) const
+{
+  std::vector<std::string> species;
+  std::set<std::string> seen;
+
+  std::function<void(const std::string &)> resolve = [&](const std::string & fpath) {
+    std::string abs_path = fpath;
+    {
+      auto slash = _mechanism_file.find_last_of('/');
+      std::string dir = (slash != std::string::npos) ? _mechanism_file.substr(0, slash + 1) : "";
+      if (!dir.empty() && fpath.find('/') == std::string::npos)
+        abs_path = dir + fpath;
+    }
+    std::ifstream file(abs_path);
+    if (!file.is_open())
+    {
+      // Try KPP model search path — use KPP_HOME env var or derive from KPP binary
+      const char * kpp_home = std::getenv("KPP_HOME");
+      if (!kpp_home)
+      {
+        // Try to derive KPP_HOME from the KPP binary location
+        FILE * which = popen("command -v kpp 2>/dev/null || echo /home/fangxiaozhong/git_repo/KPP/bin/kpp", "r");
+        if (which)
+        {
+          char buf[4096];
+          if (fgets(buf, sizeof(buf), which))
+          {
+            std::string kpp_bin(buf);
+            kpp_bin.erase(kpp_bin.find_last_not_of(" \n\r\t") + 1);
+            auto slash = kpp_bin.find_last_of('/');
+            if (slash != std::string::npos)
+            {
+              std::string kpp_dir = kpp_bin.substr(0, slash);
+              if (kpp_dir.size() > 4 && kpp_dir.substr(kpp_dir.size() - 4) == "/bin")
+                kpp_home = strdup((kpp_dir.substr(0, kpp_dir.size() - 4) + "/models/").c_str());
+            }
+          }
+          pclose(which);
+        }
+      }
+      if (kpp_home)
+        abs_path = std::string(kpp_home) + "/" + fpath;
+      file.open(abs_path);
+    }
+    if (!file.is_open()) return;
+
+    std::string line;
+    bool in_defvar = false;
+    while (std::getline(file, line))
+    {
+      if (line.find("#INCLUDE") == 0 || line.find("#include") == 0)
+      {
+        auto pos = line.find_first_of(" \t");
+        if (pos != std::string::npos)
+        {
+          std::string incl = line.substr(pos + 1);
+          incl.erase(0, incl.find_first_not_of(" \t"));
+          incl.erase(incl.find_last_not_of(" \t") + 1);
+          resolve(incl);
+        }
+        continue;
+      }
+      // #MODEL directive: resolve model_name.spc from KPP models directory
+      if (line.find("#MODEL") == 0 || line.find("#model") == 0)
+      {
+        auto pos = line.find_first_of(" \t");
+        if (pos != std::string::npos)
+        {
+          std::string model = line.substr(pos + 1);
+          model.erase(0, model.find_first_not_of(" \t"));
+          model.erase(model.find_last_not_of(" \t") + 1);
+          resolve(model + ".spc");
+          resolve(model + ".eqn");
+        }
+        continue;
+      }
+      if (line.find("#DEFVAR") == 0) { in_defvar = true; continue; }
+      if (line.find("#DEFFIX") == 0) { in_defvar = false; continue; }
+      if (line.find('#') == 0) continue;
+      if (!in_defvar) continue;
+
+      auto eq = line.find('=');
+      if (eq == std::string::npos) continue;
+      std::string name = line.substr(0, eq);
+      name.erase(0, name.find_first_not_of(" \t"));
+      name.erase(name.find_last_not_of(" \t") + 1);
+      if (!name.empty() && seen.insert(name).second)
+        species.push_back(name);
+    }
+  };
+
+  resolve(kpp_file);
+  if (species.empty())
+    mooseError("AtmosphericChemistry: no species found in ", kpp_file,
+               ". Check KPP_HOME or KPP binary location.");
+  return species;
 }

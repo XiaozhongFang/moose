@@ -156,4 +156,21 @@
     input = test_family_conservation.i
     requirement = 'The box mode with family conservation (NOx = NO2 + NO) shall run without error. The DAE slack variable (NO2) absorbs the algebraic constraint to conserve NOx.'
   [../]
+  [./kpp_small_strato]
+    type = CSVDiff
+    input = kpp_small_strato.i
+    csvdiff = kpp_small_strato.csv
+    rel_err = 5.0e-2
+    abs_zero = 1.0e-6
+    heavy = true
+    prereq = kpp_small_strato_build
+    requirement = 'The KPP Rosenbrock solver (chem_solver=kpp_rosenbrock) shall match the KPP standalone reference for the 5-species small_strato mechanism within 5% over a diurnal cycle.'
+  [../]
+  [./kpp_small_strato_build]
+    type = RunApp
+    input = kpp_small_strato_build.i
+    heavy = true
+    skip = 'KPP build test — requires KPP tool installed'
+    requirement = 'KPP mechanism .kpp → .so build pipeline shall complete without error.'
+  [../]
 []
