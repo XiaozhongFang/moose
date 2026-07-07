@@ -11,8 +11,7 @@
   []
 []
 
-[AtmosphericChemistry]
-  mode = box
+[AtmosphericChemistryBox]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/tutorial_5sp.fac'
   mcm_photolysis_file = ''
   temperature = 298

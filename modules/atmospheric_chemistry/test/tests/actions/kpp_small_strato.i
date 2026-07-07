@@ -18,8 +18,7 @@
   []
 []
 
-[AtmosphericChemistry]
-  mode = box
+[AtmosphericChemistryBox]
   mechanism_file = 'kpp_small_strato/small_strato.kpp'
   temperature = 298.0
   air_density = 2.5e19

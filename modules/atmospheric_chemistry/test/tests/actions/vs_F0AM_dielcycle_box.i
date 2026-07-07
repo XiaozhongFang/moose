@@ -14,8 +14,7 @@
   []
 []
 
-[AtmosphericChemistry]
-  mode = box
+[AtmosphericChemistryBox]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_DielExampleChemistry.fac'
   temperature = 296.914
   air_density = 2.44594e19

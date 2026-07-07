@@ -137,7 +137,7 @@ AtmosphericChemistryCoupledAction::actAddVariable()
   {
     auto aux_params = _factory.getValidParams("MooseVariable");
     aux_params.set<MooseEnum>("family") = MooseEnum("LAGRANGE MONOMIAL", "MONOMIAL");
-    aux_params.set<MooseEnum>("order") = MooseEnum("FIRST SECOND THIRD FOURTH CONSTANT", "CONSTANT");
+    aux_params.set<MooseEnum>("order") = MooseEnum("CONSTANT");
     _problem->addAuxVariable("MooseVariable", "RO2", aux_params);
   }
 
@@ -160,6 +160,7 @@ AtmosphericChemistryCoupledAction::buildReactantMatrix() const
       auto it = sp_idx.find(name);
       if (it != sp_idx.end())
         mat[r].push_back(static_cast<Real>(it->second));
+        mat[r].push_back(coeff);
     }
   }
   return mat;

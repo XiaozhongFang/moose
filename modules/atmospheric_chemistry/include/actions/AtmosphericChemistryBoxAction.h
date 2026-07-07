@@ -10,6 +10,7 @@
 #pragma once
 
 #include "Action.h"
+#include "MechanismLoader.h"
 
 #include <string>
 #include <vector>
@@ -48,6 +49,8 @@ protected:
 
   /// Parsed species names in mechanism order
   std::vector<std::string> _species;
+  /// Full mechanism data (for sparse coupling matrix in moose_implicit mode)
+  MechanismData _mech_data;
   /// Chemical solver backend (from chem_solver param)
   std::string _chem_solver;
   /// Whether to use a self-driven integrator (PETSc TS, SUNDIALS, KPP)

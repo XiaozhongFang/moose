@@ -15,6 +15,9 @@
 #include "libmesh/coupling_matrix.h"
 
 #include <algorithm>
+#include <map>
+
+#include <algorithm>
 
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryBoxAction, "add_variable");
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryBoxAction, "add_user_object");
@@ -138,6 +141,7 @@ AtmosphericChemistryBoxAction::AtmosphericChemistryBoxAction(const InputParamete
                                photo_path, peroxy_path, input_files);
 
   _species = spec.species();
+  _mech_data = spec.mechanismData();
 
   // ---- Derive use_box_solver ----
   _use_box_solver = (_chem_solver != "moose_implicit");
@@ -185,20 +189,13 @@ void
 AtmosphericChemistryBoxAction::actAddVariable()
 {
   // Create scalar variables for all species
-  auto var_params = _factory.getValidParams("MooseVariable");
-  var_params.set<MooseEnum>("family") = MooseEnum("SCALAR");
-  var_params.set<MooseEnum>("order") = MooseEnum("FIRST");
+  auto var_params = _factory.getValidParams("MooseVariableScalar");
   for (const auto & sp : _species)
-    _problem->addVariable("MooseVariable", sp, var_params);
+    _problem->addVariable("MooseVariableScalar", sp, var_params);
 
   // RO2 diagnostic variable
   if (_ro2_diagnostic_enabled)
-  {
-    auto aux_params = _factory.getValidParams("MooseVariable");
-    aux_params.set<MooseEnum>("family") = MooseEnum("SCALAR");
-    aux_params.set<MooseEnum>("order") = MooseEnum("FIRST");
-    _problem->addAuxVariable("MooseVariable", "RO2", aux_params);
-  }
+    _problem->addVariable("MooseVariableScalar", "RO2", var_params);
 
   _console << "AtmosphericChemistryBox: Created " << _species.size()
            << " scalar variable(s)" << std::endl;
@@ -209,19 +206,27 @@ AtmosphericChemistryBoxAction::actAddUserObject()
 {
   // Create MCMBoxModel
   auto uo_params = _factory.getValidParams("MCMBoxModel");
-  // Non-chemistry parameters forwarded from the Action
+  uo_params.set<std::string>("mechanism_file") = getParam<std::string>("mechanism_file");
   uo_params.set<Real>("temperature") = getParam<Real>("temperature");
   uo_params.set<Real>("air_density") = getParam<Real>("air_density");
   uo_params.set<Real>("water_vapor") = getParam<Real>("water_vapor");
   uo_params.set<Real>("press") = getParam<Real>("press");
-  uo_params.set<std::string>("mcm_photolysis_file") =
-      getParam<std::string>("mcm_photolysis_file");
-  uo_params.set<MooseEnum>("mcm_version") = getParam<MooseEnum>("mcm_version");
   uo_params.set<Real>("latitude") = getParam<Real>("latitude");
   uo_params.set<Real>("longitude") = getParam<Real>("longitude");
   uo_params.set<unsigned int>("day") = getParam<unsigned int>("day");
   uo_params.set<unsigned int>("month") = getParam<unsigned int>("month");
   uo_params.set<unsigned int>("year") = getParam<unsigned int>("year");
+  uo_params.set<MooseEnum>("units") = getParam<MooseEnum>("units");
+  uo_params.set<Real>("jfac") = getParam<Real>("jfac");
+  uo_params.set<Real>("default_ic") = getParam<Real>("default_ic");
+  uo_params.set<bool>("use_limiting_reagent") = getParam<bool>("use_limiting_reagent");
+  // Photolysis file: empty for BOTTOMUP (parsed from data files), 
+  // otherwise the MCM photolysis rates file (mcm_photolysis_file).
+  {
+    auto scheme = getParam<MooseEnum>("photolysis_scheme");
+    uo_params.set<std::string>("photolysis_file") =
+        (scheme == "BOTTOMUP") ? "" : getParam<std::string>("mcm_photolysis_file");
+  }
   uo_params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
   uo_params.set<std::string>("hybrid_table_dir") = getParam<std::string>("hybrid_table_dir");
   uo_params.set<std::string>("lamp_flux_file") = getParam<std::string>("lamp_flux_file");
@@ -229,18 +234,16 @@ AtmosphericChemistryBoxAction::actAddUserObject()
   uo_params.set<Real>("albedo") = getParam<Real>("albedo");
   uo_params.set<Real>("o3column") = getParam<Real>("o3column");
   uo_params.set<Real>("altitude") = getParam<Real>("altitude");
-  uo_params.set<MooseEnum>("units") = getParam<MooseEnum>("units");
-  uo_params.set<Real>("jfac") = getParam<Real>("jfac");
-  uo_params.set<Real>("default_ic") = getParam<Real>("default_ic");
-  uo_params.set<bool>("roof_open") = getParam<bool>("roof_open");
-  uo_params.set<bool>("use_limiting_reagent") = getParam<bool>("use_limiting_reagent");
-  uo_params.set<std::string>("mechanism_file") = getParam<std::string>("mechanism_file");
   // Solver parameters
   uo_params.set<MooseEnum>("chem_solver") = MooseEnum(
       "moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta", _chem_solver);
   uo_params.set<Real>("solver_rtol") = getParam<Real>("chem_solver_rtol");
   uo_params.set<Real>("solver_atol") = getParam<Real>("chem_solver_atol");
-  uo_params.set<MooseEnum>("solver_type") = getParam<MooseEnum>("chem_solver_type");
+  {
+    MooseEnum ts_type("bdf arkimex eimex rosw mimex beuler cn rk theta ssp sundials", "bdf");
+    ts_type = getParam<MooseEnum>("chem_solver_type");
+    uo_params.set<MooseEnum>("solver_type") = ts_type;
+  }
 
   _problem->addUserObject("MCMBoxModel", "box_model", uo_params);
 
@@ -306,11 +309,28 @@ AtmosphericChemistryBoxAction::actAddScalarKernel()
   // Set sparse Jacobian coupling pattern (MOOSE implicit mode only)
   if (_chem_solver == "moose_implicit")
   {
+    std::map<std::string, unsigned int> sp_idx;
+    for (unsigned int i = 0; i < _species.size(); ++i)
+      sp_idx[_species[i]] = i;
+
     auto cm = std::make_unique<libMesh::CouplingMatrix>(_species.size());
     for (unsigned int i = 0; i < _species.size(); ++i)
+    {
       (*cm)(i, i) = 1;
+      for (unsigned int r = 0; r < _mech_data.reactions.size(); ++r)
+      {
+        if (std::abs(_mech_data.stoichiometric_matrix[i][r]) < 1.0e-30)
+          continue;
+        for (const auto & reactant_pair : _mech_data.reactions[r].reactants)
+        {
+          auto it = sp_idx.find(reactant_pair.second);
+          if (it != sp_idx.end())
+            (*cm)(i, it->second) = 1;
+        }
+      }
+    }
     _problem->setCouplingMatrix(std::move(cm), 0);
-    _console << "AtmosphericChemistryBox: Set diagonal coupling pattern"
+    _console << "AtmosphericChemistryBox: Set sparse Jacobian coupling pattern"
              << " (" << _species.size() << "x" << _species.size() << ")" << std::endl;
   }
 }

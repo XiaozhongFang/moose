@@ -6,8 +6,7 @@
     nx = 1
   []
 []
-[AtmosphericChemistry]
-  mode = box
+[AtmosphericChemistryBox]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_export_all.fac'
   temperature = 298.0
   air_density = 2.46e19

@@ -10,8 +10,7 @@
   []
 []
 
-[AtmosphericChemistry]
-  mode = box
+[AtmosphericChemistryBox]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
   mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
   temperature = 298.15

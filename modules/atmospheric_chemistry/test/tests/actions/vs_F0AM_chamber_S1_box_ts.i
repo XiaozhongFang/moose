@@ -7,8 +7,7 @@
   []
 []
 
-[AtmosphericChemistry]
-  mode = box
+[AtmosphericChemistryBox]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac'
   temperature = 298.0
   air_density = 2.46e19
