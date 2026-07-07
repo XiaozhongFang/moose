@@ -33,9 +33,7 @@ endif
 
 # KPP support (optional, requires --enable-kpp at configure time)
 ADDITIONAL_CPPFLAGS += -I$(APPLICATION_DIR)/kpp/adapter -I$(APPLICATION_DIR)/kpp/runtime
-ifneq ($(KPP_ENABLED),)
-  ADDITIONAL_CPPFLAGS += -DKPP_ENABLED
-endif
+ADDITIONAL_CPPFLAGS += -DKPP_ENABLED
 
 # framework
 include $(FRAMEWORK_DIR)/build.mk

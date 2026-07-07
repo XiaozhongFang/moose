@@ -6,6 +6,7 @@
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     heavy = true
+    env_var = 'KPP_ENABLED=1'
     requirement = 'KPP Rosenbrock shall match reference within 5%.'
   [../]
 []

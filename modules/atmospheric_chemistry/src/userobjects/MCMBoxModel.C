@@ -255,7 +255,7 @@ MCMBoxModel::initialize()
     for (unsigned int i = 0; i < n_vars; ++i)
     {
       std::string vname = sys.variable_name(i);
-      if (sys.variable_type(i) == FEType(0, SCALAR))
+      if (sys.variable_type(i).family == SCALAR)
         _species_names.push_back(vname);
     }
     _n_species = _species_names.size();
