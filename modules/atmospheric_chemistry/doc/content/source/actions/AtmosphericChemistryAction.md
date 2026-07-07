@@ -2,46 +2,24 @@
 
 !syntax description /AtmosphericChemistry/AtmosphericChemistryAction
 
-`AtmosphericChemistryAction` is the unified entry point for atmospheric chemistry
-simulations. It supports two mechanism formats:
-
-- **`MCM_FACSIMILE`** (`.fac`): Standard MCM format, parsed by [`MechanismLoader`](MechanismLoader.md)
-- **`KPP`** (`.kpp`): Native KPP format, species extracted from `.spc` files
+`AtmosphericChemistryAction` is the compatibility wrapper for the new
+`[AtmosphericChemistryBox]` and `[AtmosphericChemistryCoupled]` Actions.
+New input files should use the dedicated blocks instead of `mode = box|coupled`.
 
 The format is auto-detected: `chem_solver = kpp_*` or `.kpp` extension → KPP format;
 otherwise MCM_FACSIMILE is assumed.
 
-## Modes
+## [AtmosphericChemistryBox]
 
-### Box Mode (`mode = box`)
+Dedicated block for 0-D ODE box model simulations. Creates scalar variables,
+an `MCMBoxModel` UserObject, and `ChemistryODEKernel` for each species.
+Suitable for large mechanisms (tested up to full MCM v3.3.1, ~5832 species).
 
-Creates a 0-D ODE box model suitable for large mechanisms (tested up to full MCM
-v3.3.1, ~5832 species). Mechanism loading is orchestrated by the
-[`MechanismLoader`](MechanismLoader.md) utility during Action construction.
+## [AtmosphericChemistryCoupled]
 
-1. **`add_variable`** — Creates `MooseVariableScalar` (family=SCALAR) for each species
-2. **`add_user_object`** — Creates an [`MCMBoxModel`](MCMBoxModel.md) UserObject
-   that parses the `.fac` mechanism and provides cached dC/dt and Jacobian access.
-   A [`BoxIntegrator`](BoxIntegrator.md) strategy (`MooseImplicitIntegrator` or
-   `PetscTSIntegrator`) is created alongside the UO to encapsulate the integration mode.
-3. **`add_scalar_kernel`** — For each species, creates:
-   - [`ODETimeDerivative`](ODETimeDerivative.md) — contributes $du/dt$ (skipped in PETSc TS mode)
-   - [`ChemistryODEKernel`](ChemistryODEKernel.md) — contributes $-dC/dt$ (chemical source),
-     delegates to the `BoxIntegrator` strategy for all residual/Jacobian evaluation,
-     with no mode-specific branching in the kernel code
-
-### Coupled Mode (`mode = coupled`)
-
-Creates a FEM transport + chemistry system for spatially-resolved simulations
-(5--50 species):
-
-1. **`add_variable`** — Creates `MooseVariableFE` (family=LAGRANGE) for each species
-2. **`add_material`** — Creates an [`MCMRatesMaterial`](MCMRatesMaterial.md) for
-   runtime rate evaluation via fparser
-3. **`add_kernel`** — For each species, creates:
-   - [`TimeDerivative`](TimeDerivative.md) — time derivative term
-   - [`ChemicalSourceKernel`](ChemicalSourceKernel.md) — chemical source with analytical Jacobian
-   - Optional [`Diffusion`](Diffusion.md) (when `include_transport = true`)
+Dedicated block for FEM transport + chemistry simulations. Creates FE variables,
+an `MCMRatesMaterial`, and `ChemicalSourceKernel` for each species.
+Suitable for spatially-resolved simulations (5--50 species).
 
 ## Mechanism Formats
 
