@@ -159,8 +159,10 @@ AtmosphericChemistryCoupledAction::buildReactantMatrix() const
     {
       auto it = sp_idx.find(name);
       if (it != sp_idx.end())
+      {
         mat[r].push_back(static_cast<Real>(it->second));
         mat[r].push_back(coeff);
+      }
     }
   }
   return mat;
