@@ -850,6 +850,127 @@ MCMBoxModel::execute()
 }
 
 void
+MCMBoxModel::stepChemistry(Real t_start, Real t_end)
+{
+  // Lazy initialization
+  if (_n_species == 0)
+    const_cast<MCMBoxModel*>(this)->initialize();
+
+  if (!_integrator->selfDriven())
+    return;
+
+  if (_n_species == 0)
+    return;
+
+  Real dt = t_end - t_start;
+  if (t_start < 0.0 || dt <= 0.0)
+    return;
+
+  FEProblemBase & fe_problem = static_cast<FEProblemBase &>(_subproblem);
+
+  // ---- SUNDIALS path ----
+  if (_use_sundials)
+  {
+    std::vector<Real> C(_n_species);
+    for (unsigned int i = 0; i < _n_species; ++i)
+      C[i] = _subproblem.getScalarVariable(0, _species_names[i]).sln()[0];
+
+    _t = 0.5 * (t_start + t_end);
+    _mechanism->setCurrentTime(_t);
+    static_cast<MCMRuntimeMechanism*>(_mechanism.get())->evaluateCoefficients();
+    _mechanism->markDirty();
+
+    SundialsBoxIntegrator * si = static_cast<SundialsBoxIntegrator *>(_integrator.get());
+    si->solveSundialsCVODE(t_start, t_end, C);
+
+    NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
+    NumericVector<Number> & sys_sol = *nl.system().solution;
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      dof_id_type dof = sv.dofIndices()[0];
+      sv.setValue(0, C[i]);
+      sys_sol.set(dof, C[i]);
+      nl.solution().set(dof, C[i]);
+    }
+    sys_sol.close();
+    nl.solution().close();
+    *const_cast<NumericVector<Number> *>(nl.currentSolution()) = nl.solution();
+    return;
+  }
+
+  // ---- KPP path ----
+  if (_use_kpp)
+  {
+#ifdef KPP_ENABLED
+    std::vector<Real> C(_n_species);
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      C[i] = sv.sln()[0];
+      if (C[i] == 0.0 && i < _initial_conc.size() && _initial_conc[i] > 0.0)
+        C[i] = _initial_conc[i];
+    }
+
+    KppBoxIntegrator * kpp_ptr = static_cast<KppBoxIntegrator *>(_integrator.get());
+    kpp_ptr->solve(t_start, t_end, C);
+
+    NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
+    NumericVector<Number> & sys_sol = *nl.system().solution;
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      dof_id_type dof = sv.dofIndices()[0];
+      sv.setValue(0, C[i]);
+      sys_sol.set(dof, C[i]);
+      nl.solution().set(dof, C[i]);
+    }
+    sys_sol.close();
+    nl.solution().close();
+    *const_cast<NumericVector<Number> *>(nl.currentSolution()) = nl.solution();
+    return;
+#else
+    mooseError("MCMBoxModel: KPP path reached but KPP_ENABLED not defined.");
+#endif
+  }
+
+  // ---- PETSc TS path ----
+  {
+    NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
+    PetscScalar *x_arr;
+    CHKERRABORT(PETSC_COMM_SELF, VecGetArray(_ts_X, &x_arr));
+    for (unsigned int i = 0; i < _n_species; ++i)
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+      x_arr[i] = sv.sln()[0];
+      if (x_arr[i] == 0.0 && i < _initial_conc.size() && _initial_conc[i] > 0.0)
+        x_arr[i] = _initial_conc[i];
+    }
+    CHKERRABORT(PETSC_COMM_SELF, VecRestoreArray(_ts_X, &x_arr));
+
+    runPETScStep(t_start, t_end);
+
+    {
+      PetscScalar *x_arr2;
+      CHKERRABORT(PETSC_COMM_SELF, VecGetArray(_ts_X, &x_arr2));
+      NumericVector<Number> & sys_sol = *nl.system().solution;
+      for (unsigned int i = 0; i < _n_species; ++i)
+      {
+        MooseVariableScalar & sv = _subproblem.getScalarVariable(0, _species_names[i]);
+        dof_id_type dof = sv.dofIndices()[0];
+        sv.setValue(0, x_arr2[i]);
+        sys_sol.set(dof, x_arr2[i]);
+        nl.solution().set(dof, x_arr2[i]);
+      }
+      sys_sol.close();
+      nl.solution().close();
+      CHKERRABORT(PETSC_COMM_SELF, VecRestoreArray(_ts_X, &x_arr2));
+      *const_cast<NumericVector<Number>*>(nl.currentSolution()) = nl.solution();
+    }
+  }
+}
+
+void
 MCMBoxModel::setupPETScTS()
 {
   PetscErrorCode ierr;

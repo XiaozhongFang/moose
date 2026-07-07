@@ -62,6 +62,13 @@ public:
   /** Access the box integrator for per-species residual/Jacobian evaluation */
   const BoxIntegrator & getIntegrator() const { return *_integrator; }
 
+  /**
+   * Perform one chemistry step from t0 to t1, reading concentrations from
+   * ScalarVariables and writing integrated results back.
+   * Used by AtmosphericChemistryBoxExecutioner for self-driven solvers.
+   */
+  void stepChemistry(Real t0, Real t1);
+
   // -- PETSc TS standalone integrator (box mode only) --
   /** Initialize PETSc TS context */
   void setupPETScTS();
