@@ -61,8 +61,8 @@
 
 [AtmosphericChemistry]
   [Coupled]
-  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/tutorial_5sp.fac'
-  temperature = 298
+    mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/tutorial_5sp.fac'
+    temperature = 298
   []
 []
 

@@ -22,13 +22,13 @@
 
 [AtmosphericChemistry]
   [Box]
-  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac'
-  temperature = 298.0
-  air_density = 2.46e19
-  photolysis_scheme = BOTTOMUP
-  lamp_flux_file = 'ExampleLightFlux.txt'
-  bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
-  jfac = 1.0
+    mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac'
+    temperature = 298.0
+    air_density = 2.46e19
+    photolysis_scheme = BOTTOMUP
+    lamp_flux_file = 'ExampleLightFlux.txt'
+    bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
+    jfac = 1.0
   []
 []
 

@@ -12,19 +12,19 @@
 
 [AtmosphericChemistry]
   [Box]
-  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
-  mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
-  temperature = 298.15
-  latitude = 51.51
-  longitude = 0.13
-  day = 21
-  month = 6
-  year = 2010
+    mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
+    mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
+    temperature = 298.15
+    latitude = 51.51
+    longitude = 0.13
+    day = 21
+    month = 6
+    year = 2010
 
   # Family conservation: NOx = NO2 + NO (slack=NO2, member=NO)
-  family_names = 'NOx'
-  family_members = 'NO2 NO'
-  family_scaling = '1.0 1.0'
+    family_names = 'NOx'
+    family_members = 'NO2 NO'
+    family_scaling = '1.0 1.0'
   []
 []
 

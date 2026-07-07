@@ -12,9 +12,9 @@
 
 [AtmosphericChemistry]
   [Coupled]
-  mode = box
-  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/tutorial_5sp.fac'
-  temperature = 298
+    mode = box
+    mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/tutorial_5sp.fac'
+    temperature = 298
   []
 []
 

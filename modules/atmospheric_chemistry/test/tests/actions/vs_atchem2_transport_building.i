@@ -125,18 +125,18 @@
 
 [AtmosphericChemistry]
   [Coupled]
-  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
-  temperature = 288.15
-  air_density = 2.55e19
-  water_vapor = 4.45e17
-  press = 1013.25
-  mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
-  photolysis_scheme = MCM_SZA
-  latitude = 51.51
-  longitude = 0.13
-  day = 21
-  month = 6
-  year = 2010
+    mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
+    temperature = 288.15
+    air_density = 2.55e19
+    water_vapor = 4.45e17
+    press = 1013.25
+    mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
+    photolysis_scheme = MCM_SZA
+    latitude = 51.51
+    longitude = 0.13
+    day = 21
+    month = 6
+    year = 2010
   []
 []
 

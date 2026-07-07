@@ -8,16 +8,16 @@
 []
 [AtmosphericChemistry]
   [Box]
-  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_export_all.fac'
-  temperature = 298.0
-  air_density = 2.46e19
-  press = 1013.0
-  photolysis_scheme = MCM_SZA
-  chem_solver = petsc_ts
-  chem_solver_type = bdf
-  chem_solver_rtol = 1e-1
-  chem_solver_atol = 1e-4
-  default_ic = 1.0e6
+    mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_export_all.fac'
+    temperature = 298.0
+    air_density = 2.46e19
+    press = 1013.0
+    photolysis_scheme = MCM_SZA
+    chem_solver = petsc_ts
+    chem_solver_type = bdf
+    chem_solver_rtol = 1e-1
+    chem_solver_atol = 1e-4
+    default_ic = 1.0e6
   []
 []
 [Executioner]

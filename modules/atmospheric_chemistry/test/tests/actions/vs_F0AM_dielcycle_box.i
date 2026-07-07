@@ -16,20 +16,20 @@
 
 [AtmosphericChemistry]
   [Box]
-  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_DielExampleChemistry.fac'
-  temperature = 296.914
-  air_density = 2.44594e19
-  water_vapor = 2.08e17
-  press = 751.684
-  mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
-  photolysis_scheme = MCM_SZA
-  latitude = 32.903
-  longitude = -87.250
-  day = 30
-  month = 6
-  year = 2013
-  jfac = 0.5
-  dilute = 1.1574074074074073e-5
+    mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_DielExampleChemistry.fac'
+    temperature = 296.914
+    air_density = 2.44594e19
+    water_vapor = 2.08e17
+    press = 751.684
+    mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
+    photolysis_scheme = MCM_SZA
+    latitude = 32.903
+    longitude = -87.250
+    day = 30
+    month = 6
+    year = 2013
+    jfac = 0.5
+    dilute = 1.1574074074074073e-5
   []
 []
 

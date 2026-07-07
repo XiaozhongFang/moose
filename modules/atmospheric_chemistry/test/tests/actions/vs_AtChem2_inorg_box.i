@@ -14,17 +14,17 @@
 
 [AtmosphericChemistry]
   [Box]
-  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
-  temperature = 288.15
-  air_density = 2.55e19
-  water_vapor = 4.45e17
-  mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
-  latitude = 51.51
-  longitude = 0.13
-  day = 21
-  month = 6
-  year = 2010
-  press = 1013.25
+    mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
+    temperature = 288.15
+    air_density = 2.55e19
+    water_vapor = 4.45e17
+    mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
+    latitude = 51.51
+    longitude = 0.13
+    day = 21
+    month = 6
+    year = 2010
+    press = 1013.25
   []
 []
 
