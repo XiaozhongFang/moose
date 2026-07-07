@@ -10,18 +10,24 @@
 #include <string.h>
 #include <math.h>
 
-// KPP global concentration array (defined in _Global.h by KPP-generated code)
+// KPP global state (defined in _Global.h by KPP-generated code)
 extern double C[];
+extern double ATOL[];
+extern double RTOL[];
+extern double STEPMIN;
+extern char * SPC_NAMES[];
 
 // KPP functions (names fixed by KPP tool, independent of mechanism)
 extern void Initialize(void);
 extern int Rosenbrock(double Y[], double Tstart, double Tend,
+                      double AbsTol[], double RelTol[],
                       void (*ode_Fun)(double, double[], double[]),
                       void (*ode_Jac)(double, double[], double[]),
                       double RPAR[], int IPAR[]);
 
 // Injected into _Main.c by kpp/build/Makefile: int kpp_get_nspec(void) { return NSPEC; }
 extern int kpp_get_nspec(void);
+extern int kpp_get_nvar(void);
 
 // Templates called by Rosenbrock internally
 void FunTemplate(double T, double Y[], double Ydot[]);
@@ -33,6 +39,13 @@ void JacTemplate(double T, double Y[], double JVS[]);
 
 void kpp_init(void) {
     Initialize();
+}
+
+const char * kpp_get_species_name(int i) {
+    int nspec = kpp_get_nspec();
+    if (i < 0 || i >= nspec)
+        return "";
+    return SPC_NAMES[i] ? SPC_NAMES[i] : "";
 }
 
 void kpp_set_conc(double c[], int n) {
@@ -54,7 +67,24 @@ int kpp_integrate(double Y[], double t0, double t1,
                    double rtol, double atol) {
     double RPAR[20];
     int IPAR[20];
+    int nvar = kpp_get_nvar();
     memset(RPAR, 0, sizeof(RPAR));
     memset(IPAR, 0, sizeof(IPAR));
-    return Rosenbrock(Y, t0, t1, FunTemplate, JacTemplate, RPAR, IPAR);
+    for (int i = 0; i < nvar; ++i) {
+        RTOL[i] = rtol;
+        ATOL[i] = atol;
+    }
+    STEPMIN = fmax(fabs(t1 - t0) * 1.0e-6, 1.0e-12);
+    kpp_set_conc(Y, nvar);
+    IPAR[0] = 0;
+    IPAR[1] = 1;
+    IPAR[3] = 5;
+    RPAR[2] = STEPMIN;
+    int ierr = Rosenbrock(Y, t0, t1, ATOL, RTOL,
+                          FunTemplate, JacTemplate, RPAR, IPAR);
+    if (ierr > 0) {
+        STEPMIN = RPAR[11];
+        kpp_set_conc(Y, nvar);
+    }
+    return ierr;
 }

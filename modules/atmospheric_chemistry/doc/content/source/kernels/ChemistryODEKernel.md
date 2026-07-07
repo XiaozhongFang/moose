@@ -44,7 +44,8 @@ In PETSc TS mode, `reinit()` is a no-op — the integrator handles all state.
 ## Example Input File Syntax
 
 `ChemistryODEKernel` is created automatically by the
-[`AtmosphericChemistryAction`](AtmosphericChemistryAction.md) when `mode = box`.
+[`AtmosphericChemistryAction`](AtmosphericChemistryAction.md) in the
+`[AtmosphericChemistry][Box]` workflow.
 It can also be created manually:
 
 ```moose

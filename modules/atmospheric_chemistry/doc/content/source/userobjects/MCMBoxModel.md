@@ -212,7 +212,8 @@ For the S1 chamber test case (610 species, 1974 reactions, 3h simulation):
 | PETSc TS BDF, rtol=1e-1 | 14.8s | **32×** | 1.5% |
 
 **Limitations:**
-- Only available in `mode = box` (coupled mode with transport cannot use this).
+- Only available through the `[AtmosphericChemistry][Box]` workflow (coupled mode
+  with transport cannot use this).
 - Requires PETSc TS types compiled into the PETSc installation (`sundials` requires --download-sundials).
 - The solution is written at each MOOSE timestep end — intermediate TS internal steps
   are not visible to MOOSE output.

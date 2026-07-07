@@ -121,7 +121,7 @@ MCMBoxModel::validParams()
       "moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
       "petsc_ts");
   params.addParam<MooseEnum>("chem_solver", solver_enum,
-      "Chemical solver backend (forwarded from AtmosphericChemistryAction).");
+      "Chemical solver backend (kpp_rosenbrock is the supported KPP backend).");
   MooseEnum mech_fmt("MCM_FACSIMILE KPP", "MCM_FACSIMILE");
   params.addParam<MooseEnum>("mechanism_format", mech_fmt,
       "Mechanism format (forwarded from AtmosphericChemistryAction).");
@@ -171,7 +171,7 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
 #ifndef KPP_ENABLED
     mooseError("MCMBoxModel: chem_solver=", _chem_solver,
                " requires KPP support (KPP_ENABLED). "
-               "Recompile with --enable-kpp.");
+               "Rebuild the atmospheric_chemistry module with KPP support.");
 #endif
   }
 
@@ -216,7 +216,8 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
         _app, mech_path, _solver_rtol, _solver_atol, _chem_solver);
 #else
     mooseError("MCMBoxModel: chem_solver=", _chem_solver,
-               " requires KPP support.  Recompile with --enable-kpp.");
+               " requires KPP support. Rebuild the atmospheric_chemistry module with "
+               "KPP support.");
 #endif
   }
   else if (_use_box_solver)
@@ -248,16 +249,10 @@ MCMBoxModel::initialize()
   if (_use_kpp)
   {
     _console << "MCMBoxModel: KPP mode — using " << mech_file << std::endl;
-    // Count scalar variables and get their names from the system
-    _species_names.clear();
-    auto & sys = _subproblem.es().get_system(0);
-    unsigned int n_vars = sys.n_vars();
-    for (unsigned int i = 0; i < n_vars; ++i)
-    {
-      std::string vname = sys.variable_name(i);
-      if (sys.variable_type(i).family == SCALAR)
-        _species_names.push_back(vname);
-    }
+#ifdef KPP_ENABLED
+    const auto * kpp_ptr = static_cast<const KppBoxIntegrator *>(_integrator.get());
+    _species_names = kpp_ptr->speciesNames();
+#endif
     _n_species = _species_names.size();
     _n_reactions = 0;
     _console << "MCMBoxModel: Loaded " << _n_species << " species from KPP mechanism"

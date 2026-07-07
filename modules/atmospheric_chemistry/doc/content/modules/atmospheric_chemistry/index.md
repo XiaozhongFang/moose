@@ -5,11 +5,11 @@ atmospheric chemistry simulations using Master Chemical Mechanism (MCM) chemical
 
 ## Overview
 
-The module uses a unified `[AtmosphericChemistry]` Action with two modes:
+The module uses dedicated blocks under `[AtmosphericChemistry]`:
 
-1. **Box mode** (`mode = box`) — 0-D ODE using ScalarVariable + ChemistryODEKernel + MCMBoxModel.
+1. **Box mode** (`[Box]`) — 0-D ODE using ScalarVariable + ChemistryODEKernel + MCMBoxModel.
    Suitable for large mechanisms (up to full MCM ~5832 species).
-2. **Coupled mode** (`mode = coupled`) — FEM transport + chemistry using MooseVariableFE +
+2. **Coupled mode** (`[Coupled]`) — FEM transport + chemistry using MooseVariableFE +
    ChemicalSourceKernel + MCMRatesMaterial. Suitable for spatially-resolved simulations (5--50 species).
 
 ## Quick Start
@@ -17,17 +17,19 @@ The module uses a unified `[AtmosphericChemistry]` Action with two modes:
 ```moose
 # Box mode (0-D ODE, ScalarVariable)
 [AtmosphericChemistry]
-  mode = box
-  mechanism_file = 'mechanism.fac'
-  temperature = 298
+  [Box]
+    mechanism_file = 'mechanism.fac'
+    temperature = 298
+  []
 []
 
 # Coupled mode (FEM transport + chemistry)
 [AtmosphericChemistry]
-  mode = coupled
-  mechanism_file = 'mechanism.fac'
-  temperature = 298
-  include_transport = true
+  [Coupled]
+    mechanism_file = 'mechanism.fac'
+    temperature = 298
+    include_transport = true
+  []
 []
 ```
 
@@ -37,10 +39,11 @@ The `units` parameter (default: `molec_cm3`) controls input/output units:
 
 ```moose
 [AtmosphericChemistry]
-  mode = box
-  units = ppb           # input ICs in ppb, output in ppb
-  air_density = 2.46e19
-  ...
+  [Box]
+    units = ppb           # input ICs in ppb, output in ppb
+    air_density = 2.46e19
+    ...
+  []
 []
 ```
 
@@ -67,22 +70,24 @@ Two photolysis calculation methods are supported via the `photolysis_scheme` par
 ```moose
 # Hybrid scheme example
 [AtmosphericChemistry]
-  mode = coupled
-  mechanism_file = 'mechanism.fac'
-  photolysis_scheme = HYBRID
-  hybrid_table_dir = 'tuv_tables'
-  albedo = 0.1
+  [Coupled]
+    mechanism_file = 'mechanism.fac'
+    photolysis_scheme = HYBRID
+    hybrid_table_dir = 'tuv_tables'
+    albedo = 0.1
+  []
 []
 
 # BottomUp (chamber) scheme example
 [AtmosphericChemistry]
-  mode = box
-  mechanism_file = 'mechanism.fac'
-  temperature = 298.0
-  press = 1013.0
-  photolysis_scheme = BOTTOMUP
-  lamp_flux_file = 'ExampleLightFlux.txt'
-  bottomup_data_dir = 'database/photolysis/bottomup'
+  [Box]
+    mechanism_file = 'mechanism.fac'
+    temperature = 298.0
+    press = 1013.0
+    photolysis_scheme = BOTTOMUP
+    lamp_flux_file = 'ExampleLightFlux.txt'
+    bottomup_data_dir = 'database/photolysis/bottomup'
+  []
 []
 ```
 
@@ -354,9 +359,9 @@ For the S1 chamber test case (610 species, 1974 reactions, 3h simulation):
 
 ## Objects
 
-- [`AtmosphericChemistryAction`](source/actions/AtmosphericChemistryAction.md) — Unified Action (box / coupled modes)
+- [`AtmosphericChemistryAction`](source/actions/AtmosphericChemistryAction.md) — Dedicated `[Box]` and `[Coupled]` action blocks
 - [`MechanismLoader`](source/utils/MechanismLoader.md) — Standalone mechanism loading utility (path resolution + .fac parsing + photolysis set loading)
-- [`BoxIntegrator`](source/utils/BoxIntegrator.md) — Strategy interface for box-model integration (MOOSE implicit / PETSc TS)
+- [`BoxIntegrator`](source/utils/BoxIntegrator.md) — Strategy interface for box-model integration (MOOSE implicit / PETSc TS / KPP)
 - [`MCMBoxModel`](source/userobjects/MCMBoxModel.md) — 0-D chemical ODE engine with caching interface, pluggable sparse matrix backends (CSR/COO/DENSE/CSC), and optional F0AM-style limiting-reagent (LR) formulation for RO₂ termination
 - [`ChemistryODEKernel`](source/kernels/ChemistryODEKernel.md) — Box mode ScalarKernel bridge to BoxIntegrator strategy
 - [`ChemicalSourceKernel`](source/kernels/ChemicalSourceKernel.md) — FEM chemical source with analytical Jacobian + CSR sparse reactant matrix

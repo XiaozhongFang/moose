@@ -78,14 +78,15 @@ python3 scripts/generate_bottomup_jmap.py \
 
 ```moose
 [AtmosphericChemistry]
-  mode = box
-  mechanism_file = 'mechanism.fac'
-  temperature = 298.0
-  press = 1013.0
-  photolysis_scheme = BOTTOMUP
-  lamp_flux_file = 'ExampleLightFlux.txt'
-  bottomup_data_dir = 'database/photolysis/bottomup'
-  jfac = 1.0
+  [Box]
+    mechanism_file = 'mechanism.fac'
+    temperature = 298.0
+    press = 1013.0
+    photolysis_scheme = BOTTOMUP
+    lamp_flux_file = 'ExampleLightFlux.txt'
+    bottomup_data_dir = 'database/photolysis/bottomup'
+    jfac = 1.0
+  []
 []
 ```
 

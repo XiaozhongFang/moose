@@ -11,7 +11,9 @@ R = \frac{\mathrm{d}u}{\mathrm{d}t} - \frac{\mathrm{d}C_{\text{slack}}}{\mathrm{
 
 where the corrected time derivative enforces $\mathrm{d}F_{\text{total}}/\mathrm{d}t = 0$.
 
-This ScalarKernel is automatically created by `AtmosphericChemistryAction` when `family_names` parameters are provided in `mode = box`.
+This ScalarKernel is automatically created by `AtmosphericChemistryAction` when
+`family_names` parameters are provided in the `[AtmosphericChemistry][Box]`
+workflow.
 
 ### Usage
 

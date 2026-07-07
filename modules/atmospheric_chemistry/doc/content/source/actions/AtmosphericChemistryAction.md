@@ -6,7 +6,7 @@
 `[AtmosphericChemistryBox]` and `[AtmosphericChemistryCoupled]` Actions.
 New input files should use the dedicated blocks instead of `mode = box|coupled`.
 
-The format is auto-detected: `chem_solver = kpp_*` or `.kpp` extension → KPP format;
+The format is auto-detected: `chem_solver = kpp_*` or `.kpp` extension -> KPP format;
 otherwise MCM_FACSIMILE is assumed.
 
 ## [AtmosphericChemistryBox]
@@ -30,30 +30,36 @@ Used with `chem_solver = moose_implicit` or `petsc_ts`.
 
 ### `KPP` (Kinetic Pre-Processor)
 
-Native KPP `.kpp` format. Species are extracted from `.spc` files via the
-`#DEFVAR` section. Requires `chem_solver = kpp_*` and `KPP_ENABLED=1` build.
+Native KPP `.kpp` format. In the box KPP workflow, the generated KPP shared
+library provides the authoritative `#DEFVAR` species order through `SPC_NAMES`.
+Use `chem_solver = kpp_rosenbrock` for the supported KPP box integrator.
 
-The chemistry is integrated by a pre-compiled KPP shared library loaded at
-runtime via `KPP_LIB` environment variable. Build the `.so` with:
+The chemistry is integrated by a pre-compiled KPP shared library. By default,
+the library is auto-discovered beside the `.kpp` file using
+`kpp_build_<mechanism>/libkpp_<mechanism>.so`; `KPP_LIB` can override this path.
+Build the `.so` with:
 
 ```bash
 make -f modules/atmospheric_chemistry/kpp/build/Makefile MECH=path/to/mech.kpp
-KPP_LIB=path/to/kpp_build_mech/libkpp_mech.so
 ```
 
 Example:
 ```moose
 [AtmosphericChemistry]
-  mode = box
-  mechanism_file = 'mechanism.kpp'    # .kpp → auto-detected as KPP format
-  chem_solver = kpp_rosenbrock
+  [Box]
+    mechanism_file = 'mechanism.kpp'
+    chem_solver = kpp_rosenbrock
+  []
 []
 ```
 
+See [`KPP Workflow for Atmospheric Chemistry Box Models`](/modules/atmospheric_chemistry/kpp_workflow.md)
+for different mechanism files, user-defined mechanisms, and validation guidance.
+
 Format is auto-detected:
-- `chem_solver = kpp_*` → KPP format, or
-- File extension `.kpp` → KPP format
-- Otherwise → `MCM_FACSIMILE` (`.fac`)
+- `chem_solver = kpp_*` -> KPP format, or
+- File extension `.kpp` -> KPP format
+- Otherwise -> `MCM_FACSIMILE` (`.fac`)
 
 ## Photolysis Schemes
 
@@ -85,13 +91,14 @@ and 4D linear interpolation.
 
 ```moose
 [AtmosphericChemistry]
-  mode = coupled
-  mechanism_file = 'mechanism.fac'
-  photolysis_scheme = HYBRID
-  hybrid_table_dir = 'tuv_tables'
-  albedo = 0.1
-  o3column = 350
-  altitude = 500
+  [Coupled]
+    mechanism_file = 'mechanism.fac'
+    photolysis_scheme = HYBRID
+    hybrid_table_dir = 'tuv_tables'
+    albedo = 0.1
+    o3column = 350
+    altitude = 500
+  []
 []
 ```
 
@@ -135,9 +142,9 @@ Parameters:
   - `moose_implicit` — MOOSE Newton solver owns the integration (default)
   - `petsc_ts` — PETSc TS (BDF/ARKIMEX), 28-32× speedup for box mode
   - `sundials` — SUNDIALS CVODE (requires `--with-sundials`)
-  - `kpp_rosenbrock` — KPP Rosenbrock (requires `--enable-kpp`)
-  - `kpp_sdirk` — KPP SDIRK (requires `--enable-kpp`)
-  - `kpp_runge_kutta` — KPP Runge-Kutta (requires `--enable-kpp`)
+  - `kpp_rosenbrock` — KPP Rosenbrock through a generated shared library
+  - `kpp_sdirk` — reserved KPP option; not wired to a supported adapter entry point
+  - `kpp_runge_kutta` — reserved KPP option; not wired to a supported adapter entry point
 - `chem_solver_type` (enum: bdf|arkimex|..., default: bdf): ODE solver type for `petsc_ts` only.
 - `chem_solver_rtol` (real, default: 1e-6): Relative tolerance for the adaptive integrator.
 - `chem_solver_atol` (real, default: 1e-10): Absolute tolerance for the adaptive integrator.
@@ -160,18 +167,19 @@ Parameters:
 []
 
 [AtmosphericChemistry]
-  mode = box
-  mechanism_file = 'mechanism.fac'
-  temperature = 298.15
-  air_density = 2.46e19
-  water_vapor = 2.46e17
-  press = 1013.25
-  mcm_photolysis_file = 'mcm_photolysis_rates_v3.3.1.dat'
-  latitude = 51.51
-  longitude = 0.13
-  day = 21
-  month = 6
-  year = 2010
+  [Box]
+    mechanism_file = 'mechanism.fac'
+    temperature = 298.15
+    air_density = 2.46e19
+    water_vapor = 2.46e17
+    press = 1013.25
+    mcm_photolysis_file = 'mcm_photolysis_rates_v3.3.1.dat'
+    latitude = 51.51
+    longitude = 0.13
+    day = 21
+    month = 6
+    year = 2010
+  []
 []
 
 [ICs]
@@ -198,10 +206,11 @@ Parameters:
 
 ```moose
 [AtmosphericChemistry]
-  mode = coupled
-  mechanism_file = 'mechanism.fac'
-  temperature = 298
-  include_transport = true
+  [Coupled]
+    mechanism_file = 'mechanism.fac'
+    temperature = 298
+    include_transport = true
+  []
 []
 ```
 

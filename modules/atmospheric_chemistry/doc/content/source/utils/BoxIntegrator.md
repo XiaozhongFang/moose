@@ -15,7 +15,7 @@ It has four concrete implementations:
   `MCMBoxModel::execute()` running PETSc TS (BDF/ARKIMEX).
 
 - **`KppBoxIntegrator`** — Loads a pre-compiled KPP shared library via `dlopen`/`dlsym`
-  and calls `kpp_integrate()` to run KPP's Rosenbrock/SDIRK/Runge-Kutta integrator.
+  and calls `kpp_integrate()` to run KPP's Rosenbrock integrator.
   Self-driven mode. The `.so` is built from a `.kpp` mechanism file using
   `kpp/build/Makefile`. Available only when compiled with `KPP_ENABLED=1`.
 

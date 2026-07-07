@@ -19,8 +19,14 @@ KppBoxIntegrator::KppBoxIntegrator(MooseApp & app,
     _kpp_init(nullptr),
     _kpp_integrate(nullptr),
     _kpp_set_conc(nullptr),
-    _kpp_get_conc(nullptr)
+    _kpp_get_conc(nullptr),
+    _kpp_get_nvar(nullptr),
+    _kpp_get_species_name(nullptr)
 {
+  if (_solver_type != "kpp_rosenbrock" && _solver_type != "rosenbrock")
+    mooseError("KppBoxIntegrator currently supports chem_solver=kpp_rosenbrock only; got ",
+               _solver_type);
+
   // Derive .so path: KPP_LIB env var takes precedence, then auto-discover
   std::string lib_name;
   const char * kpp_lib_env = std::getenv("KPP_LIB");
@@ -57,8 +63,12 @@ KppBoxIntegrator::KppBoxIntegrator(MooseApp & app,
   _kpp_integrate = reinterpret_cast<IntegrateFn>(dlsym(_lib_handle, "kpp_integrate"));
   _kpp_get_conc  = reinterpret_cast<GetConcFn>(dlsym(_lib_handle, "kpp_get_conc"));
   _kpp_set_conc  = reinterpret_cast<SetConcFn>(dlsym(_lib_handle, "kpp_set_conc"));
+  _kpp_get_nvar  = reinterpret_cast<GetIntFn>(dlsym(_lib_handle, "kpp_get_nvar"));
+  _kpp_get_species_name =
+      reinterpret_cast<NameFn>(dlsym(_lib_handle, "kpp_get_species_name"));
 
-  if (!_kpp_init || !_kpp_integrate || !_kpp_get_conc || !_kpp_set_conc)
+  if (!_kpp_init || !_kpp_integrate || !_kpp_get_conc || !_kpp_set_conc ||
+      !_kpp_get_nvar || !_kpp_get_species_name)
   {
     std::string msg = "KppBoxIntegrator: failed to resolve KPP symbols from ";
     msg += lib_name;
@@ -70,9 +80,20 @@ KppBoxIntegrator::KppBoxIntegrator(MooseApp & app,
   // Initialize KPP global state
   _kpp_init();
 
+  const int nvar = _kpp_get_nvar();
+  _species_names.reserve(nvar);
+  for (const auto i : make_range(nvar))
+  {
+    const char * name = _kpp_get_species_name(i);
+    if (!name || !name[0])
+      mooseError("KppBoxIntegrator: missing KPP species name for index ", i);
+    _species_names.emplace_back(name);
+  }
+
   _console << "KppBoxIntegrator: loaded " << lib_name
            << " (rtol=" << _rtol << ", atol=" << _atol
-           << ", solver=" << _solver_type << ")" << std::endl;
+           << ", solver=" << _solver_type
+           << ", nvar=" << _species_names.size() << ")" << std::endl;
 }
 
 KppBoxIntegrator::~KppBoxIntegrator()

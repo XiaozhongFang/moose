@@ -46,6 +46,8 @@ public:
   /// Advance the chemistry from t0 to t1 using KPP INTEGRATE().
   void solve(Real t0, Real t1, std::vector<Real> & C) const;
 
+  const std::vector<std::string> & speciesNames() const { return _species_names; }
+
 private:
   const Real _rtol;
   const Real _atol;
@@ -58,9 +60,14 @@ private:
   using IntegrateFn = int (*)(double *, double, double, double, double);
   using SetConcFn   = void (*)(double *, int);
   using GetConcFn   = void (*)(double *, int);
+  using GetIntFn    = int (*)(void);
+  using NameFn      = const char * (*)(int);
 
   InitFn      _kpp_init;
   IntegrateFn _kpp_integrate;
   SetConcFn   _kpp_set_conc;
   GetConcFn   _kpp_get_conc;
+  GetIntFn    _kpp_get_nvar;
+  NameFn      _kpp_get_species_name;
+  std::vector<std::string> _species_names;
 };

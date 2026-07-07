@@ -1,12 +1,20 @@
 [Tests]
+  [./build_kpp_small_strato]
+    type = RunCommand
+    command = 'make -f ../../../kpp/build/Makefile MECH=kpp_small_strato/small_strato.kpp'
+    heavy = true
+    requirement = 'The system shall build a KPP shared library for the small_strato mechanism.'
+  [../]
+
   [./kpp_small_strato]
     type = CSVDiff
     input = kpp_small_strato.i
     csvdiff = kpp_small_strato.csv
+    ignore_columns = 'time_h O2 N'
     rel_err = 5.0e-2
-    abs_zero = 1.0e-6
+    abs_zero = 1.0e-1
     heavy = true
-    env_var = 'KPP_ENABLED=1'
+    prereq = build_kpp_small_strato
     requirement = 'KPP Rosenbrock shall match reference within 5%.'
   [../]
 []

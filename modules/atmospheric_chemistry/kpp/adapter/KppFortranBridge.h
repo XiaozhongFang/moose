@@ -27,6 +27,12 @@ void kpp_init(void);
 int kpp_integrate(double Y[], double t0, double t1,
                    double rtol, double atol);
 
+/// Number of KPP variable species.
+int kpp_get_nvar(void);
+
+/// KPP species name at a zero-based C[]/VAR[] index.
+const char * kpp_get_species_name(int i);
+
 /// Copy external concentrations into KPP global C[] array.
 /// @param c   Concentration vector (length n)
 /// @param n   Number of species

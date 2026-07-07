@@ -31,7 +31,7 @@ ifneq ($(wildcard $(SUNDIALS_DIR)/include/cvode/cvode.h),)
   ADDITIONAL_CPPFLAGS  += -DHAVE_SUNDIALS
 endif
 
-# KPP support (optional, requires --enable-kpp at configure time)
+# KPP shared-library backend support.
 ADDITIONAL_CPPFLAGS += -I$(APPLICATION_DIR)/kpp/adapter -I$(APPLICATION_DIR)/kpp/runtime
 ADDITIONAL_CPPFLAGS += -DKPP_ENABLED
 
