@@ -11,8 +11,7 @@
 []
 
 [AtmosphericChemistry]
-  [Coupled]
-    mode = box
+  [Box]
     mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/tutorial_5sp.fac'
     temperature = 298
   []

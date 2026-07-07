@@ -7,20 +7,21 @@
   []
 []
 [AtmosphericChemistry]
-  mode = box
-  mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac'
-  temperature = 298.0
-  air_density = 2.46e19
-  water_vapor = 3.12e17
-  press = 1013.0
-  photolysis_scheme = BOTTOMUP
-  lamp_flux_file = 'ExampleLightFlux.txt'
-  bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
-  jfac = 1.0
-  chem_solver = petsc_ts
-  chem_solver_type = radau5
-  chem_solver_rtol = 1e-1
-  chem_solver_atol = 1e-4
+  [Box]
+    mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac'
+    temperature = 298.0
+    air_density = 2.46e19
+    water_vapor = 3.12e17
+    press = 1013.0
+    photolysis_scheme = BOTTOMUP
+    lamp_flux_file = 'ExampleLightFlux.txt'
+    bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
+    jfac = 1.0
+    chem_solver = petsc_ts
+    chem_solver_type = radau5
+    chem_solver_rtol = 1e-1
+    chem_solver_atol = 1e-4
+  []
 []
 [ICs]
   [C5H8_ic] type = ScalarConstantIC variable = C5H8 value = 2.47e11 []
