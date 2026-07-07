@@ -10,7 +10,8 @@
   []
 []
 
-[AtmosphericChemistryBox]
+[AtmosphericChemistry]
+  [Box]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
   mcm_photolysis_file = '../../../doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat'
   temperature = 298.15
@@ -24,6 +25,7 @@
   family_names = 'NOx'
   family_members = 'NO2 NO'
   family_scaling = '1.0 1.0'
+  []
 []
 
 [ICs]

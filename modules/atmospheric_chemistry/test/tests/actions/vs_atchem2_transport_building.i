@@ -123,7 +123,8 @@
   []
 []
 
-[AtmosphericChemistryCoupled]
+[AtmosphericChemistry]
+  [Coupled]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
   temperature = 288.15
   air_density = 2.55e19
@@ -136,6 +137,7 @@
   day = 21
   month = 6
   year = 2010
+  []
 []
 
 [ICs]

@@ -43,9 +43,8 @@ AtmosphericChemistryApp::registerAll(Factory & f, ActionFactory & af, Syntax & s
   Registry::registerObjectsTo(f, {"AtmosphericChemistryApp"});
   Registry::registerActionsTo(af, {"AtmosphericChemistryApp"});
 
-  registerSyntax("AtmosphericChemistryAction", "AtmosphericChemistry");
-  registerSyntax("AtmosphericChemistryBoxAction", "AtmosphericChemistryBox");
-  registerSyntax("AtmosphericChemistryCoupledAction", "AtmosphericChemistryCoupled");
+  registerSyntax("AtmosphericChemistryBoxAction", "AtmosphericChemistry/Box");
+  registerSyntax("AtmosphericChemistryCoupledAction", "AtmosphericChemistry/Coupled");
 }
 
 void

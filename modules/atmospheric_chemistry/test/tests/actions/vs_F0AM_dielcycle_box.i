@@ -14,7 +14,8 @@
   []
 []
 
-[AtmosphericChemistryBox]
+[AtmosphericChemistry]
+  [Box]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_DielExampleChemistry.fac'
   temperature = 296.914
   air_density = 2.44594e19
@@ -29,6 +30,7 @@
   year = 2013
   jfac = 0.5
   dilute = 1.1574074074074073e-5
+  []
 []
 
 [ICs]

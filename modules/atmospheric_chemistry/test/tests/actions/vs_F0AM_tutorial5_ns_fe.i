@@ -59,9 +59,11 @@
   [const]  type = GenericConstantMaterial  prop_names = 'rho mu'  prop_values = '1 1'  []
 []
 
-[AtmosphericChemistryCoupled]
+[AtmosphericChemistry]
+  [Coupled]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/tutorial_5sp.fac'
   temperature = 298
+  []
 []
 
 [ICs]

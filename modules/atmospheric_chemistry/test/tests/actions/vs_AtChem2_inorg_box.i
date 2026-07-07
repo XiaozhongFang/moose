@@ -12,7 +12,8 @@
   []
 []
 
-[AtmosphericChemistryBox]
+[AtmosphericChemistry]
+  [Box]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
   temperature = 288.15
   air_density = 2.55e19
@@ -24,6 +25,7 @@
   month = 6
   year = 2010
   press = 1013.25
+  []
 []
 
 [ICs]

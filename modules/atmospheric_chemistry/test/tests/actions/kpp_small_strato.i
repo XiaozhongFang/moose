@@ -18,12 +18,14 @@
   []
 []
 
-[AtmosphericChemistryBox]
+[AtmosphericChemistry]
+  [Box]
   mechanism_file = 'kpp_small_strato/small_strato.kpp'
   temperature = 298.0
   air_density = 2.5e19
   press = 1013.0
   chem_solver = kpp_rosenbrock
+  []
 []
 
 [ICs]

@@ -14,7 +14,8 @@
   []
 []
 
-[AtmosphericChemistryBox]
+[AtmosphericChemistry]
+  [Box]
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac'
   temperature = 298.0
   air_density = 2.46e19
@@ -28,6 +29,7 @@
   chem_solver_type = bdf
   chem_solver_rtol = 1e-2
   chem_solver_atol = 1e-6
+  []
 []
 
 [ICs]
