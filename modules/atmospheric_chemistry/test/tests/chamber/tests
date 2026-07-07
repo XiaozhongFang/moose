@@ -2,7 +2,7 @@
   [./vs_F0AM_chamber_S1_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S1_box.i
-    csvdiff = gold_vs_F0AM_chamber_S1_box.csv
+    csvdiff = vs_F0AM_chamber_S1_box.gold.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'
@@ -12,7 +12,7 @@
   [./vs_F0AM_chamber_S2_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S2_box.i
-    csvdiff = gold_vs_F0AM_chamber_S2_box.csv
+    csvdiff = vs_F0AM_chamber_S2_box.gold.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'
@@ -28,7 +28,7 @@
   [./vs_F0AM_chamber_S3_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S3_box.i
-    csvdiff = gold_vs_F0AM_chamber_S3_box.csv
+    csvdiff = vs_F0AM_chamber_S3_box.gold.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'ONE RO2 CH3ONO'
@@ -38,7 +38,7 @@
   [./vs_F0AM_dielcycle_box]
     type = CSVDiff
     input = vs_F0AM_dielcycle_box.i
-    csvdiff = gold_dielcycle.csv
+    csvdiff = ../actions/gold/vs_F0AM_dielcycle_box.csv
     heavy = true
     requirement = '24h diurnal cycle shall reproduce reference.'
   [../]
@@ -57,7 +57,7 @@
   [./vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-2]
     type = CSVDiff
     input = vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-2.i
-    csvdiff = gold_ts_bdf_rtol1e-2.csv
+    csvdiff = ../actions/gold/vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-2.csv
     heavy = true
     requirement = 'S1 TS bdf rtol=1e-2 shall match reference.'
   [../]

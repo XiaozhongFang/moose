@@ -2,14 +2,14 @@
   [./vs_F0AM_tutorial5_box]
     type = CSVDiff
     input = vs_F0AM_tutorial5_box.i
-    csvdiff = gold_vs_F0AM_tutorial5_box.csv
+    csvdiff = vs_F0AM_tutorial5_box.gold.csv
     rel_err = 3.0e-3
     requirement = 'Species B shall match analytical solution within 0.3%.'
   [../]
   [./vs_AtChem2_inorg_box]
     type = CSVDiff
     input = vs_AtChem2_inorg_box.i
-    csvdiff = gold_vs_AtChem2_inorg_box.csv
+    csvdiff = vs_AtChem2_inorg_box.gold.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
     ignore_columns = 'RO2 NA O O1D J1 J2 J3 J4 J5 J6 J7 J8 J11 J12 J13 J14 J15 J16 J17 J18 J19 J20 J21 J22 J23 J24 J31 J32 J33 J34 J35 J41 J51 J52 J53 J54 J55 J56 J61 RO2_sum CH3NO3 CH3O CH3O2 CH3O2NO2 CH3OH CH3OOH H2 H2O2 HCHO HNO3 HO2 HO2NO2 HONO N2O5 NO3'
