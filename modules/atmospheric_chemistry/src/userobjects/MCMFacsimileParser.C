@@ -212,18 +212,17 @@ MCMFacsimileParser::parse(const std::string & filename, const std::string & phot
     std::cout << "MCMFacsimileParser: Detected " << n_lr
               << " limiting-reagent (RO2 termination) reactions" << std::endl;
 
-  // Transfer photolysis data — only for J values actually referenced in
-  // the mechanism (not all 35 from the photolysis-rates file).  This
-  // prevents MCMRatesMaterial from receiving excess CL/CMM/CNN entries
-  // that don't correspond to any J variable in the mechanism expressions.
-  for (auto & jkey : _photolysis_rates)
+  // Transfer ALL photolysis data from the photolysis-rates file, not just
+  // the J values referenced in reaction expressions.  The getJValue() fallback
+  // in MCMBoxModel/MCMRuntimeMechanism uses these to compute J on-the-fly
+  // from the MCM SZA formula for AtChem2-compatible output.
+  // Iterate over the parser's internal _j_CL map (loaded from file, has ALL entries).
+  for (auto & [jkey, cl_val] : _j_CL)
   {
-    auto cl_it = _j_CL.find(jkey);
-    if (cl_it == _j_CL.end()) continue;
     unsigned int jn;
     pcrecpp::RE("J<([0-9]+)>").FullMatch(jkey, &jn);
     mech.j_numbers.push_back(jn);
-    mech.j_CL.push_back(cl_it->second);
+    mech.j_CL.push_back(cl_val);
     mech.j_CMM.push_back(_j_CMM[jkey]);
     mech.j_CNN.push_back(_j_CNN[jkey]);
   }
