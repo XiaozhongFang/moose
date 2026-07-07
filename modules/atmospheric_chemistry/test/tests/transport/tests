@@ -1,0 +1,8 @@
+[Tests]
+  [./vs_atchem2_transport_building]
+    type = RunApp
+    input = vs_atchem2_transport_building.i
+    heavy = true
+    requirement = 'Coupled mode with INS flow and chemistry shall converge.'
+  [../]
+[]
