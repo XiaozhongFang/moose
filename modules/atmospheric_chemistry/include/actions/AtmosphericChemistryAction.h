@@ -15,7 +15,6 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <set>
 
 /**
  * Unified Action for atmospheric chemistry simulations.
@@ -31,8 +30,7 @@
  *   mode = coupled (FEM transport + chemistry)
  *     Creates MooseVariableFE (family=LAGRANGE) for each species,
  *     MCMRatesMaterial for rate evaluation, TimeDerivative +
- *     ChemicalSourceKernel for each species, and optional Diffusion
- *     kernels via include_transport.
+ *     ChemicalSourceKernel for each species.
  *     Suitable for spatially-resolved simulations (5--50 species).
  *
  * Parses MCM Facsimile (.fac) mechanism files via MechanismLoader.
@@ -68,17 +66,12 @@ protected:
   std::vector<std::string> _species;
   std::vector<std::string> _ro2_species;
 
-  /// Parse KPP .spc files to extract species names (for mechanism_format=KPP)
-  std::vector<std::string> parseKPPSpecies(const std::string & kpp_file) const;
-
   /// Full mechanism data (from MechanismLoader), used by coupled mode tasks
   MechanismData _mech_data;
 
   /// Mode: "box" or "coupled"
   const MooseEnum _mode;
 
-  /// Include transport in coupled mode
-  const bool _include_transport;
   /// Chemical solver backend (derived from chem_solver + box_solver fallback)
   MooseEnum _chem_solver;
   /// PETSc TS standalone integrator for box mode (derived from _chem_solver)

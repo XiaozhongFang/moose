@@ -125,7 +125,6 @@
 
 [AtmosphericChemistry]
   mode = coupled
-  include_transport = true
   mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/atchem2_example.fac'
   temperature = 288.15
   air_density = 2.55e19

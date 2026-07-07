@@ -319,6 +319,8 @@ protected:
   bool _use_sundials = false;
   /// True when chem_solver=kpp_* triggers KPP integration path in execute()
   bool _use_kpp = false;
+  /// True when chem_solver=petsc_ts uses PETSc TS as self-driven integrator
+  bool _use_petsc_ts = false;
 
 public:
   // SUNDIALS direct integration entry point.  Called from execute() when

@@ -1,7 +1,7 @@
 # kpp/build/Makefile — Build KPP shared libraries for box-mode chemistry
 # Usage: make -f kpp/build/Makefile MECH=path/to/mechanism.kpp
 SHELL := /bin/bash
-KPP_BIN ?= $(shell command -v kpp 2>/dev/null || echo /home/fangxiaozhong/git_repo/KPP/bin/kpp)
+KPP_BIN ?= $(shell command -v kpp 2>/dev/null || echo "kpp")
 
 MECH_NAME := $(basename $(notdir $(MECH)))
 MECH_DIR := $(dir $(realpath $(MECH)))
@@ -38,6 +38,12 @@ $(LIB): $(ADAPTER_SRC) $(realpath $(MECH))
 	gcc -shared -o $(LIB) $(OUT_DIR)/$(MECH_NAME)_*.o $(OUT_DIR)/kpp_adapter.o -lm
 	@echo "=== Done: $(LIB) ==="
 	@ls -lh $(LIB)
+	@echo "  META $(OUT_DIR)/kpp_$(MECH_NAME).json"
+	@NSPEC=$$(grep -m1 '^#define NSPEC ' $(OUT_DIR)/$(MECH_NAME)_Parameters.h 2>/dev/null | awk '{print $$3}'); \
+	NVAR=$$(grep -m1 '^#define NVAR ' $(OUT_DIR)/$(MECH_NAME)_Parameters.h 2>/dev/null | awk '{print $$3}'); \
+	NREACT=$$(grep -m1 '^#define NREACT ' $(OUT_DIR)/$(MECH_NAME)_Parameters.h 2>/dev/null | awk '{print $$3}'); \
+	echo "{\"mechanism\":\"$(MECH_NAME)\",\"n_species\":$${NSPEC:-0},\"n_reactions\":$${NREACT:-0},\"n_var\":$${NVAR:-0}}" \
+	  > $(OUT_DIR)/kpp_$(MECH_NAME).json
 
 clean:
 	rm -rf $(OUT_DIR)

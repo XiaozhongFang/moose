@@ -159,9 +159,10 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
   _use_kpp = (_chem_solver == "kpp_rosenbrock" ||
               _chem_solver == "kpp_sdirk" ||
               _chem_solver == "kpp_runge_kutta");
+  _use_petsc_ts = (_chem_solver == "petsc_ts");
 
-  // Both KPP and SUNDIALS are self-driven modes
-  if (_use_sundials || _use_kpp)
+  // All non-moose_implicit solvers are self-driven modes
+  if (_use_sundials || _use_kpp || _use_petsc_ts)
     _use_box_solver = true;
 
   // KPP solvers need mechanism_format=KPP (enforced by Action, double-check here)

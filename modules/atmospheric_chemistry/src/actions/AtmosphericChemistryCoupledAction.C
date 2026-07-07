@@ -1,0 +1,287 @@
+//* This file is part of the MOOSE framework
+//* https://mooseframework.inl.gov
+//*
+//* All rights reserved, see COPYRIGHT for full restrictions
+//* https://github.com/idaholab/moose/blob/master/COPYRIGHT
+//*
+//* Licensed under LGPL 2.1, please see LICENSE for details
+//* https://www.gnu.org/licenses/lgpl-2.1.html
+
+#include "AtmosphericChemistryCoupledAction.h"
+#include "ChemistryMechanismSpec.h"
+#include "AddVariableAction.h"
+#include "FEProblem.h"
+#include "MooseEnum.h"
+
+#include <algorithm>
+#include <unordered_map>
+
+registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryCoupledAction, "add_variable");
+registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryCoupledAction, "add_material");
+registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryCoupledAction, "add_kernel");
+
+InputParameters
+AtmosphericChemistryCoupledAction::validParams()
+{
+  InputParameters params = Action::validParams();
+
+  params.addRequiredParam<std::string>(
+      "mechanism_file", "Path to the MCM Facsimile-format mechanism file (.fac)");
+
+  params.addParam<Real>("temperature", 298.15, "Ambient temperature (K)");
+  params.addParam<Real>("air_density", 2.46e19, "Air number density (molecules/cm^3)");
+  params.addParam<Real>("water_vapor", 2.46e17,
+      "Background water vapor concentration (molecules/cm^3)");
+  params.addParam<Real>("press", 0.0,
+      "Pressure (mbar). If >0, M computed dynamically via ideal gas law.");
+  params.addParam<std::string>(
+      "mcm_photolysis_file",
+      "doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat",
+      "Path to the MCM photolysis-rates parameter file for SZA-based J calculation.");
+
+  MooseEnum mcm_version("v3.1 v3.2 v3.3.1", "v3.3.1");
+  params.addParam<MooseEnum>("mcm_version", mcm_version,
+      "Version of the Master Chemical Mechanism (v3.1, v3.2, v3.3.1)");
+
+  params.addParam<Real>("latitude", 51.51, "Latitude in degrees (North positive)");
+  params.addParam<Real>("longitude", 0.13, "Longitude in degrees (East positive)");
+  params.addParam<unsigned int>("day", 21, "Day of month for solar zenith angle calculation");
+  params.addParam<unsigned int>("month", 6, "Month for solar zenith angle calculation");
+  params.addParam<unsigned int>("year", 2010, "Year for solar zenith angle calculation");
+  MooseEnum photo_scheme("MCM_SZA HYBRID BOTTOMUP", "MCM_SZA");
+  params.addParam<MooseEnum>("photolysis_scheme", photo_scheme,
+      "Photolysis scheme: MCM_SZA, HYBRID (4D TUV lookup), or BOTTOMUP");
+
+  params.addParam<std::string>("hybrid_table_dir", "",
+      "Directory containing F0AM Hybrid J-value table files");
+  params.addParam<std::string>("lamp_flux_file", "",
+      "Path to lamp/actinic flux file (required if photolysis_scheme=BOTTOMUP)");
+  params.addParam<std::string>("bottomup_data_dir",
+      "../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup",
+      "Directory containing BottomUp photolysis data files");
+  params.addParam<Real>("albedo", 0.1, "Surface albedo (0-1), used by HYBRID scheme");
+  params.addParam<Real>("o3column", 350.0, "O3 column in Dobson Units");
+  params.addParam<Real>("altitude", 0.0, "Altitude in meters, used by HYBRID scheme");
+
+  MooseEnum units_enum("molec_cm3 ppb", "molec_cm3");
+  params.addParam<MooseEnum>("units", units_enum,
+      "Concentration units for input/output: 'molec_cm3' (default) or 'ppb'.");
+
+  params.addParam<bool>("output_ro2_sum", false,
+      "Create a diagnostic variable 'RO2' = sum of peroxy radical concentrations.");
+  params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
+  params.addParam<bool>("roof_open", true, "Roof (chamber cover) open.");
+  params.addParam<bool>("use_limiting_reagent", false,
+      "Enable F0AM-style limiting-reagent formulation for RO2+RO2 termination.");
+
+  params.addClassDescription(
+      "Action for FEM transport + chemistry (coupled mode). Creates FE variables, "
+      "MCMRatesMaterial, and ChemicalSourceKernel for each species.");
+  return params;
+}
+
+AtmosphericChemistryCoupledAction::AtmosphericChemistryCoupledAction(const InputParameters & params)
+  : Action(params),
+    _ro2_diagnostic_enabled(false)
+{
+  std::string mech_file = getParam<std::string>("mechanism_file");
+  if (!mech_file.empty() && mech_file[0] == '/')
+    mooseError("AtmosphericChemistryCoupled: mechanism_file must be relative, got absolute: ", mech_file);
+
+  std::string mcm_ver = getParam<MooseEnum>("mcm_version");
+  std::string photo_path = getParam<std::string>("mcm_photolysis_file");
+  if (!photo_path.empty() && photo_path[0] == '/')
+    mooseError("AtmosphericChemistryCoupled: mcm_photolysis_file must be relative, got absolute: ", photo_path);
+  std::string peroxy_path =
+      "doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_" + mcm_ver + ".dat";
+
+  auto input_files = _app.getInputFileNames();
+  // Coupled mode always uses moose_implicit solver
+  ChemistryMechanismSpec spec(mech_file, "moose_implicit", mcm_ver,
+                               photo_path, peroxy_path, input_files);
+
+  _species = spec.species();
+  _ro2_species = spec.ro2Species();
+  _mech_data = spec.mechanismData();
+
+  // RO2 diagnostic
+  bool want_ro2 = getParam<bool>("output_ro2_sum");
+  bool has_ro2 = std::find(_species.begin(), _species.end(), "RO2") != _species.end();
+  _ro2_diagnostic_enabled = want_ro2 && !has_ro2;
+}
+
+void
+AtmosphericChemistryCoupledAction::act()
+{
+  const std::string & task = _current_task;
+
+  if (task == "add_variable")
+    actAddVariable();
+  else if (task == "add_material")
+    actAddMaterial();
+  else if (task == "add_kernel")
+    actAddKernel();
+}
+
+void
+AtmosphericChemistryCoupledAction::actAddVariable()
+{
+  // Create FE (LAGRANGE) variables for all species
+  auto type = AddVariableAction::variableType(FEType(0, LAGRANGE));
+  auto var_params = _factory.getValidParams(type);
+  for (const auto & sp : _species)
+    _problem->addVariable(type, sp, var_params);
+
+  // RO2 AuxVariable (constant monomial)
+  if (_ro2_diagnostic_enabled)
+  {
+    auto aux_params = _factory.getValidParams("MooseVariable");
+    aux_params.set<MooseEnum>("family") = MooseEnum("LAGRANGE MONOMIAL", "MONOMIAL");
+    aux_params.set<MooseEnum>("order") = MooseEnum("FIRST SECOND THIRD FOURTH CONSTANT", "CONSTANT");
+    _problem->addAuxVariable("MooseVariable", "RO2", aux_params);
+  }
+
+  _console << "AtmosphericChemistryCoupled: Created " << _species.size()
+           << " FE variable(s)" << std::endl;
+}
+
+std::vector<std::vector<Real>>
+AtmosphericChemistryCoupledAction::buildReactantMatrix() const
+{
+  std::map<std::string, unsigned int> sp_idx;
+  for (unsigned int i = 0; i < _species.size(); ++i)
+    sp_idx[_species[i]] = i;
+
+  std::vector<std::vector<Real>> mat(_mech_data.reactions.size());
+  for (unsigned int r = 0; r < _mech_data.reactions.size(); ++r)
+  {
+    for (auto & [coeff, name] : _mech_data.reactions[r].reactants)
+    {
+      auto it = sp_idx.find(name);
+      if (it != sp_idx.end())
+        mat[r].push_back(static_cast<Real>(it->second));
+    }
+  }
+  return mat;
+}
+
+void
+AtmosphericChemistryCoupledAction::actAddMaterial()
+{
+  auto params = _factory.getValidParams("MCMRatesMaterial");
+  params.set<Real>("temperature") = getParam<Real>("temperature");
+  params.set<Real>("air_density") = getParam<Real>("air_density");
+  params.set<Real>("water_vapor") = getParam<Real>("water_vapor");
+  params.set<std::vector<std::string>>("species_list") = _species;
+  params.set<std::vector<VariableName>>("species_variables") =
+      std::vector<VariableName>(_species.begin(), _species.end());
+  params.set<std::vector<std::string>>("reaction_rate_expressions") =
+      _mech_data.reaction_rate_expressions;
+  params.set<std::vector<std::vector<Real>>>("reactant_matrix") = buildReactantMatrix();
+
+  std::vector<std::string> coeff_names, coeff_exprs;
+  for (auto & name : _mech_data.eval_order)
+  {
+    coeff_names.push_back(name);
+    coeff_exprs.push_back(_mech_data.converted_coefficients.at(name));
+  }
+  params.set<std::vector<std::string>>("coefficient_names") = coeff_names;
+  params.set<std::vector<std::string>>("coefficient_expressions") = coeff_exprs;
+
+  // J-value parameters
+  std::vector<unsigned int> j_numbers_all;
+  std::vector<Real> j_cl_vals, j_cmm_vals, j_cnn_vals;
+  {
+    auto scheme = getParam<MooseEnum>("photolysis_scheme");
+    if (scheme != "BOTTOMUP")
+    {
+      j_numbers_all = _mech_data.j_numbers_all;
+      j_cl_vals = _mech_data.j_cl_values;
+      j_cmm_vals = _mech_data.j_cmm_values;
+      j_cnn_vals = _mech_data.j_cnn_values;
+    }
+  }
+  params.set<std::vector<unsigned int>>("j_numbers") = j_numbers_all;
+  params.set<std::vector<Real>>("j_cl_values") = j_cl_vals;
+  params.set<std::vector<Real>>("j_cmm_values") = j_cmm_vals;
+  params.set<std::vector<Real>>("j_cnn_values") = j_cnn_vals;
+
+  if (!_ro2_species.empty())
+    params.set<std::vector<std::string>>("ro2_species") = _ro2_species;
+
+  params.set<Real>("latitude") = getParam<Real>("latitude");
+  params.set<Real>("longitude") = getParam<Real>("longitude");
+  params.set<unsigned int>("day") = getParam<unsigned int>("day");
+  params.set<unsigned int>("month") = getParam<unsigned int>("month");
+  params.set<unsigned int>("year") = getParam<unsigned int>("year");
+  params.set<Real>("jfac") = getParam<Real>("jfac");
+  params.set<MooseEnum>("units") = getParam<MooseEnum>("units");
+  params.set<bool>("roof_open") = getParam<bool>("roof_open");
+  params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
+  params.set<std::string>("hybrid_table_dir") = getParam<std::string>("hybrid_table_dir");
+  params.set<std::string>("lamp_flux_file") = getParam<std::string>("lamp_flux_file");
+  params.set<std::string>("bottomup_data_dir") = getParam<std::string>("bottomup_data_dir");
+
+  _problem->addMaterial("MCMRatesMaterial", "mcm_rates_material", params);
+  _console << "AtmosphericChemistryCoupled: Created MCMRatesMaterial with "
+           << _mech_data.reactions.size() << " reactions" << std::endl;
+}
+
+void
+AtmosphericChemistryCoupledAction::actAddKernel()
+{
+  // Build species index mapping
+  std::unordered_map<std::string, unsigned int> species_name_to_idx;
+  species_name_to_idx.reserve(_species.size());
+  for (unsigned int i = 0; i < _species.size(); ++i)
+    species_name_to_idx[_species[i]] = i;
+
+  // Build species_reactants matrix
+  std::vector<std::vector<Real>> species_reactants(_species.size());
+  for (unsigned int r = 0; r < _mech_data.reactions.size(); ++r)
+    for (auto & [coeff, name] : _mech_data.reactions[r].reactants)
+    {
+      auto it = species_name_to_idx.find(name);
+      if (it != species_name_to_idx.end())
+      {
+        unsigned int sidx = it->second;
+        species_reactants[sidx].push_back(static_cast<Real>(r));
+        species_reactants[sidx].push_back(coeff);
+      }
+    }
+
+  // Unit conversion
+  auto u = getParam<MooseEnum>("units");
+  Real M = getParam<Real>("air_density");
+  Real unit_conversion = (u == "ppb") ? M / 1.0e9 : 1.0;
+  std::vector<VariableName> all_species(_species.begin(), _species.end());
+
+  for (unsigned int j = 0; j < _species.size(); ++j)
+  {
+    auto td_params = _factory.getValidParams("TimeDerivative");
+    td_params.set<NonlinearVariableName>("variable") = _species[j];
+    _problem->addKernel("TimeDerivative", "td_" + _species[j], td_params);
+
+    auto src_params = _factory.getValidParams("ChemicalSourceKernel");
+    src_params.set<NonlinearVariableName>("variable") = _species[j];
+    src_params.set<std::vector<Real>>("stoichiometric_row") = _mech_data.stoichiometric_matrix[j];
+    src_params.set<std::vector<VariableName>>("all_species") = all_species;
+    src_params.set<std::vector<std::vector<Real>>>("species_reactants") = species_reactants;
+    src_params.set<Real>("unit_conversion") = unit_conversion;
+    _problem->addKernel("ChemicalSourceKernel", "src_" + _species[j], src_params);
+  }
+
+  _console << "AtmosphericChemistryCoupled: Created TimeDerivative + ChemicalSourceKernel for "
+           << _species.size() << " species" << std::endl;
+
+  // RO2 AuxKernel
+  if (_ro2_diagnostic_enabled && !_ro2_species.empty())
+  {
+    std::vector<VariableName> ro2_coupled(_ro2_species.begin(), _ro2_species.end());
+    auto ro2_params = _factory.getValidParams("MCMRO2Aux");
+    ro2_params.set<AuxVariableName>("variable") = "RO2";
+    ro2_params.set<std::vector<VariableName>>("ro2_species") = ro2_coupled;
+    _problem->addAuxKernel("MCMRO2Aux", "ro2_aux", ro2_params);
+    _console << "  Added RO2 AuxKernel (" << ro2_coupled.size() << " RO2 species)" << std::endl;
+  }
+}

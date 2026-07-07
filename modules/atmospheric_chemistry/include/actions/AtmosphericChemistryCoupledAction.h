@@ -1,0 +1,58 @@
+//* This file is part of the MOOSE framework
+//* https://mooseframework.inl.gov
+//*
+//* All rights reserved, see COPYRIGHT for full restrictions
+//* https://github.com/idaholab/moose/blob/master/COPYRIGHT
+//*
+//* Licensed under LGPL 2.1, please see LICENSE for details
+//* https://www.gnu.org/licenses/lgpl-2.1.html
+
+#pragma once
+
+#include "Action.h"
+#include "MechanismLoader.h"
+
+#include <string>
+#include <vector>
+#include <map>
+
+/**
+ * Action for FEM transport + chemistry (coupled mode) atmospheric chemistry.
+ *
+ * Creates MooseVariableFE (family=LAGRANGE) for each species,
+ * MCMRatesMaterial for rate evaluation, and TimeDerivative +
+ * ChemicalSourceKernel for each species.
+ *
+ * Suitable for spatially-resolved simulations (5--50 species).
+ *
+ * Replaces [AtmosphericChemistry] mode=coupled.
+ */
+class AtmosphericChemistryCoupledAction : public Action
+{
+public:
+  static InputParameters validParams();
+
+  AtmosphericChemistryCoupledAction(const InputParameters & params);
+
+  virtual void act() override;
+
+protected:
+  /// Build the reactant index matrix for the Material
+  std::vector<std::vector<Real>> buildReactantMatrix() const;
+
+  /// Create FE variables for each chemical species
+  void actAddVariable();
+  /// Create MCMRatesMaterial
+  void actAddMaterial();
+  /// Create TimeDerivative + ChemicalSourceKernel for each species
+  void actAddKernel();
+
+  /// Parsed species names in mechanism order
+  std::vector<std::string> _species;
+  /// RO2 peroxy-radical species
+  std::vector<std::string> _ro2_species;
+  /// Full mechanism data (from MechanismLoader)
+  MechanismData _mech_data;
+  /// Whether RO2 diagnostic variable should be created
+  bool _ro2_diagnostic_enabled;
+};
