@@ -9,11 +9,13 @@
 
 #include "AtmosphericChemistryCoupledAction.h"
 #include "ChemistryMechanismSpec.h"
+#include "KPPGeneratedMechanism.h"
 #include "AddVariableAction.h"
 #include "FEProblem.h"
 #include "MooseEnum.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <unordered_map>
 
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryCoupledAction, "add_variable");
@@ -26,7 +28,7 @@ AtmosphericChemistryCoupledAction::validParams()
   InputParameters params = Action::validParams();
 
   params.addRequiredParam<std::string>(
-      "mechanism_file", "Path to the MCM Facsimile-format mechanism file (.fac)");
+      "mechanism_file", "Path to the mechanism file (.fac for MCM, .kpp for KPP)");
 
   params.addParam<Real>("temperature", 298.15, "Ambient temperature (K)");
   params.addParam<Real>("air_density", 2.46e19, "Air number density (molecules/cm^3)");
@@ -67,6 +69,13 @@ AtmosphericChemistryCoupledAction::validParams()
   params.addParam<MooseEnum>("units", units_enum,
       "Concentration units for input/output: 'molec_cm3' (default) or 'ppb'.");
 
+  MooseEnum solver_enum("moose_implicit kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
+                        "moose_implicit");
+  params.addParam<MooseEnum>(
+      "chem_solver", solver_enum,
+      "Chemical mechanism backend. Use moose_implicit for MCM .fac files; KPP values "
+      "select a generated KPP shared library for .kpp mechanisms.");
+
   params.addParam<bool>("output_ro2_sum", false,
       "Create a diagnostic variable 'RO2' = sum of peroxy radical concentrations.");
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
@@ -76,12 +85,14 @@ AtmosphericChemistryCoupledAction::validParams()
 
   params.addClassDescription(
       "Action for FEM transport + chemistry (coupled mode). Creates FE variables, "
-      "MCMRatesMaterial, and ChemicalSourceKernel for each species.");
+      "chemistry material properties, and source kernels for each species.");
   return params;
 }
 
 AtmosphericChemistryCoupledAction::AtmosphericChemistryCoupledAction(const InputParameters & params)
   : Action(params),
+    _chem_solver(getParam<MooseEnum>("chem_solver")),
+    _use_kpp(false),
     _ro2_diagnostic_enabled(false)
 {
   std::string mech_file = getParam<std::string>("mechanism_file");
@@ -95,19 +106,38 @@ AtmosphericChemistryCoupledAction::AtmosphericChemistryCoupledAction(const Input
   std::string peroxy_path =
       "doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_" + mcm_ver + ".dat";
 
-  auto input_files = _app.getInputFileNames();
-  // Coupled mode always uses moose_implicit solver
-  ChemistryMechanismSpec spec(mech_file, "moose_implicit", mcm_ver,
-                               photo_path, peroxy_path, input_files);
+  _use_kpp = (_chem_solver == "kpp_rosenbrock" || _chem_solver == "kpp_sdirk" ||
+              _chem_solver == "kpp_runge_kutta");
+  if (!_use_kpp && mech_file.size() > 4 &&
+      mech_file.substr(mech_file.size() - 4) == ".kpp")
+    _use_kpp = true;
 
-  _species = spec.species();
-  _ro2_species = spec.ro2Species();
-  _mech_data = spec.mechanismData();
+  if (_use_kpp)
+  {
+    KPPGeneratedMechanism mechanism(kppLibraryPath(mech_file));
+    _species = mechanism.speciesNames();
+    _ro2_species.clear();
+  }
+  else
+  {
+    auto input_files = _app.getInputFileNames();
+    ChemistryMechanismSpec spec(mech_file, _chem_solver, mcm_ver,
+                                 photo_path, peroxy_path, input_files);
+    _species = spec.species();
+    _ro2_species = spec.ro2Species();
+    _mech_data = spec.mechanismData();
+  }
 
   // RO2 diagnostic
   bool want_ro2 = getParam<bool>("output_ro2_sum");
   bool has_ro2 = std::find(_species.begin(), _species.end(), "RO2") != _species.end();
   _ro2_diagnostic_enabled = want_ro2 && !has_ro2;
+  if (_use_kpp && _ro2_diagnostic_enabled)
+  {
+    mooseWarning("AtmosphericChemistryCoupled: output_ro2_sum is not available for KPP "
+                 "mechanisms because RO2 metadata is not exported by the KPP shared library.");
+    _ro2_diagnostic_enabled = false;
+  }
 }
 
 void
@@ -121,6 +151,26 @@ AtmosphericChemistryCoupledAction::act()
     actAddMaterial();
   else if (task == "add_kernel")
     actAddKernel();
+}
+
+std::string
+AtmosphericChemistryCoupledAction::kppLibraryPath(const std::string & mechanism_file) const
+{
+  const char * kpp_lib_env = std::getenv("KPP_LIB");
+  if (kpp_lib_env)
+    return kpp_lib_env;
+
+  if (mechanism_file.empty())
+    return "libkpp_generated.so";
+
+  auto slash = mechanism_file.find_last_of('/');
+  std::string dir = (slash != std::string::npos) ? mechanism_file.substr(0, slash + 1) : "";
+  std::string base = mechanism_file.substr(slash + 1);
+  auto dot = base.find_last_of('.');
+  if (dot != std::string::npos)
+    base = base.substr(0, dot);
+
+  return dir + "kpp_build_" + base + "/libkpp_" + base + ".so";
 }
 
 void
@@ -171,6 +221,26 @@ AtmosphericChemistryCoupledAction::buildReactantMatrix() const
 void
 AtmosphericChemistryCoupledAction::actAddMaterial()
 {
+  if (_use_kpp)
+  {
+    auto params = _factory.getValidParams("KPPMechanismMaterial");
+    params.set<std::string>("lib_path") = kppLibraryPath(getParam<std::string>("mechanism_file"));
+    params.set<std::vector<VariableName>>("species_variables") =
+        std::vector<VariableName>(_species.begin(), _species.end());
+    params.set<Real>("temperature") = getParam<Real>("temperature");
+    params.set<Real>("air_density") = getParam<Real>("air_density");
+    params.set<Real>("water_vapor") = getParam<Real>("water_vapor");
+    params.set<Real>("press") = getParam<Real>("press");
+    params.set<Real>("jfac") = getParam<Real>("jfac");
+    params.set<bool>("roof_open") = getParam<bool>("roof_open");
+    params.set<MooseEnum>("units") = getParam<MooseEnum>("units");
+
+    _problem->addMaterial("KPPMechanismMaterial", "kpp_mechanism_material", params);
+    _console << "AtmosphericChemistryCoupled: Created KPPMechanismMaterial with "
+             << _species.size() << " variable species" << std::endl;
+    return;
+  }
+
   auto params = _factory.getValidParams("MCMRatesMaterial");
   params.set<Real>("temperature") = getParam<Real>("temperature");
   params.set<Real>("air_density") = getParam<Real>("air_density");
@@ -233,6 +303,35 @@ AtmosphericChemistryCoupledAction::actAddMaterial()
 void
 AtmosphericChemistryCoupledAction::actAddKernel()
 {
+  if (_use_kpp)
+  {
+    auto u = getParam<MooseEnum>("units");
+    Real M = getParam<Real>("air_density");
+    const Real pressure = getParam<Real>("press");
+    if (pressure > 0.0)
+      M = (pressure * 100.0) / (1.380649e-23 * getParam<Real>("temperature")) * 1.0e-6;
+    const Real unit_conversion = (u == "ppb") ? M / 1.0e9 : 1.0;
+    std::vector<VariableName> all_species(_species.begin(), _species.end());
+
+    for (unsigned int j = 0; j < _species.size(); ++j)
+    {
+      auto td_params = _factory.getValidParams("TimeDerivative");
+      td_params.set<NonlinearVariableName>("variable") = _species[j];
+      _problem->addKernel("TimeDerivative", "td_" + _species[j], td_params);
+
+      auto src_params = _factory.getValidParams("KPPChemicalSourceKernel");
+      src_params.set<NonlinearVariableName>("variable") = _species[j];
+      src_params.set<unsigned int>("species_index") = j;
+      src_params.set<std::vector<VariableName>>("all_species") = all_species;
+      src_params.set<Real>("unit_conversion") = unit_conversion;
+      _problem->addKernel("KPPChemicalSourceKernel", "src_" + _species[j], src_params);
+    }
+
+    _console << "AtmosphericChemistryCoupled: Created TimeDerivative + KPPChemicalSourceKernel for "
+             << _species.size() << " species" << std::endl;
+    return;
+  }
+
   // Build species index mapping
   std::unordered_map<std::string, unsigned int> species_name_to_idx;
   species_name_to_idx.reserve(_species.size());

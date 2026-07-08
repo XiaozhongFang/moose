@@ -27,8 +27,7 @@
  * .so is compiled from KPP-generated .c files together with the
  * kpp_adapter.c bridge.
  *
- * Reuses KppBoxIntegrator for the self-driven integration path
- * (which calls KPP's Rosenbrock integrator via kpp_integrate).
+ * Reuses KppBoxIntegrator for the self-driven integration path.
  * This class is the IMechanism front-end for RHS/Jacobian evaluations
  * used by MOOSE's implicit time integration (PETSc TS).
  */
@@ -48,7 +47,7 @@ public:
 
   // ===== IMechanism interface =====
 
-  unsigned int nSpecies() const override { return _n_species; }
+  unsigned int nSpecies() const override { return _n_variable; }
   unsigned int nReactions() const override { return _n_reactions; }
   const std::vector<std::string> & speciesNames() const override { return _species_names; }
 
@@ -69,12 +68,29 @@ public:
 
   // ===== Accessors / configuration =====
 
-  void setRoofOpen(bool open) override { _roof_open = open; }
+  void setRoofOpen(bool open) override
+  {
+    _roof_open = open;
+    markDirty();
+  }
   bool isRoofOpen() const override { return _roof_open; }
-  void setJFac(Real jfac) override { _jfac = jfac; }
+  void setJFac(Real jfac) override
+  {
+    _jfac = jfac;
+    markDirty();
+  }
   void invalidatePhotolysisCache() override {}
-  void markDirty() const override {}
-  void setCurrentTime(Real t) const override { _t = t; }
+  void markDirty() const override
+  {
+    _rhs_valid = false;
+    _jacobian_valid = false;
+    _cached_params_valid = false;
+  }
+  void setCurrentTime(Real t) const override
+  {
+    _t = t;
+    markDirty();
+  }
 
   Real getJValue(unsigned int j_number) const override;
   unsigned int nJValues() const override { return _n_j_vals; }
@@ -118,15 +134,15 @@ private:
 
   // ===== Pointers to KPP global variables (resolved via dlsym) =====
 
-  double * _kpp_C;       // C[NSPEC] — concentration array
-  double * _kpp_VAR;     // VAR[NVAR] — variable species array
-  double * _kpp_FIX;     // FIX[] — fixed species
-  double * _kpp_RCONST;  // RCONST[] — rate constants
+  double * _kpp_C;       // C[NSPEC] concentration array
+  double ** _kpp_VAR_ptr;
+  double ** _kpp_FIX_ptr;
+  double * _kpp_RCONST;  // RCONST[] rate constants
 
   // ===== Sparse Jacobian structure (resolved via dlsym from KPP .so) =====
 
-  int * _lu_irow;   // LU_IROW[NNZ] — row indices (1-based)
-  int * _lu_icol;   // LU_ICOL[NNZ] — column indices (1-based)
+  int * _lu_irow;   // LU_IROW[NNZ] — row indices (0-based in generated C)
+  int * _lu_icol;   // LU_ICOL[NNZ] — column indices (0-based in generated C)
   int * _lu_crow;   // LU_CROW[NVAR+1] — compressed row pointers (NNZ = LU_CROW[NVAR])
 
   // ===== Mechanism metadata =====
@@ -136,6 +152,7 @@ private:
   unsigned int _n_reactions;
   unsigned int _jac_nnz;
   std::vector<std::string> _species_names;
+  std::vector<std::string> _all_species_names;
 
   // ===== Runtime state =====
 
@@ -143,4 +160,12 @@ private:
   Real _jfac;
   mutable Real _t;
   unsigned int _n_j_vals;
+  mutable std::vector<Real> _cached_C;
+  mutable std::vector<Real> _cached_rhs;
+  mutable std::vector<std::tuple<unsigned int, unsigned int, Real>> _cached_jacobian;
+  mutable PhysParams _cached_params;
+  mutable Real _cached_time;
+  mutable bool _rhs_valid;
+  mutable bool _jacobian_valid;
+  mutable bool _cached_params_valid;
 };

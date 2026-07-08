@@ -8,6 +8,12 @@ MECH_DIR := $(dir $(realpath $(MECH)))
 OUT_DIR ?= $(MECH_DIR)kpp_build_$(MECH_NAME)
 LIB := $(OUT_DIR)/libkpp_$(MECH_NAME).so
 ADAPTER_SRC := $(realpath $(dir $(lastword $(MAKEFILE_LIST)))/../adapter/kpp_adapter.c)
+KPP_INTEGRATOR ?= $(shell awk 'tolower($$1)=="#integrator"{print tolower($$2); exit}' $(MECH) 2>/dev/null)
+KPP_INTEGRATOR := $(if $(KPP_INTEGRATOR),$(KPP_INTEGRATOR),rosenbrock)
+KPP_ADAPTER_CPPFLAGS :=
+ifneq ($(KPP_INTEGRATOR),rosenbrock)
+  KPP_ADAPTER_CPPFLAGS += -DKPP_USE_GENERATED_INTEGRATE
+endif
 
 .PHONY: all clean
 all: $(LIB)
@@ -15,9 +21,19 @@ all: $(LIB)
 $(LIB): $(ADAPTER_SRC) $(realpath $(MECH))
 	@echo "=== KPP Build: $(MECH_NAME) ==="
 	rm -rf $(OUT_DIR) && mkdir -p $(OUT_DIR)
-	cp $(realpath $(MECH)) $(OUT_DIR)/
-	for incl in $$(grep '#INCLUDE' $(realpath $(MECH)) | awk '{print $$2}'); do \
-		[ -f "$(MECH_DIR)$$incl" ] && cp "$(MECH_DIR)$$incl" $(OUT_DIR)/; \
+	set -e; \
+	model=$$(awk 'tolower($$1)=="#model"{print $$2; exit}' $(realpath $(MECH))); \
+	files="$(realpath $(MECH))"; \
+	if [ -n "$$model" ]; then files="$$files $(MECH_DIR)$$model.spc $(MECH_DIR)$$model.eqn"; fi; \
+	for src in $$files; do \
+		[ -f "$$src" ] || continue; \
+		cp "$$src" $(OUT_DIR)/; \
+		src_dir=$$(dirname "$$src")/; \
+		for incl in $$(awk 'tolower($$1)=="#include"{print $$2}' "$$src"); do \
+			incl=$${incl%\"}; incl=$${incl#\"}; \
+			if [ -f "$$src_dir$$incl" ]; then cp "$$src_dir$$incl" $(OUT_DIR)/; \
+			elif [ -f "$(MECH_DIR)$$incl" ]; then cp "$(MECH_DIR)$$incl" $(OUT_DIR)/; fi; \
+		done; \
 	done
 	cd $(OUT_DIR) && $(KPP_BIN) $(MECH_NAME).kpp . 2>&1 | tail -1
 	for f in $(OUT_DIR)/._*; do \
@@ -35,7 +51,7 @@ $(LIB): $(ADAPTER_SRC) $(realpath $(MECH))
 		gcc -O2 -fPIC -I$(OUT_DIR) -c $$src -o $${src%.c}.o; \
 	done
 	echo "  CC kpp_adapter.c"
-	gcc -O2 -fPIC -I$(OUT_DIR) -c $(ADAPTER_SRC) -o $(OUT_DIR)/kpp_adapter.o
+	gcc -O2 -fPIC -I$(OUT_DIR) $(KPP_ADAPTER_CPPFLAGS) -c $(ADAPTER_SRC) -o $(OUT_DIR)/kpp_adapter.o
 	echo "  LINK libkpp_$(MECH_NAME).so"
 	gcc -shared -o $(LIB) $(OUT_DIR)/$(MECH_NAME)_*.o $(OUT_DIR)/kpp_adapter.o -lm
 	@echo "=== Done: $(LIB) ==="

@@ -23,8 +23,10 @@ KppBoxIntegrator::KppBoxIntegrator(MooseApp & app,
     _kpp_get_nvar(nullptr),
     _kpp_get_species_name(nullptr)
 {
-  if (_solver_type != "kpp_rosenbrock" && _solver_type != "rosenbrock")
-    mooseError("KppBoxIntegrator currently supports chem_solver=kpp_rosenbrock only; got ",
+  if (_solver_type != "kpp_rosenbrock" && _solver_type != "kpp_sdirk" &&
+      _solver_type != "kpp_runge_kutta" && _solver_type != "rosenbrock")
+    mooseError("KppBoxIntegrator currently supports chem_solver=kpp_rosenbrock, "
+               "kpp_sdirk, and kpp_runge_kutta; got ",
                _solver_type);
 
   // Derive .so path: KPP_LIB env var takes precedence, then auto-discover
@@ -131,7 +133,7 @@ KppBoxIntegrator::solve(Real t0, Real t1, std::vector<Real> & C) const
   {
     _console << "KppBoxIntegrator: integration failed, ierr=" << ierr
              << " t=[" << t0 << "," << t1 << "]" << std::endl;
-    mooseError("KppBoxIntegrator: Rosenbrock integration failed with ierr=", ierr,
+    mooseError("KppBoxIntegrator: KPP integration failed with ierr=", ierr,
                " at t=[", t0, ", ", t1, "]. "
                "Check mechanism tolerances or initial conditions.");
   }

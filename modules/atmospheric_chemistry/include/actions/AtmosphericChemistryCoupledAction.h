@@ -20,8 +20,8 @@
  * Action for FEM transport + chemistry (coupled mode) atmospheric chemistry.
  *
  * Creates MooseVariableFE (family=LAGRANGE) for each species,
- * MCMRatesMaterial for rate evaluation, and TimeDerivative +
- * ChemicalSourceKernel for each species.
+ * MCMRatesMaterial or KPPMechanismMaterial for rate evaluation, and
+ * TimeDerivative + source kernel for each species.
  *
  * Suitable for spatially-resolved simulations (5--50 species).
  *
@@ -39,6 +39,8 @@ public:
 protected:
   /// Build the reactant index matrix for the Material
   std::vector<std::vector<Real>> buildReactantMatrix() const;
+  /// Derive the KPP shared-library path from the mechanism file.
+  std::string kppLibraryPath(const std::string & mechanism_file) const;
 
   /// Create FE variables for each chemical species
   void actAddVariable();
@@ -53,6 +55,10 @@ protected:
   std::vector<std::string> _ro2_species;
   /// Full mechanism data (from MechanismLoader)
   MechanismData _mech_data;
+  /// Chemical solver/backend selector.
+  std::string _chem_solver;
+  /// Whether this Action is using a KPP-generated mechanism.
+  bool _use_kpp;
   /// Whether RO2 diagnostic variable should be created
   bool _ro2_diagnostic_enabled;
 };

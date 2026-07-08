@@ -92,7 +92,8 @@ AtmosphericChemistryBoxAction::validParams()
       "  petsc_ts        — PETSc TS (BDF/ARKIMEX)\n"
       "  sundials        — SUNDIALS CVODE\n"
       "  kpp_rosenbrock  — KPP Rosenbrock shared-library solver\n"
-      "  kpp_sdirk/kpp_runge_kutta — reserved KPP options");
+      "  kpp_sdirk       — KPP SDIRK shared-library solver\n"
+      "  kpp_runge_kutta — KPP implicit Runge-Kutta shared-library solver");
 
   params.addParam<Real>("chem_solver_rtol", 1e-6,
       "Relative tolerance for the chemical ODE solver.");

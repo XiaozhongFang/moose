@@ -12,10 +12,28 @@
 #include "Moose.h"
 
 #include <dlfcn.h>
+#include <cstddef>
 #include <cstring>
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <mutex>
+
+namespace
+{
+std::recursive_mutex kpp_generated_mechanism_mutex;
+
+bool
+samePhysParams(const PhysParams & a, const PhysParams & b)
+{
+  return a.temperature == b.temperature && a.air_density == b.air_density &&
+         a.water_vapor == b.water_vapor && a.pressure == b.pressure && a.rh == b.rh &&
+         a.jfac == b.jfac && a.latitude == b.latitude && a.longitude == b.longitude &&
+         a.albedo == b.albedo && a.o3column == b.o3column && a.altitude == b.altitude &&
+         a.cos_sza == b.cos_sza && a.blheight == b.blheight && a.j_vals == b.j_vals;
+}
+}
 
 KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
   : _lib_handle(nullptr),
@@ -24,8 +42,8 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
     _init(nullptr),
     _update_rconst(nullptr),
     _kpp_C(nullptr),
-    _kpp_VAR(nullptr),
-    _kpp_FIX(nullptr),
+    _kpp_VAR_ptr(nullptr),
+    _kpp_FIX_ptr(nullptr),
     _kpp_RCONST(nullptr),
     _lu_irow(nullptr),
     _lu_icol(nullptr),
@@ -37,7 +55,11 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
     _roof_open(true),
     _jfac(1.0),
     _t(0.0),
-    _n_j_vals(0)
+    _n_j_vals(0),
+    _cached_time(std::numeric_limits<Real>::quiet_NaN()),
+    _rhs_valid(false),
+    _jacobian_valid(false),
+    _cached_params_valid(false)
 {
   // Open the KPP shared library
   _lib_handle = dlopen(lib_path.c_str(), RTLD_NOW | RTLD_LOCAL);
@@ -49,6 +71,7 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
   _fun  = reinterpret_cast<KppFunFn>(dlsym(_lib_handle, "Fun"));
   _jac  = reinterpret_cast<KppJacFn>(dlsym(_lib_handle, "Jac_SP"));
   _init = reinterpret_cast<KppInitFn>(dlsym(_lib_handle, "Initialize"));
+  _update_rconst = reinterpret_cast<KppVoidFn>(dlsym(_lib_handle, "Update_RCONST"));
 
   if (!_fun || !_jac || !_init)
   {
@@ -80,15 +103,15 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
   _n_reactions = kpp_get_nreact_fn ? static_cast<unsigned int>(kpp_get_nreact_fn()) : 0;
 
   // Resolve KPP global variable pointers
-  _kpp_C      = reinterpret_cast<double *>(dlsym(_lib_handle, "C"));
-  _kpp_VAR    = reinterpret_cast<double *>(dlsym(_lib_handle, "VAR"));
-  _kpp_FIX    = reinterpret_cast<double *>(dlsym(_lib_handle, "FIX"));
-  _kpp_RCONST = reinterpret_cast<double *>(dlsym(_lib_handle, "RCONST"));
+  _kpp_C       = reinterpret_cast<double *>(dlsym(_lib_handle, "C"));
+  _kpp_VAR_ptr = reinterpret_cast<double **>(dlsym(_lib_handle, "VAR"));
+  _kpp_FIX_ptr = reinterpret_cast<double **>(dlsym(_lib_handle, "FIX"));
+  _kpp_RCONST  = reinterpret_cast<double *>(dlsym(_lib_handle, "RCONST"));
 
-  if (!_kpp_C)
+  if (!_kpp_C || !_kpp_VAR_ptr || !_kpp_FIX_ptr || !_kpp_RCONST)
   {
     std::string msg = "KPPGeneratedMechanism: failed to resolve KPP global ";
-    msg += "array 'C' from \"" + lib_path + "\"";
+    msg += "arrays (C, VAR, FIX, RCONST) from \"" + lib_path + "\"";
     dlclose(_lib_handle);
     _lib_handle = nullptr;
     mooseError(msg);
@@ -105,7 +128,8 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
                "structure (LU_IROW, LU_ICOL, LU_CROW) from \"",
                lib_path, "\". Rebuild the KPP library.");
 
-  // NNZ = LU_CROW[NVAR] (total non-zero entries in the Jacobian)
+  // NNZ = LU_CROW[NVAR] (total non-zero entries in the Jacobian).
+  // KPP-generated C stores LU_IROW/LU_ICOL as 0-based indices.
   _jac_nnz = _lu_crow[_n_variable];
 
   // Attempt to read species names from KPP's SPC_NAMES global.
@@ -114,21 +138,23 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
   char ** kpp_spc_names = reinterpret_cast<char **>(dlsym(_lib_handle, "SPC_NAMES"));
   if (kpp_spc_names)
   {
-    _species_names.reserve(_n_species);
+    _all_species_names.reserve(_n_species);
     for (unsigned int i = 0; i < _n_species; ++i)
     {
       if (kpp_spc_names[i])
-        _species_names.emplace_back(kpp_spc_names[i]);
+        _all_species_names.emplace_back(kpp_spc_names[i]);
       else
-        _species_names.emplace_back("spc_" + std::to_string(i));
+        _all_species_names.emplace_back("spc_" + std::to_string(i));
     }
   }
   else
   {
-    _species_names.reserve(_n_species);
+    _all_species_names.reserve(_n_species);
     for (unsigned int i = 0; i < _n_species; ++i)
-      _species_names.emplace_back("species_" + std::to_string(i));
+      _all_species_names.emplace_back("species_" + std::to_string(i));
   }
+  _species_names.assign(_all_species_names.begin(),
+                        _all_species_names.begin() + static_cast<std::ptrdiff_t>(_n_variable));
 
   // Initialize KPP global state (sets up FIX, RCONST, etc.)
   _init();
@@ -137,6 +163,8 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
   // KPP typically names rate constants KJ_<N> or J_<N> for photolysis.
   // For now, default to 0 — updateParams will re-count.
   _n_j_vals = 0;
+  _cached_C.assign(_n_variable, 0.0);
+  _cached_rhs.assign(_n_variable, 0.0);
 }
 
 KPPGeneratedMechanism::~KPPGeneratedMechanism()
@@ -151,6 +179,12 @@ KPPGeneratedMechanism::~KPPGeneratedMechanism()
 void
 KPPGeneratedMechanism::updateParams(const PhysParams & params)
 {
+  std::lock_guard<std::recursive_mutex> lock(kpp_generated_mechanism_mutex);
+
+  _rhs_valid = false;
+  _jacobian_valid = false;
+  _cached_params = params;
+  _cached_params_valid = true;
   // Update the KPP global RCONST array with new rate coefficients.
   //
   // KPP-generated mechanisms typically provide an Update_RCONST() function
@@ -160,18 +194,17 @@ KPPGeneratedMechanism::updateParams(const PhysParams & params)
   // If Update_RCONST is not available (e.g. older generation), the user
   // must ensure the .so's global arrays are updated externally.
 
-  using UpdateRCONSTFn = void (*)(void);
-  auto update_rconst = reinterpret_cast<UpdateRCONSTFn>(
-      dlsym(_lib_handle, "Update_RCONST"));
-
-  if (update_rconst)
+  if (_update_rconst)
   {
     // Set KPP global physical parameters if the symbols are available
     double * kpp_temp = reinterpret_cast<double *>(dlsym(_lib_handle, "TEMP"));
     double * kpp_air  = reinterpret_cast<double *>(dlsym(_lib_handle, "AIR"));
+    double * kpp_time = reinterpret_cast<double *>(dlsym(_lib_handle, "TIME"));
 
     if (kpp_temp)
       *kpp_temp = static_cast<double>(params.temperature);
+    if (kpp_time)
+      *kpp_time = static_cast<double>(_t);
 
     // AIR density: either from params.air_density or computed from pressure
     double air_dens = static_cast<double>(params.air_density);
@@ -188,23 +221,56 @@ KPPGeneratedMechanism::updateParams(const PhysParams & params)
       *kpp_air = air_dens;
 
     // H2O: from water_vapor or computed from RH
+    double h2o = static_cast<double>(params.water_vapor);
+    if (params.rh >= 0.0)
+    {
+      // Saturation vapor pressure (Clausius-Clapeyron approximation)
+      double es = 6.112 * std::exp(17.67 * (params.temperature - 273.15) /
+                                    (params.temperature - 29.65));
+      double p_h2o = (params.rh / 100.0) * es * 100.0; // Pa
+      h2o = p_h2o / (1.380649e-23 * params.temperature) * 1e-6; // molec/cm³
+    }
     double * kpp_h2o = reinterpret_cast<double *>(dlsym(_lib_handle, "H2O"));
     if (kpp_h2o)
-    {
-      double h2o = static_cast<double>(params.water_vapor);
-      if (params.rh >= 0.0)
-      {
-        // Saturation vapor pressure (Clausius-Clapeyron approximation)
-        double es = 6.112 * std::exp(17.67 * (params.temperature - 273.15) /
-                                      (params.temperature - 29.65));
-        double p_h2o = (params.rh / 100.0) * es * 100.0; // Pa
-        h2o = p_h2o / (1.380649e-23 * params.temperature) * 1e-6; // molec/cm³
-      }
       *kpp_h2o = h2o;
+
+    double * var = _kpp_VAR_ptr ? *_kpp_VAR_ptr : nullptr;
+    double * fix = _kpp_FIX_ptr ? *_kpp_FIX_ptr : nullptr;
+    if (fix && var && _all_species_names.size() >= _n_species)
+    {
+      const double o2 = 0.21 * air_dens;
+      const double n2 = 0.78 * air_dens;
+      for (unsigned int i = _n_variable; i < _n_species; ++i)
+      {
+        const auto fix_index = i - _n_variable;
+
+        const std::string & name = _all_species_names[i];
+        if (name == "M" || name == "AIR")
+          fix[fix_index] = air_dens;
+        else if (name == "O2")
+          fix[fix_index] = o2;
+        else if (name == "N2")
+          fix[fix_index] = n2;
+        else if (name == "H2O")
+          fix[fix_index] = h2o;
+      }
+    }
+
+    auto update_sun = reinterpret_cast<KppVoidFn>(dlsym(_lib_handle, "Update_SUN"));
+    if (update_sun)
+      update_sun();
+
+    double * kpp_sun = reinterpret_cast<double *>(dlsym(_lib_handle, "SUN"));
+    if (kpp_sun)
+    {
+      if (!_roof_open)
+        *kpp_sun = 0.0;
+      else
+        *kpp_sun *= static_cast<double>(_jfac * params.jfac);
     }
 
     // Call Update_RCONST to re-evaluate all rate coefficients
-    update_rconst();
+    _update_rconst();
   }
   else
   {
@@ -223,50 +289,88 @@ KPPGeneratedMechanism::updateParams(const PhysParams & params)
 }
 
 void
-KPPGeneratedMechanism::computeRHS(Real /*t*/,
+KPPGeneratedMechanism::computeRHS(Real t,
                                    const std::vector<Real> & C,
-                                   const PhysParams & /*params*/,
+                                   const PhysParams & params,
                                    std::vector<Real> & dC_dt) const
 {
-  unsigned int n = _n_species;
+  std::lock_guard<std::recursive_mutex> lock(kpp_generated_mechanism_mutex);
+
+  unsigned int n = _n_variable;
   if (C.size() < n || dC_dt.size() < n)
     mooseError("KPPGeneratedMechanism::computeRHS: concentration vector size mismatch");
 
-  // Copy concentrations into KPP's global C[] array
-  for (unsigned int i = 0; i < n; ++i)
-    _kpp_C[i] = static_cast<double>(C[i]);
+  const bool cache_hit = _rhs_valid && _cached_C.size() == n &&
+                         _cached_time == t &&
+                         _cached_params_valid && samePhysParams(_cached_params, params) &&
+                         std::equal(_cached_C.begin(), _cached_C.end(), C.begin());
+  if (cache_hit)
+  {
+    for (unsigned int i = 0; i < n; ++i)
+      dC_dt[i] = _cached_rhs[i];
+    return;
+  }
 
-  // Call KPP's Fun() which writes into the global arrays and Ydot.
-  // Fun signature: Fun(Y, FIX, RCONST, Ydot)
-  // KPP uses the global C[] as Y internally; we pass it explicitly.
+  _t = t;
+  const_cast<KPPGeneratedMechanism *>(this)->updateParams(params);
+
+  double * var = *_kpp_VAR_ptr;
+  double * fix = *_kpp_FIX_ptr;
+  for (unsigned int i = 0; i < n; ++i)
+    var[i] = static_cast<double>(C[i]);
+
   std::vector<double> Ydot(n, 0.0);
-  _fun(_kpp_C, _kpp_FIX, _kpp_RCONST, Ydot.data());
+  _fun(var, fix, _kpp_RCONST, Ydot.data());
 
-  // Copy result back to MOOSE Real vector
   for (unsigned int i = 0; i < n; ++i)
+  {
     dC_dt[i] = static_cast<Real>(Ydot[i]);
+    _cached_rhs[i] = dC_dt[i];
+    _cached_C[i] = C[i];
+  }
+  _cached_time = t;
+  _cached_params = params;
+  _cached_params_valid = true;
+  _rhs_valid = true;
+  _jacobian_valid = false;
 }
 
 void
 KPPGeneratedMechanism::computeJacobian(
-    Real /*t*/,
+    Real t,
     const std::vector<Real> & C,
-    const PhysParams & /*params*/,
+    const PhysParams & params,
     std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const
 {
-  unsigned int n = _n_species;
+  std::lock_guard<std::recursive_mutex> lock(kpp_generated_mechanism_mutex);
+
+  unsigned int n = _n_variable;
   if (C.size() < n)
     mooseError("KPPGeneratedMechanism::computeJacobian: concentration vector size mismatch");
 
-  // Copy concentrations into KPP's global C[] array
+  const bool cache_hit = _jacobian_valid && _cached_C.size() == n &&
+                         _cached_time == t &&
+                         _cached_params_valid && samePhysParams(_cached_params, params) &&
+                         std::equal(_cached_C.begin(), _cached_C.end(), C.begin());
+  if (cache_hit)
+  {
+    J = _cached_jacobian;
+    return;
+  }
+
+  _t = t;
+  const_cast<KPPGeneratedMechanism *>(this)->updateParams(params);
+
+  double * var = *_kpp_VAR_ptr;
+  double * fix = *_kpp_FIX_ptr;
   for (unsigned int i = 0; i < n; ++i)
-    _kpp_C[i] = static_cast<double>(C[i]);
+    var[i] = static_cast<double>(C[i]);
 
   // KPP's Jac_SP writes into global JVS[] sparse Jacobian storage.
   // The KPP sparse Jacobian format uses:
   //   JVS[LU_NONZERO] — non-zero Jacobian values
-  //   LU_IROW[LU_NONZERO] — row indices (1-based)
-  //   LU_ICOL[LU_NONZERO] — column indices (1-based)
+  //   LU_IROW[LU_NONZERO] — row indices (0-based in generated C)
+  //   LU_ICOL[LU_NONZERO] — column indices (0-based in generated C)
   //
   // We resolve these globals at runtime (they may not exist in all KPP versions).
 
@@ -287,7 +391,7 @@ KPPGeneratedMechanism::computeJacobian(
 
   // Call KPP's Jac_SP() with our own JVS buffer
   std::vector<double> jvs(_jac_nnz);
-  _jac(_kpp_C, _kpp_FIX, _kpp_RCONST, jvs.data());
+  _jac(var, fix, _kpp_RCONST, jvs.data());
 
   // Convert sparse Jacobian to triplet format
   int nnz = static_cast<int>(_jac_nnz);
@@ -295,12 +399,23 @@ KPPGeneratedMechanism::computeJacobian(
   J.reserve(static_cast<std::size_t>(nnz));
   for (int k = 0; k < nnz; ++k)
   {
-    // KPP uses 1-based indexing; convert to 0-based
-    unsigned int row = static_cast<unsigned int>(_lu_irow[k] - 1);
-    unsigned int col = static_cast<unsigned int>(_lu_icol[k] - 1);
+    if (_lu_irow[k] < 0 || _lu_icol[k] < 0)
+      continue;
+
+    unsigned int row = static_cast<unsigned int>(_lu_irow[k]);
+    unsigned int col = static_cast<unsigned int>(_lu_icol[k]);
+    if (row >= n || col >= n)
+      continue;
+
     Real val = static_cast<Real>(jvs[k]);
     J.emplace_back(row, col, val);
   }
+  _cached_C.assign(C.begin(), C.begin() + static_cast<std::ptrdiff_t>(n));
+  _cached_jacobian = J;
+  _cached_time = t;
+  _cached_params = params;
+  _cached_params_valid = true;
+  _jacobian_valid = true;
 }
 
 SpeciesRates
@@ -309,18 +424,8 @@ KPPGeneratedMechanism::computeSpeciesRates(
     const std::vector<Real> & /*C*/,
     const PhysParams & /*params*/) const
 {
-  // KPP does not natively provide per-species production/loss rates
-  // separate from the net RHS.  This would require iterating over
-  // reactions and their stoichiometry — information not easily
-  // extracted from KPP globals without the mechanism's equation-by-equation
-  // data.
-  //
-  // For the scaffold, return zero vectors.
-
-  SpeciesRates rates;
-  rates.production.assign(_n_species, 0.0);
-  rates.loss.assign(_n_species, 0.0);
-  return rates;
+  mooseError("KPPGeneratedMechanism::computeSpeciesRates: separated production/loss "
+             "rates require stoichiometry metadata that KPP shared libraries do not export.");
 }
 
 // ===== Single-species accessors (delegate to computeRHS / computeJacobian) =====
@@ -331,7 +436,7 @@ KPPGeneratedMechanism::getDCdt(unsigned int idx, const std::vector<Real> & C) co
   // Compute full RHS and return the requested component.
   // Inefficient for repeated calls — caches could be added later.
   PhysParams dummy;
-  std::vector<Real> dC_dt(_n_species);
+  std::vector<Real> dC_dt(_n_variable);
   computeRHS(_t, C, dummy, dC_dt);
   return dC_dt[idx];
 }
@@ -376,9 +481,8 @@ KPPGeneratedMechanism::getJValue(unsigned int /*j_number*/) const
 {
   // KPP does not expose photolysis J-values through a standard API.
   // If the mechanism uses photolysis, they are embedded in RCONST entries.
-  mooseDoOnce(mooseWarning(
-      "KPPGeneratedMechanism::getJValue: not implemented for KPP mechanisms."));
-  return 0.0;
+  mooseError("KPPGeneratedMechanism::getJValue: individual photolysis J values "
+             "are not exported by KPP shared libraries.");
 }
 
 // ===== Reaction diagnostics =====
@@ -388,21 +492,16 @@ KPPGeneratedMechanism::getRO2Sum(const std::vector<Real> & /*C*/) const
 {
   // RO2 sum requires knowing which species are peroxy radicals.
   // This metadata is not available from KPP globals alone.
-  mooseDoOnce(mooseWarning(
-      "KPPGeneratedMechanism::getRO2Sum: RO2 species indices not available "
-      "from KPP library.  Returning 0."));
-  return 0.0;
+  mooseError("KPPGeneratedMechanism::getRO2Sum: RO2 species metadata is not "
+             "available from KPP shared libraries.");
 }
 
 Real
 KPPGeneratedMechanism::reactionRate(unsigned int /*r*/,
                                      const std::vector<Real> & /*C*/) const
 {
-  // KPP does not provide a per-reaction rate query API.
-  // Would require access to the mechanism's stoichiometry data.
-  mooseDoOnce(mooseWarning(
-      "KPPGeneratedMechanism::reactionRate: not implemented."));
-  return 0.0;
+  mooseError("KPPGeneratedMechanism::reactionRate: per-reaction rates require "
+             "stoichiometry metadata that KPP shared libraries do not export.");
 }
 
 Real
@@ -410,34 +509,31 @@ KPPGeneratedMechanism::speciesReactionRate(unsigned int /*s*/,
                                             unsigned int /*r*/,
                                             const std::vector<Real> & /*C*/) const
 {
-  mooseDoOnce(mooseWarning(
-      "KPPGeneratedMechanism::speciesReactionRate: not implemented."));
-  return 0.0;
+  mooseError("KPPGeneratedMechanism::speciesReactionRate: per-reaction species "
+             "rates require stoichiometry metadata that KPP shared libraries do not export.");
 }
 
 Real
 KPPGeneratedMechanism::speciesLossRate(unsigned int /*s*/,
                                         const std::vector<Real> & /*C*/) const
 {
-  mooseDoOnce(mooseWarning(
-      "KPPGeneratedMechanism::speciesLossRate: not implemented."));
-  return 0.0;
+  mooseError("KPPGeneratedMechanism::speciesLossRate: separated production/loss "
+             "rates require stoichiometry metadata that KPP shared libraries do not export.");
 }
 
 Real
 KPPGeneratedMechanism::speciesProductionRate(unsigned int /*s*/,
                                               const std::vector<Real> & /*C*/) const
 {
-  mooseDoOnce(mooseWarning(
-      "KPPGeneratedMechanism::speciesProductionRate: not implemented."));
-  return 0.0;
+  mooseError("KPPGeneratedMechanism::speciesProductionRate: separated production/loss "
+             "rates require stoichiometry metadata that KPP shared libraries do not export.");
 }
 
 void
 KPPGeneratedMechanism::allReactionRates(const std::vector<Real> & /*C*/,
                                          std::vector<Real> & rates) const
 {
-  mooseDoOnce(mooseWarning(
-      "KPPGeneratedMechanism::allReactionRates: not implemented."));
-  rates.assign(_n_reactions, 0.0);
+  rates.clear();
+  mooseError("KPPGeneratedMechanism::allReactionRates: per-reaction rates require "
+             "stoichiometry metadata that KPP shared libraries do not export.");
 }

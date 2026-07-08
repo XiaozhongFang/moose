@@ -121,7 +121,7 @@ MCMBoxModel::validParams()
       "moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
       "petsc_ts");
   params.addParam<MooseEnum>("chem_solver", solver_enum,
-      "Chemical solver backend (kpp_rosenbrock is the supported KPP backend).");
+      "Chemical solver backend.");
   MooseEnum mech_fmt("MCM_FACSIMILE KPP", "MCM_FACSIMILE");
   params.addParam<MooseEnum>("mechanism_format", mech_fmt,
       "Mechanism format (forwarded from AtmosphericChemistryAction).");

@@ -15,15 +15,20 @@ extern double C[];
 extern double ATOL[];
 extern double RTOL[];
 extern double STEPMIN;
+extern double STEPMAX;
 extern char * SPC_NAMES[];
 
 // KPP functions (names fixed by KPP tool, independent of mechanism)
 extern void Initialize(void);
+#ifndef KPP_USE_GENERATED_INTEGRATE
 extern int Rosenbrock(double Y[], double Tstart, double Tend,
                       double AbsTol[], double RelTol[],
                       void (*ode_Fun)(double, double[], double[]),
                       void (*ode_Jac)(double, double[], double[]),
                       double RPAR[], int IPAR[]);
+#else
+extern void INTEGRATE(double TIN, double TOUT);
+#endif
 
 // Injected into _Main.c by kpp/build/Makefile: int kpp_get_nspec(void) { return NSPEC; }
 extern int kpp_get_nspec(void);
@@ -65,17 +70,24 @@ void kpp_get_conc(double c[], int n) {
 
 int kpp_integrate(double Y[], double t0, double t1,
                    double rtol, double atol) {
-    double RPAR[20];
-    int IPAR[20];
     int nvar = kpp_get_nvar();
-    memset(RPAR, 0, sizeof(RPAR));
-    memset(IPAR, 0, sizeof(IPAR));
     for (int i = 0; i < nvar; ++i) {
         RTOL[i] = rtol;
         ATOL[i] = atol;
     }
     STEPMIN = fmax(fabs(t1 - t0) * 1.0e-6, 1.0e-12);
+    STEPMAX = fabs(t1 - t0);
     kpp_set_conc(Y, nvar);
+
+#ifdef KPP_USE_GENERATED_INTEGRATE
+    INTEGRATE(t0, t1);
+    kpp_get_conc(Y, nvar);
+    return 1;
+#else
+    double RPAR[20];
+    int IPAR[20];
+    memset(RPAR, 0, sizeof(RPAR));
+    memset(IPAR, 0, sizeof(IPAR));
     IPAR[0] = 0;
     IPAR[1] = 1;
     IPAR[3] = 5;
@@ -87,4 +99,5 @@ int kpp_integrate(double Y[], double t0, double t1,
         kpp_set_conc(Y, nvar);
     }
     return ierr;
+#endif
 }

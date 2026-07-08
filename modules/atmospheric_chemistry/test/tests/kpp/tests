@@ -17,4 +17,12 @@
     prereq = build_kpp_small_strato
     requirement = 'KPP Rosenbrock shall match reference within 5%.'
   [../]
+
+  [./kpp_small_strato_coupled]
+    type = RunApp
+    input = kpp_small_strato_coupled.i
+    heavy = true
+    prereq = build_kpp_small_strato
+    requirement = 'KPP-generated RHS and analytical Jacobian shall run in coupled implicit mode.'
+  [../]
 []
