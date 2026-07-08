@@ -111,7 +111,7 @@ for the mathematical formulation and usage guidance.
 
 When enabled, the parser detects RO₂+RO₂ reactions during mechanism loading
 and applies:
-$$ R_r = k_r \cdot \min([\mathrm{RO_2^{\it i}}], [\mathrm{RO_2^{\it j}}])^2 $$
+$$ R_r = k_r \cdot \min([\mathrm{RO_2^{\it i}}], [\mathrm{RO_2^{\it j}}]) $$
 instead of the standard $k_r \cdot [\mathrm{RO_2^{\it i}}] \cdot [\mathrm{RO_2^{\it j}}]$.
 
 This parameter is forwarded to the underlying `MCMBoxModel` UserObject in

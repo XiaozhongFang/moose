@@ -25,6 +25,8 @@
     lamp_flux_file = 'ExampleLightFlux.txt'
     bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
     jfac = 1.0
+    output_ro2_sum = true
+    use_limiting_reagent = true
     chem_solver = petsc_ts
     chem_solver_type = bdf
     chem_solver_rtol = 1e-2

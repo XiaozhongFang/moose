@@ -823,7 +823,7 @@ MCMRuntimeMechanism::computeDCdt(const std::vector<Real> & C, std::vector<Real> 
       {
         Real c0 = C[i0], c1 = C[i1];
         Real minc = std::min(c0, c1);
-        _scratch_G[r] = minc * minc;
+        _scratch_G[r] = minc;
       }
     }
   }
@@ -873,9 +873,8 @@ MCMRuntimeMechanism::computeJacobianTriplets(
     {
       if (i0 >= 0 && i1 >= 0)
       {
-        Real minc = std::min(c0, c1);
         unsigned int min_idx = (c0 <= c1) ? (unsigned int)i0 : (unsigned int)i1;
-        Real drate = 2.0 * k * minc;
+        Real drate = k;
         emit_contrib(min_idx, drate);
       }
       continue;
@@ -980,9 +979,8 @@ MCMRuntimeMechanism::_buildJacobianCache() const
     bool is_lr = (_use_limiting_reagent && !_limiting_reagent.empty() && r < _limiting_reagent.size() && _limiting_reagent[r]);
     if (is_lr && i0 >= 0 && i1 >= 0)
     {
-      Real minc = std::min(c0, c1);
       unsigned int min_idx = (c0 <= c1) ? (unsigned int)i0 : (unsigned int)i1;
-      Real drate = 2.0 * k * minc;
+      Real drate = k;
       accum(min_idx, drate);
       continue;
     }
@@ -1042,6 +1040,10 @@ MCMRuntimeMechanism::reactionRate(unsigned int r, const std::vector<Real> & C) c
   Real c0 = (_iG[r][0] >= 0) ? C[_iG[r][0]] : 1.0;
   Real c1 = (_iG[r][1] >= 0) ? C[_iG[r][1]] : 1.0;
   Real c2 = (_iG[r][2] >= 0) ? C[_iG[r][2]] : 1.0;
+  // Limiting-reagent branch: rate = k * min(c0, c1) (F0AM-compatible)
+  if (_use_limiting_reagent && !_limiting_reagent.empty() &&
+      r < _limiting_reagent.size() && _limiting_reagent[r])
+    return _k[r] * std::min(c0, c1);
   return _k[r] * c0 * c1 * c2;
 }
 

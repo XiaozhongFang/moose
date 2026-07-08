@@ -25,6 +25,8 @@
     lamp_flux_file = 'ExampleLightFlux.txt'
     bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
     jfac = 1.0
+    output_ro2_sum = true
+    use_limiting_reagent = true
     chem_solver = petsc_ts
     chem_solver_type = bdf
     chem_solver_rtol = 1e-2
@@ -52,11 +54,12 @@
   petsc_options_value = 'lu NONZERO'
   [TimeStepper]
     type = TimeSequenceStepper
-    time_sequence = '0 1004 1962 2955 4097 4858 6238 6858 8098 8717 9957 10800'
+    time_sequence = '0 1004 1962 2955 4097 4858 6238 6858 8098 8717 9957'
   []
 []
 
 [Outputs]
+  checkpoint = true
   csv = true
   execute_on = 'timestep_end'
   file_base = 'vs_F0AM_chamber_S2_box'

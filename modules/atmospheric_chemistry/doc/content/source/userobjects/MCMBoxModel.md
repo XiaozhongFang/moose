@@ -120,7 +120,7 @@ $$ R_r = k_r \cdot [\mathrm{RO_2^{\it i}}] \cdot [\mathrm{RO_2^{\it j}}] $$
 When enabled, the reaction rate is governed by the *smaller* of the two RO₂
 concentrations:
 
-$$ R_r = k_r \cdot \min([\mathrm{RO_2^{\it i}}], [\mathrm{RO_2^{\it j}}])^2 $$
+$$ R_r = k_r \cdot \min([\mathrm{RO_2^{\it i}}], [\mathrm{RO_2^{\it j}}]) $$
 
 This formulation avoids double-counting when RO₂ species are lumped
 (F0AM's RO₂ sum variable represents the total peroxy radical pool).
@@ -143,7 +143,7 @@ The LR formulation introduces a $C^0$ discontinuity at
 $[\mathrm{RO_2^{\it i}}] = [\mathrm{RO_2^{\it j}}]$, but the derivative
 away from the crossing point is well-defined:
 
-$$ \frac{\partial R_r}{\partial C_{\min}} = 2 k_r \cdot \min([\mathrm{RO_2^{\it i}}], [\mathrm{RO_2^{\it j}}]) $$
+$$ \frac{\partial R_r}{\partial C_{\min}} = k_r $$
 
 $$ \frac{\partial R_r}{\partial C_{\text{other}}} = 0 $$
 

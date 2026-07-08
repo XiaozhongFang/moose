@@ -25,6 +25,7 @@
     lamp_flux_file = 'ExampleLightFlux.txt'
     bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
     jfac = 10.0
+    use_limiting_reagent = true
   []
 []
 
@@ -57,5 +58,5 @@
 []
 
 [Problem]
-  restart_file_base = 'vs_F0AM_chamber_S2_box_checkpoint_cp/LATEST'
+  restart_file_base = 'vs_F0AM_chamber_S2_box_cp/LATEST'
 []

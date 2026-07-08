@@ -5,7 +5,7 @@
     csvdiff = vs_F0AM_chamber_S1_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
-    ignore_columns = 'ONE RO2 CH3ONO'
+    ignore_columns = 'ONE'
     heavy = true
     requirement = 'S1: box mode shall match F0AM within 5%.'
   [../]
@@ -15,7 +15,7 @@
     csvdiff = vs_F0AM_chamber_S2_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
-    ignore_columns = 'ONE RO2 CH3ONO'
+    ignore_columns = 'ONE'
     heavy = true
     requirement = 'S2: box mode shall match F0AM within 5%.'
   [../]
@@ -23,7 +23,7 @@
     type = RunApp
     input = vs_F0AM_chamber_S2b_box.i
     heavy = true
-    skip = 'S2b restart needs a separate S2 producer test (creates checkpoint at 10800s)'
+    prereq = vs_F0AM_chamber_S2_box
     requirement = 'S2b restart shall run without error.'
   [../]
   [./vs_F0AM_chamber_S3_box]
@@ -32,7 +32,7 @@
     csvdiff = vs_F0AM_chamber_S3_box.csv
     rel_err = 5.0e-2
     abs_zero = 1.0e-6
-    ignore_columns = 'ONE RO2 CH3ONO'
+    ignore_columns = 'ONE'
     heavy = true
     requirement = 'S3: box mode shall match F0AM within 5%.'
   [../]
