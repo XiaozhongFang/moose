@@ -4,9 +4,9 @@
 # detects RO2 (peroxy radical) species from the .fac mechanism file's
 # explicit RO2 = ... declaration line.
 #
-# The MCMRO2ListPostprocessor outputs the count of detected RO2 species.
-# The gold CSV (CSVDiff) verifies the count matches the expected value
-# from the mechanism file's RO2 = line (117 species).
+# The MCMRO2ListPostprocessor outputs one column per detected RO2 species name.
+# The gold CSV is generated directly from the mechanism file's RO2 = line and
+# CSVDiff verifies both the count and species-name set (117 species).
 #
 # Additional validation: the parser's internal validation against the
 # peroxy-radicals reference file prints warnings for any detected RO2

@@ -16,18 +16,12 @@
  * VectorPostprocessor that outputs the list of RO2 (peroxy radical) species
  * detected by MCMBoxModel from the parsed mechanism file.
  *
- * Outputs two vectors:
+ * Outputs one count vector and one vector per RO2 species name:
  *   - ro2_count (1 element): total number of detected RO2 species
- *   - ro2_species (N elements): 0-based species indices for each RO2
+ *   - <species name> (1 element): 1 if that species was detected as RO2
  *
- * Used in CSVDiff tests to validate that the RO2 detection is correct.
- * The gold CSV matches the VPP output format:
- *   ro2_count,ro2_species
- *   117,<index_0>
- *   0,<index_1>
- *   ...
- *
- * CSVDiff compares columns common to both the gold and test output.
+ * Used in CSVDiff tests to validate the detected RO2 species by name. Missing
+ * or extra RO2 species appear as CSV header differences.
  */
 class MCMRO2ListPostprocessor : public GeneralVectorPostprocessor
 {
@@ -45,6 +39,6 @@ protected:
 
   /// Vector: RO2 species count (single element)
   VectorPostprocessorValue & _ro2_count;
-  /// Vector: RO2 species indices
-  VectorPostprocessorValue & _ro2_species;
+  /// Vectors keyed by detected RO2 species names.
+  std::vector<VectorPostprocessorValue *> _ro2_species_flags;
 };

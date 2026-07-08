@@ -153,18 +153,23 @@ halogen text files from JPL/IUPAC references.
 
 ## RO2 Species Extraction
 
-The parser detects peroxy radical (RO₂) species using the same logic as AtChem2:
-explicit `RO2 = CH3O2 + ...` section in `.kpp` files, or O₂-suffix heuristic (excluding
-known false positives: HO2, NO2, SO2, H2O2 etc.).
+The parser detects peroxy radical (RO₂) species using explicit family declarations
+when available: `RO2 = CH3O2 + ... ;` in `.fac` files or the corresponding
+`RO2 = & ... )` section in `.kpp` files. If no explicit family declaration exists,
+it falls back to species-name detection (`O2` suffix or names containing `RO2`,
+excluding known false positives such as HO2, NO2, SO2, and H2O2). This fallback
+covers simplified mechanisms that declare `RO2` directly as a species.
 
-Extract the RO₂ list via the actual module (uses `MCMRO2ListPostprocessor` console output):
+Regenerate the RO₂ CSVDiff gold directly from a `.fac` mechanism's explicit
+`RO2 = ... ;` declaration:
 
 ```bash
-# Run the module to extract RO2 species names from a .fac mechanism
-python3 scripts/check_ro2.py mechanism.fac -o ro2_species.txt
+python3 scripts/check_ro2.py mechanism.fac --gold-csv gold/test_ro2_detection_ro2_list_0001.csv
 ```
 
-Output: `ro2_species.txt` (one species per line, alphabetically sorted).
+To validate the parser output against that explicit declaration, add `--run-app`.
+For simplified mechanisms without an explicit declaration, `--run-app` reports the
+fallback-detected species names.
 
 ## Chemical Mechanism Files
 
@@ -307,7 +312,7 @@ The comparison scripts convert MOOSE's molec/cm³ output to ppb using
 | Script | Purpose |
 |--------|---------|
 | `scripts/kpp_to_fac.py` | Convert `.kpp` → `.fac` |
-| `scripts/check_ro2.py` | Run the module to extract RO2 species names from a .fac mechanism via `MCMRO2ListPostprocessor`. Usage: `check_ro2.py <mechanism.fac> [-o output.txt]` |
+| `scripts/check_ro2.py` | Extract RO2 species names from a `.fac` mechanism's explicit `RO2 = ... ;` declaration, write CSVDiff gold with `--gold-csv`, and optionally compare parser output with `--run-app`. |
 | `scripts/generate_atchem2_gold.py` | Generate gold CSV from AtChem2 reference output |
 | `scripts/plot_atchem2.py` | Plot MOOSE vs AtChem2 comparison (3×3 grid PDF) |
 | `scripts/plot_vs_f0am.py` | Plot MOOSE vs analytical solution for F0AM tutorial |
