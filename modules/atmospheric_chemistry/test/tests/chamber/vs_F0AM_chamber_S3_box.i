@@ -18,8 +18,8 @@
   [Box]
     mechanism_file = '../../../doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac'
     temperature = 298.0
-    air_density = 2.46e19
-    water_vapor = 3.12e17
+    air_density = 2.4622e19
+    water_vapor = 7.6114e16
     press = 1013.0
     photolysis_scheme = BOTTOMUP
     lamp_flux_file = 'ExampleLightFlux.txt'
@@ -42,8 +42,7 @@
   type = Transient
   solve_type = NEWTON
   scheme = 'bdf2'
-  end_time = 10800      # 3h
-  dt = 100              # 100s steps for stiff chemistry
+  end_time = 10800
   l_max_its = 200
   l_tol = 1e-4
   nl_max_its = 15
@@ -52,8 +51,8 @@
   petsc_options_iname = '-pc_type -pc_factor_shift_type'
   petsc_options_value = 'lu NONZERO'
   [TimeStepper]
-    type = ConstantDT
-    dt = 100
+    type = TimeSequenceStepper
+    time_sequence = '0 973 1994 2929 3906 5070 6024 7141 7885 8859 9832 10800'
   []
 []
 
@@ -62,5 +61,5 @@
   csv = true
   execute_on = 'timestep_end'
   file_base = 'vs_F0AM_chamber_S3_box'
-  time_step_interval = 10
+  time_step_interval = 1
 []

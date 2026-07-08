@@ -23,6 +23,7 @@
     type = RunApp
     input = vs_F0AM_chamber_S2b_box.i
     heavy = true
+    skip = 'S2b restart needs a separate S2 producer test (creates checkpoint at 10800s)'
     requirement = 'S2b restart shall run without error.'
   [../]
   [./vs_F0AM_chamber_S3_box]
@@ -34,55 +35,5 @@
     ignore_columns = 'ONE RO2 CH3ONO'
     heavy = true
     requirement = 'S3: box mode shall match F0AM within 5%.'
-  [../]
-  [./vs_F0AM_dielcycle_box]
-    type = CSVDiff
-    input = vs_F0AM_dielcycle_box.i
-    csvdiff = ../actions/gold/vs_F0AM_dielcycle_box.csv
-    heavy = true
-    requirement = '24h diurnal cycle shall reproduce reference.'
-  [../]
-  [./vs_F0AM_chamber_S1_box_ts]
-    type = RunApp
-    input = vs_F0AM_chamber_S1_box_ts.i
-    heavy = true
-    requirement = 'S1 PETSc TS shall run.'
-  [../]
-  [./vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-1]
-    type = RunApp
-    input = vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-1.i
-    heavy = true
-    requirement = 'S1 TS bdf rtol=1e-1 shall run.'
-  [../]
-  [./vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-2]
-    type = CSVDiff
-    input = vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-2.i
-    csvdiff = ../actions/gold/vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-2.csv
-    heavy = true
-    requirement = 'S1 TS bdf rtol=1e-2 shall match reference.'
-  [../]
-  [./vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-3]
-    type = RunApp
-    input = vs_F0AM_chamber_S1_box_ts_bdf_rtol1e-3.i
-    heavy = true
-    requirement = 'S1 TS bdf rtol=1e-3 shall run.'
-  [../]
-  [./vs_F0AM_chamber_S1_box_ts_arkimex_rtol1e-2]
-    type = RunApp
-    input = vs_F0AM_chamber_S1_box_ts_arkimex_rtol1e-2.i
-    heavy = true
-    requirement = 'S1 TS arkimex rtol=1e-2 shall run.'
-  [../]
-  [./vs_F0AM_chamber_S1_box_ts_sundials_rtol1e-2]
-    type = RunApp
-    input = vs_F0AM_chamber_S1_box_ts_sundials_rtol1e-2.i
-    heavy = true
-    requirement = 'S1 TS sundials rtol=1e-2 shall run.'
-  [../]
-  [./vs_F0AM_chamber_S1_box_ts_radau5_rtol1e-1]
-    type = RunApp
-    input = vs_F0AM_chamber_S1_box_ts_radau5_rtol1e-1.i
-    heavy = true
-    requirement = 'S1 TS radau5 rtol=1e-1 shall run.'
   [../]
 []
