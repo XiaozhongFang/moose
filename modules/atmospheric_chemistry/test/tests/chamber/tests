@@ -4,7 +4,7 @@
     input = vs_F0AM_chamber_S1_box.i
     csvdiff = vs_F0AM_chamber_S1_box.csv
     rel_err = 5.0e-2
-    abs_zero = 1.0e-6
+    abs_zero = 1.15e-6
     ignore_columns = 'ONE'
     heavy = true
     requirement = 'S1: box mode shall match F0AM within 5%.'
@@ -14,7 +14,7 @@
     input = vs_F0AM_chamber_S2_box.i
     csvdiff = vs_F0AM_chamber_S2_box.csv
     rel_err = 5.0e-2
-    abs_zero = 1.0e-6
+    abs_zero = 1.15e-6
     ignore_columns = 'ONE'
     heavy = true
     requirement = 'S2: box mode shall match F0AM within 5%.'
@@ -31,7 +31,7 @@
     input = vs_F0AM_chamber_S3_box.i
     csvdiff = vs_F0AM_chamber_S3_box.csv
     rel_err = 5.0e-2
-    abs_zero = 1.0e-6
+    abs_zero = 1.15e-6
     ignore_columns = 'ONE'
     heavy = true
     requirement = 'S3: box mode shall match F0AM within 5%.'

@@ -70,7 +70,7 @@ MCMBoxModel::validParams()
       "when many species start at zero. 0.0 = no default (original F0AM behavior).");
   params.addParam<bool>("use_limiting_reagent", false,
       "Enable F0AM-style limiting-reagent formulation for RO2+RO2 termination "
-      "reactions: rate = k * min([A],[B])² instead of k * [A] * [B]. "
+      "reactions: rate = k * min([RO2_i], [RO2]) instead of k * [RO2_i] * [RO2]. "
       "Default false (standard MCM chemistry). Set true for F0AM-compatible "
       "RO2 termination or when comparing against F0AM reference outputs.");
   MooseEnum stoich_fmt("CSR COO DENSE CSC", "CSR");
@@ -414,9 +414,7 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
     return;
   }
 
-  // Use the cached (already-evaluated) rate coefficients.
-  // evaluateCoefficients() is called once per timestep (in runPETScStep or
-  // via getDCdt when dirty) — between those calls, _k is constant.
+  // The mechanism evaluates concentration-dependent rate coefficients for C.
   auto * mech = static_cast<MCMRuntimeMechanism*>(_mechanism.get());
   mech->computeDCdt(C, dC);
 
@@ -822,6 +820,7 @@ MCMBoxModel::execute()
   {
     PetscScalar *x_arr;
     CHKERRABORT(PETSC_COMM_SELF, VecGetArray(_ts_X, &x_arr));
+    std::vector<Real> C_final(x_arr, x_arr + _n_species);
     NumericVector<Number> & sys_sol = *nl.system().solution;
     for (unsigned int i = 0; i < _n_species; ++i)
     {
@@ -831,6 +830,15 @@ MCMBoxModel::execute()
       sv.setValue(0, x_arr[i]);    // _u[i] = val (for sln() → output)
       sys_sol.set(dof, x_arr[i]);  // sys.solution (for next predictor)
       nl.solution().set(dof, x_arr[i]);  // nl.solution (backup)
+    }
+    if (_subproblem.hasScalarVariable("RO2"))
+    {
+      MooseVariableScalar & sv = _subproblem.getScalarVariable(0, "RO2");
+      dof_id_type dof = sv.dofIndices()[0];
+      const Real ro2_sum = _mechanism->getRO2Sum(C_final);
+      sv.setValue(0, ro2_sum);
+      sys_sol.set(dof, ro2_sum);
+      nl.solution().set(dof, ro2_sum);
     }
     sys_sol.close();
     nl.solution().close();
@@ -943,12 +951,11 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
   PETSC_TRY(TSAdaptSetStepLimits(adapt, 1.0e-12, (t1 - t0)));
   PETSC_TRY(TSSetSolution(_ts, _ts_X));
 
-  // Evaluate rate coefficients at the midpoint of this interval.
-  // _k is evaluated at interval midpoint for constant photolysis.
+  // Use midpoint time for time-dependent photolysis during this interval.
+  // Concentration-dependent coefficients are evaluated from the current TS
+  // state in the RHS/Jacobian callbacks.
   _t = 0.5 * (t0 + t1);
   _mechanism->setCurrentTime(_t);
-  if (_mechanism)
-    static_cast<MCMRuntimeMechanism*>(_mechanism.get())->evaluateCoefficients();
 
   // Run the integrator
   PETSC_TRY(TSSolve(_ts, _ts_X));
@@ -998,19 +1005,10 @@ MCMBoxModel::tsRHSFunction(TS /*ts*/, PetscReal /*t*/, Vec C, Vec F, void *ctx)
   PetscCall(VecGetArrayRead(C, &c_arr));
   PetscCall(VecGetArray(F, &f_arr));
 
-  // NOTE: evaluateCoefficients() is NOT called here — it's called once per
-  // MOOSE timestep (in runPETScStep) with the midpoint time.  Calling it
-  // on every TS internal step would modify shared state (_func_params, _k)
-  // in ways that break the TS integrator's assumptions.  For the short
-  // MOOSE timesteps (dt=100s), SZA-driven photolysis changes are negligible.
-
   // Build std::vector around PETSc array (no copy for 610 elements - acceptable)
   std::vector<Real> C_vec(c_arr, c_arr + model->_n_species);
   std::vector<Real> dC_vec;
   model->computeDCdt(C_vec, dC_vec);
-
-  // NOTE: computeDCdt uses _k from the most recent evaluateCoefficients()
-  // call in runPETScStep().  _k is constant throughout the TS interval.
 
   for (unsigned int i = 0; i < model->_n_species; ++i)
     f_arr[i] = dC_vec[i];

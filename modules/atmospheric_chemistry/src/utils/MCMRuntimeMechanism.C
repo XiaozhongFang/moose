@@ -715,6 +715,13 @@ MCMRuntimeMechanism::evaluateCoefficients()
   }
 }
 
+void
+MCMRuntimeMechanism::evaluateCoefficients(const std::vector<Real> & C)
+{
+  _cached_C = C;
+  evaluateCoefficients();
+}
+
 // ---- IMechanism interface implementations ----
 
 void
@@ -741,9 +748,6 @@ MCMRuntimeMechanism::computeRHS(Real t,
   const_cast<MCMRuntimeMechanism *>(this)->updateParams(params);
   const_cast<MCMRuntimeMechanism *>(this)->_t = t;
 
-  // Evaluate rate coefficients
-  const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients();
-
   // Compute dC/dt
   computeDCdt(C, dC_dt);
 }
@@ -759,9 +763,6 @@ MCMRuntimeMechanism::computeJacobian(
   const_cast<MCMRuntimeMechanism *>(this)->updateParams(params);
   const_cast<MCMRuntimeMechanism *>(this)->_t = t;
 
-  // Evaluate rate coefficients
-  const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients();
-
   // Compute Jacobian
   computeJacobianTriplets(C, J);
 }
@@ -776,7 +777,7 @@ MCMRuntimeMechanism::computeSpeciesRates(Real t,
   const_cast<MCMRuntimeMechanism *>(this)->_t = t;
 
   // Evaluate rate coefficients
-  const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients();
+  const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients(C);
 
   SpeciesRates rates;
   rates.production.resize(_n_species, 0.0);
@@ -800,6 +801,8 @@ MCMRuntimeMechanism::computeDCdt(const std::vector<Real> & C, std::vector<Real> 
 
   if (_n_reactions == 0 || _n_species == 0)
     return;
+
+  const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients(C);
 
   // Step 1: compute reactant products G[i] = C[iG[i][0]] * C[iG[i][1]] * C[iG[i][2]]
   _scratch_G.assign(_n_reactions, 0.0);
@@ -853,6 +856,8 @@ MCMRuntimeMechanism::computeJacobianTriplets(
   if (_n_reactions == 0 || _n_species == 0)
     return;
 
+  const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients(C);
+
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
     const int i0 = _iG[r][0], i1 = _iG[r][1], i2 = _iG[r][2];
@@ -895,8 +900,6 @@ MCMRuntimeMechanism::getDCdt(unsigned int idx, const std::vector<Real> & C) cons
   if ((_dirty) || _cached_dC.size() != _n_species)
   {
     _cached_C = C;
-    if (!_coeff_parsers.empty())
-      const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients();
     _cached_dC.resize(_n_species);
     computeDCdt(C, _cached_dC);
     _dirty = false;
@@ -910,6 +913,7 @@ MCMRuntimeMechanism::getJacobianDiagonal(unsigned int idx, const std::vector<Rea
   if (_dirty || _cached_diag_J.size() != _n_species)
   {
     _cached_C = C;
+    const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients(C);
     _buildJacobianCache();
     _dirty = false;
   }
@@ -922,6 +926,7 @@ MCMRuntimeMechanism::getJacobianOffDiagonal(unsigned int i, unsigned int j, cons
   if (_dirty || _cached_od_row_ptr.size() != _n_species + 1)
   {
     _cached_C = C;
+    const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients(C);
     _buildJacobianCache();
     _dirty = false;
   }

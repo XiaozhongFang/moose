@@ -405,7 +405,11 @@ cs_linear_T(const std::string & path, Real T, Real Tref, Real scaleSigma, Real s
 
 /// Exponential T-correction: sigma * exp(B*(T-Tref))
 static std::pair<std::vector<Real>, std::vector<Real>>
-cs_exp_T(const std::string & path, Real T, Real Tref)
+cs_exp_T(const std::string & path,
+         Real T,
+         Real Tref,
+         Real sigma_scale = 1.0,
+         Real B_scale = 1.0)
 {
   std::ifstream file(path);
   if (!file.good()) return {{}, {}};
@@ -417,21 +421,25 @@ cs_exp_T(const std::string & path, Real T, Real Tref)
     for (auto & c : line) if (c == ',') c = ' ';
     std::istringstream iss(line);
     Real w, s, B;
-    if (iss >> w >> s >> B) { wl.push_back(w); cs.push_back(s * std::exp(B * (T - Tref))); }
-    else { iss.clear(); Real w2, v; if (iss >> w2 >> v) { wl.push_back(w2); cs.push_back(v); } }
+    if (iss >> w >> s >> B)
+    {
+      wl.push_back(w);
+      cs.push_back(s / sigma_scale * std::exp(B / B_scale * (T - Tref)));
+    }
+    else { iss.clear(); Real w2, v; if (iss >> w2 >> v) { wl.push_back(w2); cs.push_back(v / sigma_scale); } }
   }
   return {wl, cs};
 }
 
 /// Cubic T-correction: sig298 * (1 + A*Tn + B*Tn^2 + C*Tn^3), Tn = T/Tref
 static std::pair<std::vector<Real>, std::vector<Real>>
-cs_cubic_T(const std::string & path, Real T, Real Tref)
+cs_cubic_T(const std::string & path, Real T, Real /*Tref*/)
 {
   std::ifstream file(path);
   if (!file.good()) return {{}, {}};
   std::vector<Real> wl, cs;
   std::string line;
-  Real Tn = T / Tref;
+  const Real Teff = std::max(235.0, std::min(298.0, T));
   while (std::getline(file, line))
   {
     if (line.empty() || line[0] == '#') continue;
@@ -439,7 +447,7 @@ cs_cubic_T(const std::string & path, Real T, Real Tref)
     std::istringstream iss(line);
     Real w, s298, A, B, Cc;
     if (iss >> w >> s298 >> A >> B >> Cc)
-      { wl.push_back(w); cs.push_back(s298 * (1.0 + A*Tn + B*Tn*Tn + Cc*Tn*Tn*Tn)); }
+      { wl.push_back(w); cs.push_back(s298 * (1.0 + A*Teff + B*Teff*Teff + Cc*Teff*Teff*Teff)); }
     else { iss.clear(); Real w2, v; if (iss >> w2 >> v) { wl.push_back(w2); cs.push_back(v); } }
   }
   return {wl, cs};
@@ -486,17 +494,61 @@ cs_log10_Arrhenius(const std::string & path, Real T, Real Tref)
   return {wl, cs};
 }
 
+/// Read a wavelength CSV and return one 1-based value column.
+static std::pair<std::vector<Real>, std::vector<Real>>
+loadCSVColumn(const std::string & path, unsigned int value_col)
+{
+  std::ifstream file(path);
+  if (!file.good()) return {{}, {}};
+  std::vector<Real> wl, vals;
+  std::string line;
+  while (std::getline(file, line))
+  {
+    if (line.empty() || line[0] == '#') continue;
+    for (auto & c : line) if (c == ',') c = ' ';
+    std::istringstream iss(line);
+    std::vector<Real> fields;
+    Real v;
+    while (iss >> v)
+      fields.push_back(v);
+    if (fields.size() > value_col - 1)
+    {
+      wl.push_back(fields[0]);
+      vals.push_back(fields[value_col - 1]);
+    }
+  }
+  return {wl, vals};
+}
+
 /// H2O2: 7th-order poly (lambda<=260) + chi sigmoid (lambda>260) (F0AM Cross_Section_H2O2.m)
 static std::pair<std::vector<Real>, std::vector<Real>>
 cs_H2O2(const std::string & path, Real T)
 {
-  auto [wl, cols] = cs_interp_T(path, T, 220, 298);
+  auto [wl, cols] = loadCSVColumn(path, 2);
   if (wl.empty()) return {{}, {}};
-  // Apply sigmoid chi for lambda > 260 nm
-  Real chi = 1.0 / (1.0 + std::exp(-1265.0 / T));
+  const Real A[] = {6.4761e4, -9.2170972e2, 4.535649, -4.4589016e-3,
+                    -4.035101e-5, 1.6878206e-7, -2.652014e-10, 1.5534675e-13};
+  const Real B[] = {6.8123e3, -5.1351e1, 1.1522e-1, -3.0493e-5, -1.0924e-7};
+  const Real chi = 1.0 / (1.0 + std::exp(-1265.0 / T));
   for (size_t i = 0; i < wl.size(); ++i)
     if (wl[i] > 260.0)
-      cols[i] *= chi;
+    {
+      Real xA = 0.0;
+      Real xB = 0.0;
+      Real p = 1.0;
+      for (const auto a : A)
+      {
+        xA += a * p;
+        p *= wl[i];
+      }
+      p = 1.0;
+      for (const auto b : B)
+      {
+        xB += b * p;
+        p *= wl[i];
+      }
+      cols[i] = (xA * chi + xB * (1.0 - chi)) / 1.0e21;
+    }
   return {wl, cols};
 }
 
@@ -595,15 +647,15 @@ BottomUpJIntegrator::computeCS_builtin(const std::string & species, Real T, Real
 
   if (species == "HCHO")       return cs_linear_T(csv, T, 298.0, 1.0e21, 1.0e24);
   if (species == "NO2")        { auto [w,v]=loadCSV2(csv); for(auto &x:v)x/=1.0e20; return {w,v}; }
-  if (species == "O3_JPL")     return cs_interp_T(csv, T, 218.0, 295.0);
+  if (species == "O3_JPL")     return cs_interp_T(csv, std::max(218.0, std::min(295.0, T)), 218.0, 295.0);
   if (species == "N2O5")       return cs_log10_Arrhenius(csv, T, 298.0);
   if (species == "CH3COCH3")   return cs_cubic_T(csv, T, 298.0);
-  if (species == "HNO3" ||
-      species == "CH3NO3" ||
+  if (species == "HNO3")       return cs_exp_T(csv, T, 298.0, 1.0e20, 1000.0);
+  if (species == "CH3NO3" ||
       species == "C2H5NO3" ||
       species == "IC3H7NO3" ||
       species == "PAN")        return cs_exp_T(csv, T, 298.0);
-  if (species == "NO3")        return cs_interp_T(csv, T, 230.0, 298.0);
+  if (species == "NO3")        { auto [w,v]=cs_interp_T(csv, std::max(230.0, std::min(298.0, T)), 298.0, 230.0); for(auto &x:v)x/=1.0e19; return {w,v}; }
   if (species == "H2O2")       return cs_H2O2(csv, T);
   if (species == "ClNO2")      return cs_quadratic_T(csv, T, 296.0);
   if (species == "BrONO2")     return cs_interp_T(csv, T, 230.0, 298.0);
@@ -664,15 +716,35 @@ BottomUpJIntegrator::computeQY_builtin(const std::string & species, Real T, Real
   }
   if (species == "O3_O1D_JPL")
   {
-    const Real R=0.695, v2=825.518;
-    Real q2=std::exp(-v2/(R*T)), Q=1.0+q2;
+    const Real Teff = std::max(200.0, std::min(320.0, T));
+    const Real A1=0.8036, A2=8.9061, A3=0.1192;
+    const Real X1=304.225, X2=314.957, X3=310.737;
+    const Real w1=5.576, w2=6.601, w3=2.187;
+    const Real v1=0.0, v2=825.518, c=0.0765, R=0.695;
+    const Real q1=std::exp(-v1/(R*Teff));
+    const Real q2=std::exp(-v2/(R*Teff));
+    const Real qsum = q1 + q2;
     std::vector<Real> wl, qy;
-    for (unsigned int w = 185; w <= 345; ++w) {
-      Real wf=static_cast<Real>(w); wl.push_back(wf);
-      if (wf < 220.0) qy.push_back(1.0);
-      else if (wf <= 305.0) qy.push_back(0.9);
-      else if (wf <= 328.0) { Real x=(wf-328.0)/13.0; qy.push_back(std::exp(-x*x)*3.0e-2+std::exp(-(wf-308.0)*(wf-308.0)/2500.0)*3.0e-3); }
-      else qy.push_back(0.0);
+    auto [wl_o3, unused] = loadCSV2(_data_dir+"/CrossSections/Cross_Section_O3_JPL.csv");
+    for (const auto wf : wl_o3) {
+      wl.push_back(wf);
+      if (wf >= 193.0 && wf < 220.0)
+        qy.push_back(0.0137 * wf - 2.16);
+      else if (wf >= 220.0 && wf < 306.0)
+        qy.push_back(0.9);
+      else if (wf >= 306.0 && wf < 329.0)
+      {
+        const Real term1 = std::exp(-std::pow((X1 - wf) / w1, 4.0)) * (q1 / qsum * A1);
+        const Real term2 = std::exp(-std::pow((X2 - wf) / w2, 2.0)) *
+                           (q2 / qsum * A2 * std::pow(Teff / 300.0, 2.0));
+        const Real term3 = std::exp(-std::pow((X3 - wf) / w3, 2.0)) *
+                           A3 * std::pow(Teff / 300.0, 1.5);
+        qy.push_back(term1 + term2 + term3 + c);
+      }
+      else if (wf >= 329.0 && wf < 341.0)
+        qy.push_back(0.08);
+      else
+        qy.push_back(0.0);
     }
     return {wl, qy};
   }
@@ -688,12 +760,28 @@ BottomUpJIntegrator::computeQY_builtin(const std::string & species, Real T, Real
     return loadCSV2(csv);
   }
   if (species == "GLYOX_H2" || species == "GLYOX_HCHO" || species == "GLYOX_HCO")
-    return loadCSV2(_data_dir+"/QuantumYields/Quantum_Yield_GLYOX_JPL.csv");
+  {
+    const std::string csv = _data_dir+"/QuantumYields/Quantum_Yield_GLYOX_JPL.csv";
+    if (species == "GLYOX_HCO")
+      return loadCSVColumn(csv, 2);
+    if (species == "GLYOX_H2")
+      return loadCSVColumn(csv, 3);
+    return loadCSVColumn(csv, 4);
+  }
   if (species == "MGLYOX")
   {
     std::vector<Real> wl, qy;
-    for (unsigned int w=200; w<=480; ++w) { wl.push_back(Real(w));
-      if (w<290) qy.push_back(0.5); else if (w<350) qy.push_back(0.5*(350.0-w)/60.0); else if (w<400) qy.push_back(0.05); else qy.push_back(0.01); }
+    const Real PN2 = 0.78 * P;
+    for (unsigned int w=280; w<=440; ++w)
+    {
+      const Real wf = Real(w);
+      Real QY0 = 1.0;
+      if (wf > 380.0)
+        QY0 = 3.63e-7 * std::exp(5693.0 / wf);
+      const Real kQ = 1.93e4 * std::exp(-5639.0 / wf) * 760.0 / 1013.0;
+      wl.push_back(wf);
+      qy.push_back(1.0 / (1.0 / QY0 + kQ * PN2));
+    }
     return {wl, qy};
   }
   if (species == "Acrolein")
@@ -704,14 +792,55 @@ BottomUpJIntegrator::computeQY_builtin(const std::string & species, Real T, Real
   }
   if (species == "CH3COCH3_CO")
   {
-    std::vector<Real> wl, qy; Real Tn=T/295.0, a0=0.350*std::pow(Tn,-1.28), b0=0.068*std::pow(Tn,-2.65);
-    for (unsigned int w=250; w<=380; ++w) { Real wf=Real(w), A0=a0*std::exp(-(1.0e7/wf-30488.0)*b0); wl.push_back(wf); qy.push_back(1.0/(1.0+A0)); }
+    std::vector<Real> wl, qy;
+    const Real Tn = T / 295.0;
+    const Real a0 = 0.350 * std::pow(Tn, -1.28);
+    const Real b0 = 0.068 * std::pow(Tn, -2.65);
+    for (unsigned int i=0; i<=96; ++i)
+    {
+      const Real wf = 279.0 + 0.5 * i;
+      const Real A0 = a0 / (1.0 - a0) * std::exp((wf - 248.0) * b0);
+      wl.push_back(wf);
+      qy.push_back(std::max(0.0, 1.0 / (1.0 + A0)));
+    }
     return {wl, qy};
   }
   if (species == "CH3COCH3_CH3CO")
   {
-    // J_BottomUp.m: 3-regime, 4 A-factors. Simplified: both channels have same QY
-    return computeQY_builtin("CH3COCH3_CO", T, P);
+    auto [wl, qy1] = computeQY_builtin("CH3COCH3_CO", T, P);
+    const Real Tn = T / 295.0;
+    const Real M = 6.022e23 * P / (8.314e4 * T);
+    const Real a1 = 1.6e-19 * std::pow(Tn, -2.38);
+    const Real b1 = 0.55e-3 * std::pow(Tn, -3.19);
+    const Real a2 = 1.62e-17 * std::pow(Tn, -10.03);
+    const Real b2 = 1.79e-3 * std::pow(Tn, -1.364);
+    const Real a3 = 26.29 * std::pow(Tn, -6.59);
+    const Real b3 = 5.72e-7 * std::pow(Tn, -2.93);
+    const Real c3 = 30006.0 * std::pow(Tn, -0.064);
+    const Real a4 = 1.67e-15 * std::pow(Tn, -7.25);
+    const Real b4 = 2.08e-3 * std::pow(Tn, -1.16);
+    std::vector<Real> qy;
+    qy.reserve(wl.size());
+    for (size_t i=0; i<wl.size(); ++i)
+    {
+      const Real wf = wl[i];
+      const Real one_minus_qy1 = 1.0 - qy1[i];
+      if (wf <= 302.0)
+      {
+        const Real A1 = a1 * std::exp(-(1.0e7 / wf - 33113.0) * b1);
+        qy.push_back(one_minus_qy1 / (1.0 + A1 * M));
+      }
+      else
+      {
+        const Real A2 = a2 * std::exp(-(1.0e7 / wf - 30488.0) * b2);
+        const Real A3 = a3 * std::exp(-std::pow(1.0e7 / wf - c3, 2.0) * b3);
+        const Real A4 = a4 * std::exp(-(1.0e7 / wf - 30488.0) * b4);
+        qy.push_back((1.0 + A4 * M + A3) /
+                     ((1.0 + A2 * M + A3) * (1.0 + A4 * M)) *
+                     one_minus_qy1);
+      }
+    }
+    return {wl, qy};
   }
   if (species == "C3H7CHO_C3H7" || species == "C3H7CHO_C2H4")
   {

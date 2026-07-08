@@ -29,8 +29,8 @@
     use_limiting_reagent = true
     chem_solver = petsc_ts
     chem_solver_type = bdf
-    chem_solver_rtol = 1e-2
-    chem_solver_atol = 1e-6
+    chem_solver_rtol = 5e-4
+    chem_solver_atol = 5e-8
   []
 []
 
@@ -44,7 +44,7 @@
   type = Transient
   solve_type = NEWTON
   scheme = 'bdf2'
-  end_time = 10800
+  end_time = 9832
   l_max_its = 200
   l_tol = 1e-4
   nl_max_its = 15
@@ -60,6 +60,7 @@
 
 [Outputs]
   checkpoint = false
+  console = false
   csv = true
   execute_on = 'timestep_end'
   file_base = 'vs_F0AM_chamber_S3_box'

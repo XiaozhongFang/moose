@@ -202,14 +202,13 @@ public:
    *  a series of evaluations (e.g., at timestep midpoint in PETSc TS mode). */
   void evaluateCoefficients();
 
-  /** Compute dC/dt using the current (already-evaluated) rate coefficients.
-   *  Unlike computeRHS(), this does NOT re-evaluate rate coefficients —
-   *  it uses the cached _k from the most recent evaluateCoefficients() call.
-   *  This is the hot-path for PETSc TS internal steps where coefficients
-   *  are constant across the timestep. */
+  /** Evaluate all rate coefficients using the supplied concentration state. */
+  void evaluateCoefficients(const std::vector<Real> & C);
+
+  /** Compute dC/dt using rate coefficients evaluated for C. */
   void computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) const;
 
-  /** Compute Jacobian as (row, col, val) triplets using current coefficients. */
+  /** Compute Jacobian as (row, col, val) triplets using coefficients evaluated for C. */
   void computeJacobianTriplets(
       const std::vector<Real> & C,
       std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const;

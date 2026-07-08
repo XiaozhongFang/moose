@@ -59,7 +59,7 @@ See `MCMBoxModel` and `ChemistryODEKernel` documentation for implementation deta
 
 ## Photolysis Schemes
 
-Two photolysis calculation methods are supported via the `photolysis_scheme` parameter:
+Three photolysis calculation methods are supported via the `photolysis_scheme` parameter:
 
 | Scheme | Input | Dependencies | Use Case |
 |--------|-------|-------------|----------|
@@ -117,6 +117,14 @@ The raw CSV files serve as the base data; temperature and pressure corrections
 are applied at runtime by the C++ built-in formulas (e.g., linear T-correction
 for HCHO, Arrhenius for N2O5, 4-regime spectroscopic for O3, etc.).
 No Python or MATLAB precomputation is needed.
+
+The chamber validation path follows F0AM's `J_BottomUp` implementation closely:
+HNO3 and NO3 cross-section scaling, O3 O(1D)/O(3P) quantum yields, H2O2
+temperature-dependent cross sections, acetone branching yields, and glyoxal /
+methylglyoxal quantum yields are evaluated from the same spectral data and
+formula conventions used by F0AM. This matters for `MCMv331_Inorg_Isoprene`,
+where incorrect J-values propagate rapidly into NO3, HNO3, and isoprene
+oxidation products.
 
 ### Internal: cs_type / qy_type system
 
@@ -212,29 +220,30 @@ MATLAB functions to C++ `BottomUpJIntegrator`). Four scenarios matching F0AM's
 | S3_box   | 10        | 1     | 3 h      | `S.StepIndex == 3` |
 | S2b_box  | 1         | 10    | 1 h      | Restart from S2 end state |
 
-**Gold CSV generation** — from F0AM `.mat` output (no MATLAB required):
+**Gold CSV generation** — run the F0AM chamber export script from MATLAB:
 
 ```bash
-# Prerequisites: F0AM ExampleSetup_Chamber.m must have been run to produce:
-#   Runs/ChamberExampleOutput.mat
-#   Runs/ChamberExampleHighLightsOutput.mat
-
-python3 scripts/generate_gold_vs_F0AM_chamber.py \
-    --mat /path/to/ChamberExampleOutput.mat \
-    --mat-s2b /path/to/ChamberExampleHighLightsOutput.mat
-
-# Custom output directory:
-python3 scripts/generate_gold_vs_F0AM_chamber.py \
-    --gold-dir test/tests/actions/gold
+# F0AM side:
+#   Setups/Examples/ExampleSetup_Chamber.m
+#   Scripts/Tutorials/ExampleSetup_Chamber/export_chamber_gold.m
+#
+# MOOSE-side copy:
+#   modules/atmospheric_chemistry/scripts/export_chamber_gold.m
 ```
 
-The script:
+The export script:
 1. Reads air number density from `S.Met.M` (dynamic, not hardcoded)
 2. Extracts S1/S2/S3 by `StepIndex`, S2b from the high-lights file
 3. Removes F0AM pseudo-species ONE and CH3ONO (not in MOOSE mechanism);
    keeps RO2 (now output as a diagnostic ScalarVariable in box mode)
 4. Reorders columns to match MOOSE output order (611 columns: 610 species + RO2)
 5. Writes to `gold/vs_F0AM_chamber_{S1,S2,S3,S2b}_box.csv`
+
+The MOOSE chamber tests use PETSc TS BDF with `chem_solver_rtol = 5e-4` and
+`chem_solver_atol = 5e-8`. The CSVDiff comparison keeps a 5% relative tolerance
+and uses `abs_zero = 1.15e-6` to ignore roundoff-scale species concentrations
+near zero. S2 and S3 stop at the final F0AM output times in their time sequences
+(`9957 s` and `9832 s`) instead of a nominal 3-hour endpoint.
 
 ### Running Tests
 
@@ -246,10 +255,17 @@ cd /path/to/moose
 ./run_tests --heavy -j1 modules/atmospheric_chemistry
 ```
 
-Or run a single scenario:
+Or run the chamber validation subset:
 
 ```bash
-cd modules/atmospheric_chemistry/test/tests/actions
+cd modules/atmospheric_chemistry
+./run_tests -C test/tests/chamber --heavy --re 'vs_F0AM_chamber_S[123]_box'
+```
+
+Or run a single scenario directly:
+
+```bash
+cd modules/atmospheric_chemistry/test/tests/chamber
 ../../../atmospheric_chemistry-opt -i vs_F0AM_chamber_S1_box.i
 ```
 
@@ -263,8 +279,8 @@ python3 scripts/compare_chamber_f0am.py
 
 # Single scenario
 python3 scripts/compare_chamber_f0am.py \
-    --moose test/tests/actions/vs_F0AM_chamber_S1_box.csv \
-    --gold test/tests/actions/gold/vs_F0AM_chamber_S1_box.csv
+    --moose test/tests/chamber/vs_F0AM_chamber_S1_box.csv \
+    --gold test/tests/chamber/gold/vs_F0AM_chamber_S1_box.csv
 ```
 
 **Visual comparison** (2x2 panel PDFs):
@@ -278,8 +294,8 @@ python3 scripts/plot_chamber_comparison.py
 
 # Single scenario, custom output
 python3 scripts/plot_chamber_comparison.py \
-    --moose test/tests/actions/vs_F0AM_chamber_S1_box.csv \
-    --gold test/tests/actions/gold/vs_F0AM_chamber_S1_box.csv \
+    --moose test/tests/chamber/vs_F0AM_chamber_S1_box.csv \
+    --gold test/tests/chamber/gold/vs_F0AM_chamber_S1_box.csv \
     --save chamber_S1.pdf
 ```
 
