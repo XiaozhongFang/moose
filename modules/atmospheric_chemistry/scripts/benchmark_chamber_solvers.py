@@ -27,6 +27,16 @@ Run the accuracy/timing benchmark against the F0AM gold CSV files:
         --compare-gold --plot-comparison \
         --f0am-seconds 7 \
         --output-dir kpp_chamber/solver_runs/f0am_accuracy_timing
+
+Run the 1x1-mesh KPP coupled accuracy check:
+
+    python3 scripts/benchmark_chamber_solvers.py \
+        --formulation coupled \
+        --solvers kpp_rosenbrock \
+        --scenarios S1 \
+        --compare-gold \
+        --rel-err 0.2 --abs-zero 1e4 --abs-err 4e4 \
+        --output-dir kpp_chamber/solver_runs/coupled_accuracy
 """
 
 import argparse
@@ -52,6 +62,8 @@ SCENARIOS = [
     ("S2b", "vs_F0AM_chamber_S2b_box.i"),
     ("S3", "vs_F0AM_chamber_S3_box.i"),
 ]
+SCENARIO_NAMES = tuple(name for name, _template in SCENARIOS)
+SCENARIO_TEMPLATES = dict(SCENARIOS)
 GOLD_SCENARIOS = {
     "S1": "vs_F0AM_chamber_S1_box.csv",
     "S2": "vs_F0AM_chamber_S2_box.csv",
@@ -264,6 +276,22 @@ def parse_solvers(value):
     return solvers
 
 
+def parse_scenarios(value):
+    if value == "all":
+        return list(SCENARIOS)
+
+    scenarios = []
+    for item in value.split(","):
+        name = item.strip()
+        if not name:
+            continue
+        if name not in SCENARIO_TEMPLATES:
+            raise SystemExit(
+                f"ERROR: unknown scenario '{name}'. Valid values: {', '.join(SCENARIO_NAMES)}, all")
+        scenarios.append((name, SCENARIO_TEMPLATES[name]))
+    return scenarios
+
+
 def parse_column_list(value):
     return [item for item in re.split(r"[,\s]+", value.strip()) if item]
 
@@ -301,6 +329,237 @@ def read_ro2_species(path=KPP_FAC):
 RO2_SPECIES = read_ro2_species()
 
 
+def read_kpp_variable_species(mechanism_file):
+    """Read KPP #DEFVAR species order from the generated .spc file."""
+    spc_file = mechanism_file.with_suffix(".spc")
+    if not spc_file.exists():
+        raise SystemExit(f"ERROR: KPP species file not found: {spc_file}")
+
+    species = []
+    in_defvar = False
+    for raw_line in spc_file.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("//"):
+            continue
+        if line.upper() == "#DEFVAR":
+            in_defvar = True
+            continue
+        if line.startswith("#"):
+            if in_defvar:
+                break
+            continue
+        if not in_defvar:
+            continue
+        match = re.match(r"([A-Za-z0-9_]+)\s*=", line)
+        if match:
+            species.append(match.group(1))
+
+    if not species:
+        raise SystemExit(f"ERROR: no KPP #DEFVAR species found in {spc_file}")
+    return species
+
+
+def parse_template_param(text, name, default=None):
+    match = re.search(rf"^\s*{re.escape(name)}\s*=\s*(.*?)\s*(?:#.*)?$",
+                      text, flags=re.MULTILINE)
+    return match.group(1).strip() if match else default
+
+
+def parse_time_values(value):
+    if value is None:
+        return []
+    text = value.strip().strip("'\"")
+    return [float(item) for item in text.split()]
+
+
+def format_time_values(values):
+    return "'" + " ".join(f"{value:g}" for value in values) + "'"
+
+
+def refine_time_values(values, max_dt, refine_until):
+    if not values or max_dt <= 0.0:
+        return values
+
+    refined = [values[0]]
+    for left, right in zip(values, values[1:]):
+        span = right - left
+        if span <= 0.0:
+            continue
+
+        if left < refine_until:
+            segment_end = min(right, refine_until)
+            n_steps = max(1, math.ceil((segment_end - left) / max_dt))
+            for step in range(1, n_steps + 1):
+                refined.append(left + (segment_end - left) * step / n_steps)
+            if segment_end < right:
+                refined.append(right)
+        else:
+            refined.append(right)
+
+    return refined
+
+
+def parse_scalar_ics(text):
+    pattern = re.compile(
+        r"\[(?P<block>[A-Za-z0-9_]+)\]\s+type\s*=\s*ScalarConstantIC\s+"
+        r"variable\s*=\s*(?P<variable>[A-Za-z0-9_]+)\s+value\s*=\s*(?P<value>\S+)")
+    return [(match.group("block"), match.group("variable"), match.group("value"))
+            for match in pattern.finditer(text)]
+
+
+def generate_coupled_input(template_path, run_dir, solver_name, scenario, s2_restart_base,
+                           keep_csv, mechanism_file, coupled_max_dt=0.0,
+                           coupled_refine_until=0.0):
+    text = template_path.read_text()
+    species = read_kpp_variable_species(mechanism_file)
+
+    jfac = parse_template_param(text, "jfac", "1.0")
+    end_time = parse_template_param(text, "end_time", "10800")
+    start_time = parse_template_param(text, "start_time")
+    time_sequence = parse_template_param(text, "time_sequence")
+    sync_times = parse_template_param(text, "sync_times")
+    constant_dt = parse_template_param(text, "dt", "3600") if scenario == "S2b" else None
+    file_base = input_relpath(output_base(run_dir, solver_name, scenario))
+    output_times = parse_time_values(time_sequence or sync_times)
+    solve_times = output_times
+    if coupled_max_dt > 0.0 and output_times:
+        refine_until = coupled_refine_until if coupled_refine_until > 0.0 else float(end_time)
+        solve_times = refine_time_values(output_times, coupled_max_dt, refine_until)
+
+    lines = [
+        f"# Generated 1x1 coupled chamber accuracy input for {solver_name} {scenario}.",
+        "# Chemistry is solved with [AtmosphericChemistry/Coupled], not box mode.",
+        "",
+        "[Mesh]",
+        "  [gen]",
+        "    type = GeneratedMeshGenerator",
+        "    dim = 1",
+        "    nx = 1",
+        "  []",
+        "[]",
+        "",
+        "[AtmosphericChemistry]",
+        "  [Coupled]",
+        f"    mechanism_file = '{input_relpath(mechanism_file)}'",
+        "    temperature = 298.0",
+        "    air_density = 2.4622e19",
+        "    water_vapor = 7.6114e16",
+        "    press = 1013.0",
+        "    photolysis_scheme = BOTTOMUP",
+        "    lamp_flux_file = 'ExampleLightFlux.txt'",
+        "    bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'",
+        f"    jfac = {jfac}",
+        f"    chem_solver = {solver_name}",
+        "    units = molec_cm3",
+        "  []",
+        "[]",
+    ]
+
+    ics = parse_scalar_ics(text)
+    if ics:
+        lines.extend(["", "[ICs]"])
+        for block, variable, value in ics:
+            lines.extend([
+                f"  [{block}]",
+                "    type = ConstantIC",
+                f"    variable = {variable}",
+                f"    value = {value}",
+                "  []",
+            ])
+        lines.append("[]")
+
+    lines.extend([
+        "",
+        "[Postprocessors]",
+        "  # One-element averages preserve species-column names for F0AM gold CSV comparison.",
+    ])
+    for name in species:
+        lines.extend([
+            f"  [{name}]",
+            "    type = ElementAverageValue",
+            f"    variable = {name}",
+            "  []",
+        ])
+    lines.append("[]")
+
+    lines.extend([
+        "",
+        "[Preconditioning]",
+        "  [smp]",
+        "    type = SMP",
+        "    full = true",
+        "  []",
+        "[]",
+        "",
+        "[Executioner]",
+        "  type = Transient",
+        "  solve_type = NEWTON",
+        "  scheme = 'bdf2'",
+    ])
+    if start_time is not None:
+        lines.append(f"  start_time = {start_time}")
+    lines.extend([
+        f"  end_time = {end_time}",
+        "  l_max_its = 200",
+        "  l_tol = 1e-4",
+        "  nl_max_its = 15",
+        "  nl_rel_tol = 1e-6",
+        "  nl_abs_tol = 1e-8",
+        "  petsc_options_iname = '-pc_type -pc_factor_shift_type'",
+        "  petsc_options_value = 'lu NONZERO'",
+        "  [TimeStepper]",
+    ])
+    if time_sequence is not None or (coupled_max_dt > 0.0 and output_times):
+        lines.extend([
+            "    type = TimeSequenceStepper",
+            f"    time_sequence = {format_time_values(solve_times)}",
+        ])
+    else:
+        lines.extend([
+            "    type = ConstantDT",
+            f"    dt = {constant_dt or end_time}",
+        ])
+    lines.extend([
+        "  []",
+        "[]",
+        "",
+        "[Outputs]",
+        "  checkpoint = " + ("true" if scenario == "S2" else "false"),
+        "  console = false",
+        f"  file_base = '{file_base}'",
+    ])
+    if keep_csv:
+        lines.extend([
+            "  [csv]",
+            "    type = CSV",
+            "    execute_on = 'timestep_end'",
+            "    time_step_interval = 1",
+        ])
+        if coupled_max_dt > 0.0 and output_times:
+            lines.append(f"    sync_times = {format_time_values(output_times)}")
+            lines.append("    sync_only = true")
+        elif sync_times is not None:
+            lines.append(f"    sync_times = {sync_times}")
+        lines.extend([
+            "  []",
+        ])
+    lines.append("[]")
+
+    if scenario == "S2b":
+        if not s2_restart_base:
+            raise ValueError("S2b requires an S2 restart base")
+        lines.extend([
+            "",
+            "[Problem]",
+            f"  restart_file_base = '{s2_restart_base}_cp/LATEST'",
+            "[]",
+        ])
+
+    generated = run_dir / f"{solver_name}_{scenario}.i"
+    generated.write_text("\n".join(lines) + "\n")
+    return generated
+
+
 def row_value(row, column, header):
     if column in row:
         return float(row[column])
@@ -316,7 +575,7 @@ def row_value(row, column, header):
     raise KeyError(column)
 
 
-def compare_csv_to_gold(moose_csv, gold_csv, rel_err, abs_zero, ignore_columns):
+def compare_csv_to_gold(moose_csv, gold_csv, rel_err, abs_zero, abs_err, ignore_columns):
     """Compare one solver CSV against a F0AM gold CSV using CSVDiff-like tolerances."""
     if not moose_csv.exists():
         return {
@@ -391,7 +650,7 @@ def compare_csv_to_gold(moose_csv, gold_csv, rel_err, abs_zero, ignore_columns):
                 rel = diff / max(abs(gold_check), abs(moose_check))
             max_rel = max(max_rel, rel)
             max_abs = max(max_abs, diff)
-            if rel > rel_err:
+            if rel > rel_err and diff > abs_err:
                 status = "FAIL"
                 fail_count += 1
                 if len(fail_examples) < 5:
@@ -412,11 +671,13 @@ def compare_csv_to_gold(moose_csv, gold_csv, rel_err, abs_zero, ignore_columns):
 
 
 def scenario_tolerances(scenario, args):
-    if args.rel_err is not None or args.abs_zero is not None:
+    if args.rel_err is not None or args.abs_zero is not None or args.abs_err is not None:
         rel = args.rel_err if args.rel_err is not None else 5.0e-2
         zero = args.abs_zero if args.abs_zero is not None else 2.0e-6
-        return rel, zero
-    return SCENARIO_TOLERANCES.get(scenario, (5.0e-2, 2.0e-6))
+        abs_err = args.abs_err if args.abs_err is not None else 0.0
+        return rel, zero, abs_err
+    rel, zero = SCENARIO_TOLERANCES.get(scenario, (5.0e-2, 2.0e-6))
+    return rel, zero, 0.0
 
 
 def diagnostic_errors(moose_csv, gold_csv):
@@ -466,12 +727,14 @@ def diagnostic_errors(moose_csv, gold_csv):
 
 
 def write_analysis(path, timing_rows, summary_rows, diagnostic_rows, f0am_seconds, compare_gold,
-                   figure_dir=None):
+                   figure_dir=None, formulation="box", scenarios=None):
     """Write a compact Markdown archive of solver timing and accuracy results."""
     lines = [
         "# Chamber Solver Timing Analysis",
         "",
         f"Generated: {_dt.datetime.now().isoformat(timespec='seconds')}",
+        f"Formulation: {formulation}",
+        f"Scenarios: {', '.join(scenarios or SCENARIO_NAMES)}",
         f"F0AM baseline scope: S1 + S2 + S2b restart + S3 ({f0am_seconds:.3f} s)",
     ]
     if compare_gold:
@@ -555,6 +818,14 @@ def main():
     parser.add_argument("--app", help="Path to atmospheric_chemistry-opt")
     parser.add_argument("--solvers", default="all",
                         help="Comma-separated solver list, or 'all' to cover direct FAC and generated KPP solvers")
+    parser.add_argument("--formulation", choices=("box", "coupled"), default="box",
+                        help="Use box inputs or generated 1x1-mesh coupled inputs")
+    parser.add_argument("--scenarios", default="all",
+                        help="Comma-separated scenario list, or 'all' for S1,S2,S2b,S3")
+    parser.add_argument("--coupled-max-dt", type=float, default=0.0,
+                        help="Maximum internal coupled time step used between chamber output times")
+    parser.add_argument("--coupled-refine-until", type=float, default=0.0,
+                        help="Only apply --coupled-max-dt before this simulation time")
     parser.add_argument("--repeat", type=int, default=1,
                         help="Number of repeats per solver")
     parser.add_argument("--f0am-seconds", type=float, default=6.0,
@@ -573,6 +844,8 @@ def main():
                         help="Override the scenario-specific relative tolerance used by --compare-gold")
     parser.add_argument("--abs-zero", type=float,
                         help="Override the scenario-specific absolute zero threshold used by --compare-gold")
+    parser.add_argument("--abs-err", type=float,
+                        help="Absolute error tolerance used together with --rel-err")
     parser.add_argument("--ignore-columns", default=" ".join(DEFAULT_IGNORE_COLUMNS),
                         help="Columns ignored by --compare-gold")
     parser.add_argument("--analysis-file", default="chamber_solver_analysis.md",
@@ -604,6 +877,13 @@ def main():
         args.keep_csv = True
 
     solvers = parse_solvers(args.solvers)
+    scenarios = parse_scenarios(args.scenarios)
+    if args.formulation == "coupled":
+        non_kpp = [name for name in solvers if name not in KPP_SOLVERS]
+        if non_kpp:
+            raise SystemExit(
+                "ERROR: --formulation coupled currently supports generated KPP solvers only: "
+                + ", ".join(non_kpp))
     ignore_columns = parse_column_list(args.ignore_columns)
     gold_dir = resolve_existing_path(args.gold_dir)
     if not gold_dir.exists() and not args.write_inputs_only:
@@ -658,12 +938,18 @@ def main():
                 repeat_max_abs = 0.0
                 s2_base = f"{solver_name}_S2"
 
-                for scenario, template in SCENARIOS:
+                for scenario, template in scenarios:
                     template_path = CHAMBER_DIR / template
-                    generated = generate_input(template_path, run_dir, solver_name, solver,
-                                               solver_type, scenario, s2_base,
-                                               args.keep_csv, args.rtol, args.atol,
-                                               mechanism_file=mechanism_file)
+                    if args.formulation == "coupled":
+                        generated = generate_coupled_input(
+                            template_path, run_dir, solver_name, scenario, s2_base,
+                            args.keep_csv, mechanism_file, args.coupled_max_dt,
+                            args.coupled_refine_until)
+                    else:
+                        generated = generate_input(template_path, run_dir, solver_name, solver,
+                                                   solver_type, scenario, s2_base,
+                                                   args.keep_csv, args.rtol, args.atol,
+                                                   mechanism_file=mechanism_file)
                     log_path = run_dir / f"{solver_name}_{scenario}.log"
 
                     if args.write_inputs_only:
@@ -704,10 +990,10 @@ def main():
                         else:
                             gold_csv = gold_dir / GOLD_SCENARIOS[scenario]
                             moose_csv = output_base(run_dir, solver_name, scenario).with_suffix(".csv")
-                            rel_err, abs_zero = scenario_tolerances(scenario, args)
+                            rel_err, abs_zero, abs_err = scenario_tolerances(scenario, args)
                             accuracy = compare_csv_to_gold(
                                 moose_csv, gold_csv, rel_err,
-                                abs_zero, ignore_columns)
+                                abs_zero, abs_err, ignore_columns)
                             accuracy["gold"] = display_path(gold_csv)
                             compared_scenarios.append(scenario)
                             for diag in diagnostic_errors(moose_csv, gold_csv):
@@ -785,7 +1071,9 @@ def main():
     write_rows(timing_csv, TIMING_FIELDS, timing_rows)
     write_rows(summary_csv, SUMMARY_FIELDS, summary_rows)
     write_analysis(analysis_path, timing_rows, summary_rows, diagnostic_rows,
-                   args.f0am_seconds, args.compare_gold, figure_dir)
+                   args.f0am_seconds, args.compare_gold, figure_dir,
+                   formulation=args.formulation,
+                   scenarios=[name for name, _template in scenarios])
 
     print(f"Wrote {input_relpath(timing_csv)}")
     print(f"Wrote {input_relpath(summary_csv)}")

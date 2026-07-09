@@ -301,6 +301,7 @@ Or run the generated-KPP chamber solver benchmark tests:
 cd modules/atmospheric_chemistry
 ./run_tests -C test/tests/chamber/kpp_chamber --re solver_timing_inputs
 ./run_tests -C test/tests/chamber/kpp_chamber --heavy --re solver_accuracy_timing
+./run_tests -C test/tests/chamber/kpp_chamber --heavy --re coupled_accuracy
 ```
 
 Or run the operator-split FV/KPP chamber smoke test. This uses a mesh-cloned
@@ -352,6 +353,15 @@ python3 scripts/benchmark_chamber_solvers.py \
     --compare-gold --plot-comparison \
     --f0am-seconds 7 \
     --output-dir kpp_chamber/solver_runs/f0am_accuracy_timing
+
+# Run the one-cell coupled KPP chamber accuracy check against the S1 gold CSV.
+python3 scripts/benchmark_chamber_solvers.py \
+    --formulation coupled \
+    --solvers kpp_rosenbrock \
+    --scenarios S1 \
+    --compare-gold \
+    --rel-err 0.2 --abs-zero 1e4 --abs-err 4e4 \
+    --output-dir kpp_chamber/solver_runs/coupled_accuracy
 
 # Optional: run the generated KPP Rosenbrock mechanism with MATLAB/F0AM default tolerances.
 python3 scripts/benchmark_chamber_solvers.py \

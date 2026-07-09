@@ -371,7 +371,6 @@ cs_interp_T(const std::string & path, Real T, Real T1, Real T2)
     if (line.empty() || line[0] == '#') continue;
     for (auto & c : line) if (c == ',') c = ' ';
     std::istringstream iss(line);
-    Real w, v1, v2;
     std::vector<Real> vals;
     { Real val; while (iss >> val) vals.push_back(val); }
     if (vals.size() >= 3)
@@ -591,7 +590,7 @@ cs_ClO_MB1999(const std::string & path, Real T)
 
 /// Br2: sum of 4 Gaussians (pure analytical, no CSV)  (F0AM Cross_Section_Br2.m)
 static std::pair<std::vector<Real>, std::vector<Real>>
-cs_Br2(Real T)
+cs_Br2(Real /*T*/)
 {
   std::vector<Real> wl, cs;
   for (unsigned int w = 200; w <= 600; ++w)
@@ -641,7 +640,7 @@ cs_Cl2(const std::string & path, Real T)
 // ─────────────────────────────────────────────────────────────
 
 std::pair<std::vector<Real>, std::vector<Real>>
-BottomUpJIntegrator::computeCS_builtin(const std::string & species, Real T, Real P) const
+BottomUpJIntegrator::computeCS_builtin(const std::string & species, Real T, Real /*P*/) const
 {
   std::string csv = _data_dir + "/CrossSections/Cross_Section_" + species + ".csv";
 

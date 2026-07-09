@@ -10,6 +10,7 @@ LIB := $(OUT_DIR)/libkpp_$(MECH_NAME).so
 ADAPTER_SRC := $(realpath $(dir $(lastword $(MAKEFILE_LIST)))/../adapter/kpp_adapter.c)
 KPP_INTEGRATOR ?= $(shell awk 'tolower($$1)=="#integrator"{print tolower($$2); exit}' $(MECH) 2>/dev/null)
 KPP_INTEGRATOR := $(if $(KPP_INTEGRATOR),$(KPP_INTEGRATOR),rosenbrock)
+KPP_CFLAGS ?= -O2 -fPIC
 KPP_ADAPTER_CPPFLAGS :=
 ifneq ($(KPP_INTEGRATOR),rosenbrock)
   KPP_ADAPTER_CPPFLAGS += -DKPP_USE_GENERATED_INTEGRATE
@@ -50,6 +51,9 @@ $(LIB): $(ADAPTER_SRC) $(realpath $(MECH))
 	perl -0pi -e 's/double C\[NSPEC\];/double C[NSPEC + NFIX];/' $(OUT_DIR)/$(MECH_NAME)_Main.c
 	perl -0pi -e 's/extern double C\[NSPEC\];/extern double C[NSPEC + NFIX];/' $(OUT_DIR)/$(MECH_NAME)_Global.h
 	perl -0pi -e 's/(Told = TIME;\n\s*TIME = T\s*;\n\s*Update_SUN\(\);\n\s*)Update_RCONST\(\);/$${1}VAR = Y;\n   Update_RCONST();\n   VAR = &C[0];/g' $(OUT_DIR)/$(MECH_NAME)_Integrator.c
+	if grep -q '^#define NMONITOR[[:space:]]*0' $(OUT_DIR)/$(MECH_NAME)_Parameters.h; then \
+		perl -0pi -e 's/int\s+MONITOR\[\]\s*=\s*\{\s*0\s*\};/int MONITOR[NMONITOR];/s' $(OUT_DIR)/$(MECH_NAME)_Monitor.c; \
+	fi
 	printf '\nint kpp_get_nspec(void) { return NSPEC; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
 	printf '\nint kpp_get_nvar(void) { return NVAR; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
 	printf '\nint kpp_get_nreact(void) { return NREACT; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
@@ -57,10 +61,10 @@ $(LIB): $(ADAPTER_SRC) $(realpath $(MECH))
 		base=$$(basename $$src); \
 		case $$base in *_mex_*) continue;; esac; \
 		echo "  CC $$base"; \
-		gcc -O2 -fPIC -I$(OUT_DIR) -c $$src -o $${src%.c}.o; \
+		gcc $(KPP_CFLAGS) -I$(OUT_DIR) -c $$src -o $${src%.c}.o; \
 	done
 	echo "  CC kpp_adapter.c"
-	gcc -O2 -fPIC -I$(OUT_DIR) $(KPP_ADAPTER_CPPFLAGS) -c $(ADAPTER_SRC) -o $(OUT_DIR)/kpp_adapter.o
+	gcc $(KPP_CFLAGS) -I$(OUT_DIR) $(KPP_ADAPTER_CPPFLAGS) -c $(ADAPTER_SRC) -o $(OUT_DIR)/kpp_adapter.o
 	echo "  LINK libkpp_$(MECH_NAME).so"
 	gcc -shared -o $(LIB) $(OUT_DIR)/$(MECH_NAME)_*.o $(OUT_DIR)/kpp_adapter.o -lm
 	@echo "=== Done: $(LIB) ==="

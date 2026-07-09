@@ -12,4 +12,12 @@
     max_time = 1200
     requirement = 'The chamber KPP benchmark workflow shall accurately solve the F0AM chamber gold scenarios and archive solver timing analysis with comparison figures using the chamber plotting layout.'
   [../]
+
+  [./coupled_accuracy]
+    type = RunCommand
+    command = 'python3 ../../../../scripts/benchmark_chamber_solvers.py --formulation coupled --solvers kpp_rosenbrock --scenarios S1 --timeout 300 --compare-gold --rel-err 0.2 --abs-zero 1e4 --abs-err 4e4 --output-dir kpp_chamber/solver_runs/coupled_accuracy'
+    heavy = true
+    max_time = 600
+    requirement = 'The chamber KPP workflow shall solve the F0AM chamber chemistry through the one-cell coupled formulation and match the S1 gold CSV.'
+  [../]
 []

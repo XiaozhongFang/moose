@@ -217,15 +217,17 @@ KPPGeneratedMechanism::updateParams(const PhysParams & params)
 
   if (_update_rconst)
   {
-    // Set KPP global physical parameters if the symbols are available
-    double * kpp_temp = reinterpret_cast<double *>(dlsym(_lib_handle, "TEMP"));
-    double * kpp_air  = reinterpret_cast<double *>(dlsym(_lib_handle, "AIR"));
-    double * kpp_time = reinterpret_cast<double *>(dlsym(_lib_handle, "TIME"));
+    // Set KPP global physical parameters if the symbols are available.
+    auto set_global = [this](const char * name, double value)
+    {
+      double * value_ptr = reinterpret_cast<double *>(dlsym(_lib_handle, name));
+      if (value_ptr)
+        *value_ptr = value;
+    };
 
-    if (kpp_temp)
-      *kpp_temp = static_cast<double>(params.temperature);
-    if (kpp_time)
-      *kpp_time = static_cast<double>(_t);
+    set_global("TEMP", static_cast<double>(params.temperature));
+    set_global("TIME", static_cast<double>(_t));
+    set_global("CFACTOR", 1.0);
 
     // AIR density: either from params.air_density or computed from pressure
     double air_dens = static_cast<double>(params.air_density);
@@ -238,8 +240,10 @@ KPPGeneratedMechanism::updateParams(const PhysParams & params)
       air_dens = (params.pressure * 100.0) /
                  (1.380649e-23 * params.temperature) * 1e-6;
     }
-    if (kpp_air)
-      *kpp_air = air_dens;
+    set_global("AIR", air_dens);
+    set_global("M", air_dens);
+    set_global("O2", 0.21 * air_dens);
+    set_global("N2", 0.78 * air_dens);
 
     // H2O: from water_vapor or computed from RH
     double h2o = static_cast<double>(params.water_vapor);
@@ -251,9 +255,7 @@ KPPGeneratedMechanism::updateParams(const PhysParams & params)
       double p_h2o = (params.rh / 100.0) * es * 100.0; // Pa
       h2o = p_h2o / (1.380649e-23 * params.temperature) * 1e-6; // molec/cm³
     }
-    double * kpp_h2o = reinterpret_cast<double *>(dlsym(_lib_handle, "H2O"));
-    if (kpp_h2o)
-      *kpp_h2o = h2o;
+    set_global("H2O", h2o);
 
     double * var = _kpp_VAR_ptr ? *_kpp_VAR_ptr : nullptr;
     double * fix = _kpp_FIX_ptr ? *_kpp_FIX_ptr : nullptr;

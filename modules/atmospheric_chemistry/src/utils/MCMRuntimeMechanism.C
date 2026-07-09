@@ -212,6 +212,8 @@ MCMRuntimeMechanism::MCMRuntimeMechanism(const ParsedMechanism & mech,
     _cached_bottomup_P(0.0),
     _bottomup_j_valid(false)
 {
+  (void)fail_on_bad_deps;
+  (void)max_function_recurse;
   loadMechanism(mech, use_limiting_reagent, stoich_format);
 }
 

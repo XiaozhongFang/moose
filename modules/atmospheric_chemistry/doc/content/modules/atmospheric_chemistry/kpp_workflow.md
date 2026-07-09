@@ -344,6 +344,21 @@ make -f ../../kpp/build/Makefile \
 ../../atmospheric_chemistry-opt -i vs_F0AM_tutorial5_split_fv.i Outputs/exodus=false
 ```
 
+To check the coupled chemistry path without transport, use the one-cell chamber
+benchmark formulation. It generates FE variables and element-average outputs for
+the KPP species and compares those columns against the F0AM S1 gold CSV:
+
+```bash
+cd modules/atmospheric_chemistry
+python3 scripts/benchmark_chamber_solvers.py \
+    --formulation coupled \
+    --solvers kpp_rosenbrock \
+    --scenarios S1 \
+    --compare-gold \
+    --rel-err 0.2 --abs-zero 1e4 --abs-err 4e4 \
+    --output-dir kpp_chamber/solver_runs/coupled_accuracy
+```
+
 KPP generated C mechanisms store runtime state in process-global arrays. The
 wrapper serializes access inside a rank when evaluating `Fun` and `Jac_SP`, while
 the parent mesh and cloned chemistry sub-application can still be decomposed
