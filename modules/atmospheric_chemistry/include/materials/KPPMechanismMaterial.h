@@ -11,6 +11,10 @@
 
 #include "Material.h"
 #include "KPPGeneratedMechanism.h"
+#include "BottomUpJIntegrator.h"
+
+#include <map>
+#include <memory>
 
 /**
  * Material that evaluates a KPP-generated mechanism RHS and sparse analytical
@@ -28,6 +32,7 @@ protected:
 
 private:
   Real airDensity() const;
+  void applyPhotolysisGlobals();
 
   KPPGeneratedMechanism _mechanism;
 
@@ -38,6 +43,15 @@ private:
   const Real _jfac;
   const bool _roof_open;
   const MooseEnum _units;
+  const MooseEnum _photolysis_scheme;
+  const std::string _lamp_flux_file;
+  const std::string _bottomup_data_dir;
+
+  std::unique_ptr<BottomUpJIntegrator> _bottomup_integrator;
+  std::map<std::string, Real> _cached_bottomup_j;
+  Real _cached_bottomup_temperature;
+  Real _cached_bottomup_pressure;
+  bool _bottomup_j_valid;
 
   unsigned int _n_species;
   std::vector<const VariableValue *> _species_vals;

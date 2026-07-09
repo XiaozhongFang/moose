@@ -1,0 +1,26 @@
+[Tests]
+  [./build_chamber_kpp_rosenbrock_inputs]
+    type = RunCommand
+    command = 'python3 ../../scripts/benchmark_chamber_solvers.py --solvers kpp_rosenbrock --write-inputs-only --output-dir kpp_chamber/solver_runs/split_input_check'
+    requirement = 'The system shall generate the KPP Rosenbrock chamber mechanism used by split chemistry-transport tests.'
+  [../]
+
+  [./build_chamber_kpp_rosenbrock_library]
+    type = RunCommand
+    command = 'make -f ../../kpp/build/Makefile MECH=chamber/kpp_chamber/generated_mechanisms/chamber_mcm_rosenbrock/chamber_mcm_rosenbrock.kpp'
+    heavy = true
+    prereq = build_chamber_kpp_rosenbrock_inputs
+    requirement = 'The system shall compile the generated KPP Rosenbrock chamber shared library for split chemistry-transport tests.'
+  [../]
+
+  [./vs_F0AM_chamber_split_kpp_fv]
+    type = RunApp
+    input = vs_F0AM_tutorial5_split_fv.i
+    heavy = true
+    min_parallel = 2
+    max_parallel = 2
+    max_time = 600
+    prereq = build_chamber_kpp_rosenbrock_library
+    requirement = 'The system shall advance F0AM chamber KPP Rosenbrock chemistry on each street-canyon grid field using operator-split FV transport and a mesh-cloned MultiApp.'
+  [../]
+[]

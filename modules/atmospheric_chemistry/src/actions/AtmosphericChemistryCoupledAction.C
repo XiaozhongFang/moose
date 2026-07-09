@@ -234,6 +234,9 @@ AtmosphericChemistryCoupledAction::actAddMaterial()
     params.set<Real>("jfac") = getParam<Real>("jfac");
     params.set<bool>("roof_open") = getParam<bool>("roof_open");
     params.set<MooseEnum>("units") = getParam<MooseEnum>("units");
+    params.set<MooseEnum>("photolysis_scheme") = getParam<MooseEnum>("photolysis_scheme");
+    params.set<std::string>("lamp_flux_file") = getParam<std::string>("lamp_flux_file");
+    params.set<std::string>("bottomup_data_dir") = getParam<std::string>("bottomup_data_dir");
 
     _problem->addMaterial("KPPMechanismMaterial", "kpp_mechanism_material", params);
     _console << "AtmosphericChemistryCoupled: Created KPPMechanismMaterial with "

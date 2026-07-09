@@ -288,6 +288,74 @@ It uses the same shared library but runs:
 This path assembles `TimeDerivative + KPPChemicalSourceKernel` for each KPP
 variable species and uses the generated sparse Jacobian in the Newton Jacobian.
 
+## Operator-Split FV Transport with KPP Chamber Chemistry
+
+The chamber split-coupling smoke test uses a single mesh-wide `TransientMultiApp`
+instead of one sub-application per grid point. The parent application solves a
+small distributed finite-volume street-canyon flow and transports selected
+species fields. The child application clones that same mesh and runs
+`[AtmosphericChemistry/Coupled]` with the generated F0AM chamber KPP Rosenbrock
+mechanism, so every local grid degree of freedom owns its own 610-species
+chemical state.
+
+The diagnostic CSV averages in the parent and child inputs are only output
+checks. Coupling is done by `MultiAppCopyTransfer` on the species fields at
+`timestep_end`; no spatial average is used to drive chemistry.
+
+The checked inputs are:
+
+```text
+modules/atmospheric_chemistry/test/tests/vs_F0AM_tutorial5_split_fv.i
+modules/atmospheric_chemistry/test/tests/vs_F0AM_tutorial5_split_sub.i
+```
+
+The child input uses the F0AM chamber BottomUp lamp spectrum:
+
+```moose
+[AtmosphericChemistry]
+  [Coupled]
+    mechanism_file = 'chamber/kpp_chamber/generated_mechanisms/chamber_mcm_rosenbrock/chamber_mcm_rosenbrock.kpp'
+    chem_solver = kpp_rosenbrock
+    photolysis_scheme = BOTTOMUP
+    lamp_flux_file = 'ExampleLightFlux.txt'
+    bottomup_data_dir = '../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
+  []
+[]
+```
+
+Run the heavy split-coupling check from the module directory:
+
+```bash
+cd modules/atmospheric_chemistry
+./run_tests -C test/tests --heavy --re 'build_chamber_kpp_rosenbrock_inputs|build_chamber_kpp_rosenbrock_library|vs_F0AM_chamber_split_kpp_fv'
+```
+
+For manual debugging, first generate and build the KPP chamber library, then run
+the parent input directly:
+
+```bash
+cd modules/atmospheric_chemistry/test/tests
+python3 ../../scripts/benchmark_chamber_solvers.py \
+    --solvers kpp_rosenbrock \
+    --write-inputs-only \
+    --output-dir kpp_chamber/solver_runs/split_input_check
+make -f ../../kpp/build/Makefile \
+    MECH=chamber/kpp_chamber/generated_mechanisms/chamber_mcm_rosenbrock/chamber_mcm_rosenbrock.kpp
+../../atmospheric_chemistry-opt -i vs_F0AM_tutorial5_split_fv.i Outputs/exodus=false
+```
+
+KPP generated C mechanisms store runtime state in process-global arrays. The
+wrapper serializes access inside a rank when evaluating `Fun` and `Jac_SP`, while
+the parent mesh and cloned chemistry sub-application can still be decomposed
+across MPI ranks for HPC runs.
+
+For the split test, both parent and child inputs use GMRES with block-Jacobi and
+rank-local LU sub-solves. This matches the operator-split assumption that
+chemistry is local to each grid field after transport. A global parallel direct
+solve couples unrelated chemistry blocks and can route the small test through
+MUMPS/METIS ordering, which is slower and less robust for this local chemistry
+workload.
+
 ## Use a Different KPP Mechanism
 
 For another KPP mechanism, repeat the mechanism-library build with the new

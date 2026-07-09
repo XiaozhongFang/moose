@@ -92,6 +92,9 @@ public:
     markDirty();
   }
 
+  /// Set a KPP-generated global double, if the shared library exports it.
+  bool setGlobal(const std::string & name, Real value);
+
   Real getJValue(unsigned int j_number) const override;
   unsigned int nJValues() const override { return _n_j_vals; }
 
@@ -134,7 +137,7 @@ private:
 
   // ===== Pointers to KPP global variables (resolved via dlsym) =====
 
-  double * _kpp_C;       // C[NSPEC] concentration array
+  double * _kpp_C;       // C[NSPEC + NFIX] concentration array
   double ** _kpp_VAR_ptr;
   double ** _kpp_FIX_ptr;
   double * _kpp_RCONST;  // RCONST[] rate constants

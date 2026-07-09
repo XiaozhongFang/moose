@@ -303,6 +303,15 @@ cd modules/atmospheric_chemistry
 ./run_tests -C test/tests/chamber/kpp_chamber --heavy --re solver_accuracy_timing
 ```
 
+Or run the operator-split FV/KPP chamber smoke test. This uses a mesh-cloned
+chemistry sub-application, so chemistry is evaluated on each grid field rather
+than on a spatial average:
+
+```bash
+cd modules/atmospheric_chemistry
+./run_tests -C test/tests --heavy --re 'build_chamber_kpp_rosenbrock_inputs|build_chamber_kpp_rosenbrock_library|vs_F0AM_chamber_split_kpp_fv'
+```
+
 Or run a single scenario directly:
 
 ```bash
@@ -536,6 +545,7 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 | `vs_F0AM_chamber_S2b_box` | CSVDiff | 610 | S2b (restart, jcorr=10): BOTTOMUP continuation from S2 vs F0AM |
 | `chamber/kpp_chamber.solver_timing_inputs` | RunCommand | 610 | Generate KPP/PETSc benchmark inputs under `kpp_chamber/solver_runs` |
 | `chamber/kpp_chamber.solver_accuracy_timing` | RunCommand | 610 | KPP Rosenbrock and PETSc BDF timing with F0AM-gold accuracy checks |
+| `vs_F0AM_chamber_split_kpp_fv` | RunApp | 610 | Operator-split FV street-canyon transport with mesh-cloned KPP chamber chemistry |
 | `vs_F0AM_dielcycle_box` | RunApp | 2908 | SOAS diel cycle: MCM_SZA |
 | `vs_atchem2_transport_building` | Exodiff | 29 | NS + chemistry + building emission |
 | `test_family_conservation` | RunApp | 29 | Family conservation (NOx = NO2 + NO) |

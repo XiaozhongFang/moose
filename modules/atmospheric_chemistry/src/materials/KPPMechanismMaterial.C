@@ -10,6 +10,8 @@
 #include "KPPMechanismMaterial.h"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 registerMooseObject("AtmosphericChemistryApp", KPPMechanismMaterial);
 
@@ -30,6 +32,19 @@ KPPMechanismMaterial::validParams()
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for KPP photolysis rates.");
   params.addParam<bool>("roof_open", true,
                         "Roof (chamber cover) open. false forces KPP SUN to zero.");
+  MooseEnum photo_scheme("MCM_SZA HYBRID BOTTOMUP", "MCM_SZA");
+  params.addParam<MooseEnum>(
+      "photolysis_scheme",
+      photo_scheme,
+      "Photolysis scheme. KPP coupled mode currently uses BOTTOMUP to set exported J globals.");
+  params.addParam<std::string>(
+      "lamp_flux_file",
+      "",
+      "Lamp/actinic flux file relative to bottomup_data_dir. Required for BOTTOMUP.");
+  params.addParam<std::string>(
+      "bottomup_data_dir",
+      "../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup",
+      "Directory containing BottomUp photolysis data files.");
 
   MooseEnum units_enum("molec_cm3 ppb", "molec_cm3");
   params.addParam<MooseEnum>("units", units_enum,
@@ -50,11 +65,35 @@ KPPMechanismMaterial::KPPMechanismMaterial(const InputParameters & params)
     _jfac(getParam<Real>("jfac")),
     _roof_open(getParam<bool>("roof_open")),
     _units(getParam<MooseEnum>("units")),
+    _photolysis_scheme(getParam<MooseEnum>("photolysis_scheme")),
+    _lamp_flux_file(getParam<std::string>("lamp_flux_file")),
+    _bottomup_data_dir(getParam<std::string>("bottomup_data_dir")),
+    _cached_bottomup_temperature(std::numeric_limits<Real>::quiet_NaN()),
+    _cached_bottomup_pressure(std::numeric_limits<Real>::quiet_NaN()),
+    _bottomup_j_valid(false),
     _kpp_rhs(declareProperty<std::vector<Real>>("kpp_rhs")),
     _kpp_jacobian_dense(declareProperty<std::vector<Real>>("kpp_jacobian_dense"))
 {
   _mechanism.setRoofOpen(_roof_open);
   _mechanism.setJFac(_jfac);
+
+  if (_photolysis_scheme != "MCM_SZA" && _photolysis_scheme != "BOTTOMUP")
+    mooseError("KPPMechanismMaterial: photolysis_scheme=", _photolysis_scheme,
+               " is not supported in KPP coupled mode. Use BOTTOMUP for chamber mechanisms.");
+
+  if (_photolysis_scheme == "BOTTOMUP")
+  {
+    if (_lamp_flux_file.empty())
+      mooseError("KPPMechanismMaterial: lamp_flux_file is required when "
+                 "photolysis_scheme=BOTTOMUP.");
+    if (!_bottomup_data_dir.empty() && _bottomup_data_dir[0] == '/')
+      mooseError("KPPMechanismMaterial: bottomup_data_dir must be relative, got absolute: ",
+                 _bottomup_data_dir);
+
+    _bottomup_integrator = std::make_unique<BottomUpJIntegrator>(_bottomup_data_dir);
+    _bottomup_integrator->loadLampFlux(_lamp_flux_file);
+    _bottomup_integrator->loadReactionMap("bottomup_jmap.dat");
+  }
 
   _n_species = coupledComponents("species_variables");
   if (_n_species != _mechanism.nSpecies())
@@ -77,6 +116,28 @@ KPPMechanismMaterial::airDensity() const
 }
 
 void
+KPPMechanismMaterial::applyPhotolysisGlobals()
+{
+  if (_photolysis_scheme != "BOTTOMUP" || !_bottomup_integrator)
+    return;
+
+  const Real current_pressure = _pressure > 0.0 ? _pressure : 1013.25;
+  if (!_bottomup_j_valid ||
+      std::abs(_temperature - _cached_bottomup_temperature) > 1.0e-12 ||
+      std::abs(current_pressure - _cached_bottomup_pressure) > 1.0e-12)
+  {
+    _cached_bottomup_j = _bottomup_integrator->computeAllJ(_temperature, current_pressure);
+    _cached_bottomup_temperature = _temperature;
+    _cached_bottomup_pressure = current_pressure;
+    _bottomup_j_valid = true;
+  }
+
+  const Real chamber_factor = _roof_open ? _jfac : 0.0;
+  for (const auto & [jname, value] : _cached_bottomup_j)
+    _mechanism.setGlobal(jname, value * chamber_factor);
+}
+
+void
 KPPMechanismMaterial::computeQpProperties()
 {
   const Real current_air_density = airDensity();
@@ -94,9 +155,11 @@ KPPMechanismMaterial::computeQpProperties()
   phys.jfac = 1.0;
 
   _kpp_rhs[_qp].assign(_n_species, 0.0);
+  applyPhotolysisGlobals();
   _mechanism.computeRHS(_t, concentrations, phys, _kpp_rhs[_qp]);
 
   std::vector<std::tuple<unsigned int, unsigned int, Real>> jacobian_triplets;
+  applyPhotolysisGlobals();
   _mechanism.computeJacobian(_t, concentrations, phys, jacobian_triplets);
 
   _kpp_jacobian_dense[_qp].assign(_n_species * _n_species, 0.0);

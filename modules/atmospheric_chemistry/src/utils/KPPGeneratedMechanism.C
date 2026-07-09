@@ -176,6 +176,27 @@ KPPGeneratedMechanism::~KPPGeneratedMechanism()
   }
 }
 
+bool
+KPPGeneratedMechanism::setGlobal(const std::string & name, Real value)
+{
+  std::lock_guard<std::recursive_mutex> lock(kpp_generated_mechanism_mutex);
+
+  double * value_ptr = reinterpret_cast<double *>(dlsym(_lib_handle, name.c_str()));
+  if (!value_ptr)
+    return false;
+
+  const double new_value = static_cast<double>(value);
+  if (*value_ptr != new_value)
+  {
+    *value_ptr = new_value;
+    markDirty();
+  }
+  else
+    *value_ptr = new_value;
+
+  return true;
+}
+
 void
 KPPGeneratedMechanism::updateParams(const PhysParams & params)
 {
@@ -311,13 +332,13 @@ KPPGeneratedMechanism::computeRHS(Real t,
     return;
   }
 
-  _t = t;
-  const_cast<KPPGeneratedMechanism *>(this)->updateParams(params);
-
   double * var = *_kpp_VAR_ptr;
   double * fix = *_kpp_FIX_ptr;
   for (unsigned int i = 0; i < n; ++i)
     var[i] = static_cast<double>(C[i]);
+
+  _t = t;
+  const_cast<KPPGeneratedMechanism *>(this)->updateParams(params);
 
   std::vector<double> Ydot(n, 0.0);
   _fun(var, fix, _kpp_RCONST, Ydot.data());
@@ -358,13 +379,13 @@ KPPGeneratedMechanism::computeJacobian(
     return;
   }
 
-  _t = t;
-  const_cast<KPPGeneratedMechanism *>(this)->updateParams(params);
-
   double * var = *_kpp_VAR_ptr;
   double * fix = *_kpp_FIX_ptr;
   for (unsigned int i = 0; i < n; ++i)
     var[i] = static_cast<double>(C[i]);
+
+  _t = t;
+  const_cast<KPPGeneratedMechanism *>(this)->updateParams(params);
 
   // KPP's Jac_SP writes into global JVS[] sparse Jacobian storage.
   // The KPP sparse Jacobian format uses:

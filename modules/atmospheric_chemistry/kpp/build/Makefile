@@ -47,6 +47,8 @@ $(LIB): $(ADAPTER_SRC) $(realpath $(MECH))
 	done
 	sed -i 's/\._/$(MECH_NAME)_/g' $(OUT_DIR)/$(MECH_NAME)_*.c $(OUT_DIR)/$(MECH_NAME)_*.h 2>/dev/null || true
 	sed -i 's/\([0-9]\)\.\([0-9]*\)e\([^0-9+-]\)/\1.\2e0\3/g' $(OUT_DIR)/$(MECH_NAME)_*.c 2>/dev/null || true
+	perl -0pi -e 's/double C\[NSPEC\];/double C[NSPEC + NFIX];/' $(OUT_DIR)/$(MECH_NAME)_Main.c
+	perl -0pi -e 's/extern double C\[NSPEC\];/extern double C[NSPEC + NFIX];/' $(OUT_DIR)/$(MECH_NAME)_Global.h
 	perl -0pi -e 's/(Told = TIME;\n\s*TIME = T\s*;\n\s*Update_SUN\(\);\n\s*)Update_RCONST\(\);/$${1}VAR = Y;\n   Update_RCONST();\n   VAR = &C[0];/g' $(OUT_DIR)/$(MECH_NAME)_Integrator.c
 	printf '\nint kpp_get_nspec(void) { return NSPEC; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
 	printf '\nint kpp_get_nvar(void) { return NVAR; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
