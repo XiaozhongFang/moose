@@ -25,7 +25,7 @@ Run the accuracy/timing benchmark against the F0AM gold CSV files:
         --solvers kpp_rosenbrock,petsc_bdf \
         --rtol 5e-4 --atol 5e-8 \
         --compare-gold --plot-comparison \
-        --f0am-seconds 6 \
+        --f0am-seconds 7 \
         --output-dir kpp_chamber/solver_runs/f0am_accuracy_timing
 """
 

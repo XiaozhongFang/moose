@@ -341,12 +341,12 @@ python3 scripts/benchmark_chamber_solvers.py \
     --solvers kpp_rosenbrock,petsc_bdf \
     --rtol 5e-4 --atol 5e-8 \
     --compare-gold --plot-comparison \
-    --f0am-seconds 6 \
+    --f0am-seconds 7 \
     --output-dir kpp_chamber/solver_runs/f0am_accuracy_timing
 
 # Optional: run the generated KPP Rosenbrock mechanism with MATLAB/F0AM default tolerances.
 python3 scripts/benchmark_chamber_solvers.py \
-    --solvers kpp_rosenbrock --rtol 1e-3 --atol 1e-6 --f0am-seconds 6
+    --solvers kpp_rosenbrock --rtol 1e-3 --atol 1e-6 --f0am-seconds 7
 ```
 
 The full solver sweep is a performance experiment and can run for many minutes
