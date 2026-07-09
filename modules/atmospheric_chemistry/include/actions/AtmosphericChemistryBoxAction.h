@@ -55,6 +55,8 @@ protected:
   std::string _chem_solver;
   /// Whether to use a self-driven integrator (PETSc TS, SUNDIALS, KPP)
   bool _use_box_solver;
+  /// Whether the selected mechanism is handled by KPP-generated code.
+  bool _use_kpp;
   /// Whether RO2 diagnostic variable should be created
   bool _ro2_diagnostic_enabled;
   /// Family conservation (F0AM DAE method)

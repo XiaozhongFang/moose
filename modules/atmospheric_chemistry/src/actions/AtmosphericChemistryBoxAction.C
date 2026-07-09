@@ -39,6 +39,10 @@ AtmosphericChemistryBoxAction::validParams()
       "Background water vapor concentration (molecules/cm^3)");
   params.addParam<Real>("press", 0.0,
       "Pressure (mbar).  If >0, M computed dynamically via ideal gas law.");
+  params.addParam<Real>("rh", -1.0,
+      "Relative humidity (%). If >=0, water_vapor is computed from rh/temp/press.");
+  params.addParam<Real>("blheight", 0.0,
+      "Boundary layer height (m), informational unless dilution is enabled.");
   params.addParam<std::string>(
       "mcm_photolysis_file",
       "doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat",
@@ -100,7 +104,7 @@ AtmosphericChemistryBoxAction::validParams()
   params.addParam<Real>("chem_solver_atol", 1e-10,
       "Absolute tolerance for the chemical ODE solver.");
   MooseEnum chem_type_enum(
-      "bdf arkimex eimex rosw mimex beuler cn rk theta ssp", "bdf");
+      "bdf arkimex eimex rosw mimex beuler cn rk theta ssp sundials", "bdf");
   params.addParam<MooseEnum>("chem_solver_type", chem_type_enum,
       "ODE solver type (petsc_ts only): 'bdf' (default), 'arkimex', etc.");
 
@@ -123,6 +127,7 @@ AtmosphericChemistryBoxAction::AtmosphericChemistryBoxAction(const InputParamete
   : Action(params),
     _chem_solver(getParam<MooseEnum>("chem_solver")),
     _use_box_solver(false),
+    _use_kpp(false),
     _ro2_diagnostic_enabled(false)
 {
   // ---- Validate mechanism file path ----
@@ -144,6 +149,7 @@ AtmosphericChemistryBoxAction::AtmosphericChemistryBoxAction(const InputParamete
 
   _species = spec.species();
   _mech_data = spec.mechanismData();
+  _use_kpp = spec.isKPP();
 
   // ---- Derive use_box_solver ----
   _use_box_solver = (_chem_solver != "moose_implicit");
@@ -151,7 +157,10 @@ AtmosphericChemistryBoxAction::AtmosphericChemistryBoxAction(const InputParamete
   // ---- RO2 diagnostic ----
   bool want_ro2 = getParam<bool>("output_ro2_sum");
   bool has_ro2 = std::find(_species.begin(), _species.end(), "RO2") != _species.end();
-  _ro2_diagnostic_enabled = want_ro2 && !has_ro2;
+  _ro2_diagnostic_enabled = want_ro2 && !has_ro2 && !_use_kpp;
+  if (want_ro2 && _use_kpp)
+    mooseWarning("AtmosphericChemistryBox: output_ro2_sum is not available for KPP "
+                 "mechanisms because RO2 is an inline rate helper, not a solved species.");
 
   // ---- Family conservation ----
   _family_names = getParam<std::vector<std::string>>("family_names");
@@ -213,6 +222,8 @@ AtmosphericChemistryBoxAction::actAddUserObject()
   uo_params.set<Real>("air_density") = getParam<Real>("air_density");
   uo_params.set<Real>("water_vapor") = getParam<Real>("water_vapor");
   uo_params.set<Real>("press") = getParam<Real>("press");
+  uo_params.set<Real>("rh") = getParam<Real>("rh");
+  uo_params.set<Real>("blheight") = getParam<Real>("blheight");
   uo_params.set<Real>("latitude") = getParam<Real>("latitude");
   uo_params.set<Real>("longitude") = getParam<Real>("longitude");
   uo_params.set<unsigned int>("day") = getParam<unsigned int>("day");
@@ -220,6 +231,7 @@ AtmosphericChemistryBoxAction::actAddUserObject()
   uo_params.set<unsigned int>("year") = getParam<unsigned int>("year");
   uo_params.set<MooseEnum>("units") = getParam<MooseEnum>("units");
   uo_params.set<Real>("jfac") = getParam<Real>("jfac");
+  uo_params.set<bool>("roof_open") = getParam<bool>("roof_open");
   uo_params.set<Real>("default_ic") = getParam<Real>("default_ic");
   uo_params.set<bool>("use_limiting_reagent") = getParam<bool>("use_limiting_reagent");
   // Photolysis file: empty for BOTTOMUP (parsed from data files), 

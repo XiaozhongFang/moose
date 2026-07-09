@@ -6,7 +6,7 @@ Computes per-species ratios at each common time point, categorizes results
 (good/ok/low/high/moose_zero), and prints a summary report.
 
 Usage:
-    # Compare all 4 scenarios using default paths
+    # Compare checked-in chamber scenarios using default paths
     python3 scripts/compare_chamber_f0am.py
 
     # Compare a single scenario
@@ -109,21 +109,20 @@ def main():
         compare(args.gold, args.moose)
         return
 
-    # Default: compare all 4 scenarios
+    # Default: compare chamber scenarios with checked-in gold.
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    actions_dir = os.path.join(script_dir, '../test/tests/actions')
-    gold_dir = os.path.join(actions_dir, 'gold')
+    chamber_dir = os.path.join(script_dir, '../test/tests/chamber')
+    gold_dir = os.path.join(chamber_dir, 'gold')
 
     scenarios = [
         ('vs_F0AM_chamber_S1_box.csv',   'vs_F0AM_chamber_S1_box.csv'),
         ('vs_F0AM_chamber_S2_box.csv',   'vs_F0AM_chamber_S2_box.csv'),
         ('vs_F0AM_chamber_S3_box.csv',   'vs_F0AM_chamber_S3_box.csv'),
-        ('vs_F0AM_chamber_S2b_box.csv',  'vs_F0AM_chamber_S2b_box.csv'),
     ]
     total_bad = 0
     for gold_f, moose_f in scenarios:
         gpath = os.path.join(gold_dir, gold_f)
-        mpath = os.path.join(actions_dir, moose_f)
+        mpath = os.path.join(chamber_dir, moose_f)
         if not os.path.exists(gpath) or not os.path.exists(mpath):
             print(f'SKIP {moose_f}: missing file')
             continue

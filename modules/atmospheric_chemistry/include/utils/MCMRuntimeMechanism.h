@@ -140,7 +140,15 @@ public:
   // ===== Solar / photolysis helpers (needed by evaluateCoefficients) =====
 
   /** Set current simulation time (seconds since midnight) for photolysis calc. */
-  void setCurrentTime(Real t) const { _t = t; }
+  void setCurrentTime(Real t) const
+  {
+    if (_t != t)
+    {
+      _rate_input_cache_valid = false;
+      _dirty = true;
+    }
+    _t = t;
+  }
 
   /** Get cached solar zenith angle cosine. */
   Real getSolarCosX() const { return _solar_cosx; }
@@ -170,14 +178,35 @@ public:
   void loadBottomUpData(const std::string & data_dir, const std::string & flux_file);
 
   /** Set JFAC scaling factor. */
-  void setJFac(Real jfac) { _jfac = jfac; }
+  void setJFac(Real jfac)
+  {
+    if (_jfac != jfac)
+    {
+      _jfac = jfac;
+      _rate_input_cache_valid = false;
+      _dirty = true;
+    }
+  }
 
   /** ROOF switch: false = CLOSED (all J=0), true = OPEN (normal). */
-  void setRoofOpen(bool open) { _roof_open = open; }
+  void setRoofOpen(bool open)
+  {
+    if (_roof_open != open)
+    {
+      _roof_open = open;
+      _rate_input_cache_valid = false;
+      _dirty = true;
+    }
+  }
   bool isRoofOpen() const { return _roof_open; }
 
   /** Invalidate BottomUp J cache. */
-  void invalidatePhotolysisCache() { _bottomup_j_valid = false; }
+  void invalidatePhotolysisCache()
+  {
+    _bottomup_j_valid = false;
+    _rate_input_cache_valid = false;
+    _dirty = true;
+  }
 
   /** Enable/disable J-calibrator. */
   void setJCalibrator(std::unique_ptr<JCalibrator> calibrator);
@@ -213,6 +242,15 @@ public:
       const std::vector<Real> & C,
       std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const;
 
+  /** Sparse Jacobian row pointers for the fixed chemical reaction graph. */
+  const std::vector<size_t> & jacobianRowPtr() const { return _jac_row_ptr; }
+
+  /** Sparse Jacobian column indices for the fixed chemical reaction graph. */
+  const std::vector<unsigned int> & jacobianCols() const { return _jac_cols; }
+
+  /** Compute sparse Jacobian values matching jacobianRowPtr()/jacobianCols(). */
+  void computeJacobianCSRValues(const std::vector<Real> & C, std::vector<Real> & values) const;
+
   /** Build the sparse Jacobian cache from _cached_C.
    *  Called automatically by getJacobianDiagonal/getJacobianOffDiagonal. */
   void _buildJacobianCache() const;
@@ -232,6 +270,15 @@ private:
                       bool use_limiting_reagent,
                       StoichMatrix::Format stoich_format);
 
+  /** Build the structural sparse Jacobian pattern once from stoichiometry and reactants. */
+  void buildJacobianPattern();
+
+  /** Lookup a structural Jacobian value slot in the fixed CSR pattern. */
+  size_t jacobianValueIndex(unsigned int row, unsigned int col) const;
+
+  /** Mark coefficient/reaction expressions that depend on concentrations. */
+  void classifyStateDependentExpressions(unsigned int n_coeff);
+
   // ===== Member variables =====
 
   // -- Mechanism data --
@@ -242,6 +289,10 @@ private:
   StoichMatrix _stoich;
   std::vector<std::array<int, 3>> _iG;
   std::vector<Real> _k;
+
+  // -- Fixed sparse Jacobian structure --
+  std::vector<size_t> _jac_row_ptr;
+  std::vector<unsigned int> _jac_cols;
 
   // -- Units --
   bool _units_ppb;
@@ -301,6 +352,9 @@ private:
   std::vector<std::vector<Real>> _reaction_local_params;
   std::vector<FastHandler> _coeff_fast;
   std::vector<FastHandler> _reaction_fast;
+  std::vector<bool> _coeff_state_dependent;
+  std::vector<bool> _reaction_state_dependent;
+  mutable bool _rate_input_cache_valid;
 
   // -- Cache for single-species interface --
   mutable bool _dirty;

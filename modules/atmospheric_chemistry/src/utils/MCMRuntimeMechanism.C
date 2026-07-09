@@ -206,6 +206,7 @@ MCMRuntimeMechanism::MCMRuntimeMechanism(const ParsedMechanism & mech,
     _solar_cosld(0.0),
     _solar_eqt(0.0),
     _t(0.0),
+    _rate_input_cache_valid(false),
     _dirty(true),
     _cached_bottomup_T(0.0),
     _cached_bottomup_P(0.0),
@@ -249,6 +250,8 @@ MCMRuntimeMechanism::loadMechanism(const ParsedMechanism & mech,
   _use_limiting_reagent = use_limiting_reagent;
   _limiting_reagent = mech.is_limiting_reagent;
   _limiting_reactant = mech.limiting_reactant;
+
+  buildJacobianPattern();
 
   // --- Evaluate rate coefficients (fparser for complex expressions) ---
   _k.assign(_n_reactions, 1.0);
@@ -472,6 +475,8 @@ MCMRuntimeMechanism::setupFparser(const ParsedMechanism & mech)
       _j_photo_indices.push_back((unsigned int)-1);
   }
 
+  classifyStateDependentExpressions(coeff_names.size());
+
   // Build fast pre-compiled handlers for coefficient and reaction expressions.
   _coeff_fast.resize(_coeff_parsers.size());
   for (unsigned int i = 0; i < _coeff_parsers.size(); ++i)
@@ -480,6 +485,50 @@ MCMRuntimeMechanism::setupFparser(const ParsedMechanism & mech)
   _reaction_fast.resize(_n_reactions);
   for (unsigned int r = 0; r < _n_reactions; ++r)
     _reaction_fast[r] = compileFastHandler(rxn_exprs[r], _reaction_var_indices[r]);
+}
+
+void
+MCMRuntimeMechanism::classifyStateDependentExpressions(unsigned int n_coeff)
+{
+  _coeff_state_dependent.assign(n_coeff, false);
+  _reaction_state_dependent.assign(_n_reactions, false);
+
+  const unsigned int coeff_start = 5;
+  const unsigned int species_start = coeff_start + n_coeff;
+
+  auto depends_on_state = [&](unsigned int idx) {
+    if (idx >= species_start && idx < _j_index_start)
+      return true;
+    if (idx >= coeff_start && idx < species_start)
+      return static_cast<bool>(_coeff_state_dependent[idx - coeff_start]);
+    return false;
+  };
+
+  bool changed = true;
+  while (changed)
+  {
+    changed = false;
+    for (const auto i : make_range(n_coeff))
+    {
+      if (_coeff_state_dependent[i])
+        continue;
+      for (const auto idx : _coeff_var_indices[i])
+        if (depends_on_state(idx))
+        {
+          _coeff_state_dependent[i] = true;
+          changed = true;
+          break;
+        }
+    }
+  }
+
+  for (const auto r : make_range(_n_reactions))
+    for (const auto idx : _reaction_var_indices[r])
+      if (depends_on_state(idx))
+      {
+        _reaction_state_dependent[r] = true;
+        break;
+      }
 }
 
 MCMRuntimeMechanism::FastHandler
@@ -564,6 +613,8 @@ void
 MCMRuntimeMechanism::evaluateCoefficients()
 {
   if (_coeff_parsers.empty()) return;
+
+  const bool reuse_static_rates = _rate_input_cache_valid;
 
   // Compute M (air density) dynamically from press/temp if press > 0
   Real M_val = _air_density;
@@ -682,6 +733,9 @@ MCMRuntimeMechanism::evaluateCoefficients()
   unsigned int n_coeff = _coeff_parsers.size();
   for (unsigned int i = 0; i < n_coeff; ++i)
   {
+    if (reuse_static_rates && i < _coeff_state_dependent.size() && !_coeff_state_dependent[i])
+      continue;
+
     Real val;
     if (_coeff_fast[i])
       val = _coeff_fast[i](_func_params);
@@ -700,6 +754,9 @@ MCMRuntimeMechanism::evaluateCoefficients()
   // Evaluate reaction rate expressions → _k
   for (unsigned int r = 0; r < _n_reactions; ++r)
   {
+    if (reuse_static_rates && r < _reaction_state_dependent.size() && !_reaction_state_dependent[r])
+      continue;
+
     Real val;
     if (_reaction_fast[r])
       val = _reaction_fast[r](_func_params);
@@ -713,6 +770,8 @@ MCMRuntimeMechanism::evaluateCoefficients()
     }
     _k[r] = (std::isnan(val) || std::isinf(val)) ? 0.0 : val;
   }
+
+  _rate_input_cache_valid = true;
 }
 
 void
@@ -727,6 +786,22 @@ MCMRuntimeMechanism::evaluateCoefficients(const std::vector<Real> & C)
 void
 MCMRuntimeMechanism::updateParams(const PhysParams & params)
 {
+  const bool changed = _temperature != params.temperature ||
+                       _air_density != params.air_density ||
+                       _water_vapor != params.water_vapor ||
+                       _press != params.pressure ||
+                       _rh != params.rh ||
+                       _jfac != params.jfac ||
+                       _blheight != params.blheight ||
+                       _lat != params.latitude ||
+                       _lon != params.longitude;
+  if (changed)
+  {
+    _rate_input_cache_valid = false;
+    _dirty = true;
+    _bottomup_j_valid = false;
+  }
+
   _temperature = params.temperature;
   _air_density = params.air_density;
   _water_vapor = params.water_vapor;
@@ -746,7 +821,7 @@ MCMRuntimeMechanism::computeRHS(Real t,
 {
   // Update physical parameters
   const_cast<MCMRuntimeMechanism *>(this)->updateParams(params);
-  const_cast<MCMRuntimeMechanism *>(this)->_t = t;
+  setCurrentTime(t);
 
   // Compute dC/dt
   computeDCdt(C, dC_dt);
@@ -761,7 +836,7 @@ MCMRuntimeMechanism::computeJacobian(
 {
   // Update physical parameters
   const_cast<MCMRuntimeMechanism *>(this)->updateParams(params);
-  const_cast<MCMRuntimeMechanism *>(this)->_t = t;
+  setCurrentTime(t);
 
   // Compute Jacobian
   computeJacobianTriplets(C, J);
@@ -774,7 +849,7 @@ MCMRuntimeMechanism::computeSpeciesRates(Real t,
 {
   // Update physical parameters
   const_cast<MCMRuntimeMechanism *>(this)->updateParams(params);
-  const_cast<MCMRuntimeMechanism *>(this)->_t = t;
+  setCurrentTime(t);
 
   // Evaluate rate coefficients
   const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients(C);
@@ -892,6 +967,109 @@ MCMRuntimeMechanism::computeJacobianTriplets(
   }
 }
 
+void
+MCMRuntimeMechanism::buildJacobianPattern()
+{
+  std::vector<std::vector<unsigned int>> rows(_n_species);
+
+  for (const auto r : make_range(_n_reactions))
+  {
+    const int i0 = _iG[r][0], i1 = _iG[r][1], i2 = _iG[r][2];
+    std::array<int, 3> cols = {i0, i1, i2};
+
+    const bool is_lr = (_use_limiting_reagent && !_limiting_reagent.empty() &&
+                        r < _limiting_reagent.size() && _limiting_reagent[r]);
+    if (is_lr)
+      cols = {i0, i1, -1};
+
+    for (const auto j : cols)
+    {
+      if (j < 0)
+        continue;
+      _stoich.forEachInRow(r, [&](int s, Real) {
+        rows[(unsigned int)s].push_back((unsigned int)j);
+      });
+    }
+  }
+
+  _jac_row_ptr.assign(_n_species + 1, 0);
+  for (const auto i : make_range(_n_species))
+  {
+    auto & row = rows[i];
+    std::sort(row.begin(), row.end());
+    row.erase(std::unique(row.begin(), row.end()), row.end());
+    _jac_row_ptr[i + 1] = _jac_row_ptr[i] + row.size();
+  }
+
+  _jac_cols.resize(_jac_row_ptr[_n_species]);
+  for (const auto i : make_range(_n_species))
+  {
+    const auto base = _jac_row_ptr[i];
+    const auto & row = rows[i];
+    for (const auto k : index_range(row))
+      _jac_cols[base + k] = row[k];
+  }
+}
+
+size_t
+MCMRuntimeMechanism::jacobianValueIndex(unsigned int row, unsigned int col) const
+{
+  const auto begin = _jac_cols.begin() + _jac_row_ptr[row];
+  const auto end = _jac_cols.begin() + _jac_row_ptr[row + 1];
+  const auto it = std::lower_bound(begin, end, col);
+  if (it == end || *it != col)
+    return static_cast<size_t>(-1);
+  return (size_t)std::distance(_jac_cols.begin(), it);
+}
+
+void
+MCMRuntimeMechanism::computeJacobianCSRValues(
+    const std::vector<Real> & C,
+    std::vector<Real> & values) const
+{
+  values.assign(_jac_cols.size(), 0.0);
+
+  if (_n_reactions == 0 || _n_species == 0)
+    return;
+
+  const_cast<MCMRuntimeMechanism *>(this)->evaluateCoefficients(C);
+
+  for (const auto r : make_range(_n_reactions))
+  {
+    const int i0 = _iG[r][0], i1 = _iG[r][1], i2 = _iG[r][2];
+    const Real c0 = (i0 >= 0) ? C[i0] : 1.0;
+    const Real c1 = (i1 >= 0) ? C[i1] : 1.0;
+    const Real c2 = (i2 >= 0) ? C[i2] : 1.0;
+    const Real k = _k[r];
+
+    auto accum = [&](unsigned int j, Real drate) {
+      if (std::abs(drate) < 1e-30)
+        return;
+      _stoich.forEachInRow(r, [&](int s, Real coeff) {
+        const auto value_index = jacobianValueIndex((unsigned int)s, j);
+        if (value_index != static_cast<size_t>(-1))
+          values[value_index] += drate * coeff;
+      });
+    };
+
+    const bool is_lr = (_use_limiting_reagent && !_limiting_reagent.empty() &&
+                        r < _limiting_reagent.size() && _limiting_reagent[r]);
+    if (is_lr && i0 >= 0 && i1 >= 0)
+    {
+      const unsigned int min_idx = (c0 <= c1) ? (unsigned int)i0 : (unsigned int)i1;
+      accum(min_idx, k);
+      continue;
+    }
+
+    if (i0 >= 0)
+      accum((unsigned int)i0, k * c1 * c2);
+    if (i1 >= 0 && i1 != i0)
+      accum((unsigned int)i1, k * c0 * c2);
+    if (i2 >= 0 && i2 != i0 && i2 != i1)
+      accum((unsigned int)i2, k * c0 * c1);
+  }
+}
+
 // ---- Cached single-species interface ----
 
 Real
@@ -990,9 +1168,9 @@ MCMRuntimeMechanism::_buildJacobianCache() const
       continue;
     }
 
-    accum((unsigned int)i0, k * c1 * c2);
-    if (i1 != i0) accum((unsigned int)i1, k * c0 * c2);
-    if (i2 != i0 && i2 != i1) accum((unsigned int)i2, k * c0 * c1);
+    if (i0 >= 0) accum((unsigned int)i0, k * c1 * c2);
+    if (i1 >= 0 && i1 != i0) accum((unsigned int)i1, k * c0 * c2);
+    if (i2 >= 0 && i2 != i0 && i2 != i1) accum((unsigned int)i2, k * c0 * c1);
   }
 
   // Flatten temp to CSR
@@ -1152,6 +1330,13 @@ MCMRuntimeMechanism::calculateCosSZA(Real t) const
 void
 MCMRuntimeMechanism::setSolarParams(Real lat, Real lon, int day, int month, int year)
 {
+  const bool changed = _lat != lat || _lon != lon || _day != day || _month != month || _year != year;
+  if (changed)
+  {
+    _rate_input_cache_valid = false;
+    _dirty = true;
+  }
+
   _lat = lat;
   _lon = lon;
   _day = day;
@@ -1175,6 +1360,8 @@ MCMRuntimeMechanism::enableHybridPhotolysis(const std::string & table_dir)
 {
   _photolysis_method = HYBRID;
   _hybrid_reader = std::make_unique<HybridJTableReader>(table_dir);
+  _rate_input_cache_valid = false;
+  _dirty = true;
 }
 
 void
@@ -1184,6 +1371,9 @@ MCMRuntimeMechanism::loadBottomUpData(const std::string & data_dir, const std::s
   _bottomup_integrator = std::make_unique<BottomUpJIntegrator>(data_dir);
   _bottomup_integrator->loadLampFlux(flux_file);
   _bottomup_integrator->loadReactionMap("bottomup_jmap.dat");
+  _bottomup_j_valid = false;
+  _rate_input_cache_valid = false;
+  _dirty = true;
 }
 
 Real
@@ -1213,4 +1403,6 @@ void
 MCMRuntimeMechanism::setJCalibrator(std::unique_ptr<JCalibrator> calibrator)
 {
   _jcalibrator = std::move(calibrator);
+  _rate_input_cache_valid = false;
+  _dirty = true;
 }

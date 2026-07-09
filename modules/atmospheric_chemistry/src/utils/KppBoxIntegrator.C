@@ -3,6 +3,7 @@
 #include "MooseApp.h"
 
 #include <dlfcn.h>
+#include <map>
 #include <string>
 
 KppBoxIntegrator::KppBoxIntegrator(MooseApp & app,
@@ -108,7 +109,20 @@ KppBoxIntegrator::~KppBoxIntegrator()
 }
 
 void
-KppBoxIntegrator::solve(Real t0, Real t1, std::vector<Real> & C) const
+KppBoxIntegrator::setGlobal(const std::string & name, Real value) const
+{
+  if (!_lib_handle)
+    return;
+  double * value_ptr = reinterpret_cast<double *>(dlsym(_lib_handle, name.c_str()));
+  if (value_ptr)
+    *value_ptr = static_cast<double>(value);
+}
+
+void
+KppBoxIntegrator::solve(Real t0,
+                        Real t1,
+                        std::vector<Real> & C,
+                        const std::map<std::string, Real> & globals) const
 {
   int n = static_cast<int>(C.size());
   if (n == 0)
@@ -121,6 +135,8 @@ KppBoxIntegrator::solve(Real t0, Real t1, std::vector<Real> & C) const
 
   // Copy into KPP global state (kpp_set_conc uses memcpy into C[NSPEC])
   _kpp_set_conc(Y.data(), n);
+  for (const auto & [name, value] : globals)
+    setGlobal(name, value);
 
   // Call KPP integration wrapper
   int ierr = _kpp_integrate(Y.data(),

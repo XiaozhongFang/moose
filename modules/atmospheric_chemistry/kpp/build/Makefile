@@ -23,24 +23,31 @@ $(LIB): $(ADAPTER_SRC) $(realpath $(MECH))
 	rm -rf $(OUT_DIR) && mkdir -p $(OUT_DIR)
 	set -e; \
 	model=$$(awk 'tolower($$1)=="#model"{print $$2; exit}' $(realpath $(MECH))); \
-	files="$(realpath $(MECH))"; \
-	if [ -n "$$model" ]; then files="$$files $(MECH_DIR)$$model.spc $(MECH_DIR)$$model.eqn"; fi; \
-	for src in $$files; do \
+	queue="$(realpath $(MECH))"; \
+	if [ -n "$$model" ]; then queue="$$queue $(MECH_DIR)$$model.def $(MECH_DIR)$$model.spc $(MECH_DIR)$$model.eqn"; fi; \
+	seen=""; \
+	while [ -n "$$queue" ]; do \
+		src=$${queue%% *}; \
+		if [ "$$src" = "$$queue" ]; then queue=""; else queue=$${queue#* }; fi; \
 		[ -f "$$src" ] || continue; \
+		case " $$seen " in *" $$src "*) continue;; esac; \
+		seen="$$seen $$src"; \
 		cp "$$src" $(OUT_DIR)/; \
 		src_dir=$$(dirname "$$src")/; \
 		for incl in $$(awk 'tolower($$1)=="#include"{print $$2}' "$$src"); do \
 			incl=$${incl%\"}; incl=$${incl#\"}; \
-			if [ -f "$$src_dir$$incl" ]; then cp "$$src_dir$$incl" $(OUT_DIR)/; \
-			elif [ -f "$(MECH_DIR)$$incl" ]; then cp "$(MECH_DIR)$$incl" $(OUT_DIR)/; fi; \
+			if [ -f "$$src_dir$$incl" ]; then queue="$$queue $$src_dir$$incl"; \
+			elif [ -f "$(MECH_DIR)$$incl" ]; then queue="$$queue $(MECH_DIR)$$incl"; fi; \
 		done; \
 	done
-	cd $(OUT_DIR) && $(KPP_BIN) $(MECH_NAME).kpp . 2>&1 | tail -1
+	cd $(OUT_DIR) && $(KPP_BIN) $(MECH_NAME).kpp .
 	for f in $(OUT_DIR)/._*; do \
+		[ -e "$$f" ] || continue; \
 		base=$${f#$(OUT_DIR)/._}; mv $$f $(OUT_DIR)/$(MECH_NAME)_$$base; \
 	done
 	sed -i 's/\._/$(MECH_NAME)_/g' $(OUT_DIR)/$(MECH_NAME)_*.c $(OUT_DIR)/$(MECH_NAME)_*.h 2>/dev/null || true
 	sed -i 's/\([0-9]\)\.\([0-9]*\)e\([^0-9+-]\)/\1.\2e0\3/g' $(OUT_DIR)/$(MECH_NAME)_*.c 2>/dev/null || true
+	perl -0pi -e 's/(Told = TIME;\n\s*TIME = T\s*;\n\s*Update_SUN\(\);\n\s*)Update_RCONST\(\);/$${1}VAR = Y;\n   Update_RCONST();\n   VAR = &C[0];/g' $(OUT_DIR)/$(MECH_NAME)_Integrator.c
 	printf '\nint kpp_get_nspec(void) { return NSPEC; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
 	printf '\nint kpp_get_nvar(void) { return NVAR; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c
 	printf '\nint kpp_get_nreact(void) { return NREACT; }\n' >> $(OUT_DIR)/$(MECH_NAME)_Main.c

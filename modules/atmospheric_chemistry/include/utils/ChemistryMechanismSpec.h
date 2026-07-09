@@ -63,6 +63,8 @@ public:
 private:
   /// Parse KPP .spc files to extract species names (recursive #INCLUDE/#MODEL)
   std::vector<std::string> parseKPPSpecies(const std::string & kpp_file) const;
+  /// Parse species names from KPP-generated Parameters.h when available.
+  std::vector<std::string> parseKPPGeneratedSpecies(const std::string & kpp_file) const;
 
   /// Parsed mechanism data (populated for .fac files)
   MechanismData _mech_data;

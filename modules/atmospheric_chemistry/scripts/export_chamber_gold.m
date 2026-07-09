@@ -5,11 +5,18 @@
 %   cd('D:/BaiduSyncdisk/Code/F0AM/Scripts/Tutorials/ExampleSetup_Chamber')
 %   addpath(genpath('D:/BaiduSyncdisk/Code/F0AM'))
 %   export_chamber_gold
+%
+% Optional:
+%   export_chamber_gold('/path/to/F0AM', '/path/to/moose/.../chamber/gold')
 
-function export_chamber_gold()
-    f0am_root = 'D:/BaiduSyncdisk/Code/F0AM';
+function timing = export_chamber_gold(f0am_root, moose_gold_dir)
+    if nargin < 1 || isempty(f0am_root)
+        f0am_root = resolve_f0am_root();
+    end
+    if nargin < 2 || isempty(moose_gold_dir)
+        moose_gold_dir = default_chamber_gold_dir();
+    end
     runs_dir = fullfile(f0am_root, 'Runs');
-    moose_gold_dir = 'W:/home/fangxiaozhong/git_repo/moose/modules/atmospheric_chemistry/test/tests/actions/gold';
 
     addpath(genpath(f0am_root));
 
@@ -29,7 +36,9 @@ function export_chamber_gold()
     ModelOptions.GoParallel = 0;
 
     fprintf('=== Running F0AM main simulation (S1/S2/S3) ===\n');
+    tic;
     S = F0AM_ModelCore(Met, InitConc, ChemFiles, BkgdConc, ModelOptions);
+    main_seconds = toc;
 
     air_den = resolve_air_density(S);
     fprintf('  Air density used for ppb->molec/cm^3: %.6e\n', air_den);
@@ -53,7 +62,9 @@ function export_chamber_gold()
     ModelOptions2.IntTime = 3600;
     ModelOptions2.SavePath = fullfile(runs_dir, 'AllScenarios_S2b.mat');
 
+    tic;
     S2b = F0AM_ModelCore(Met2, InitConc2, ChemFiles, BkgdConc, ModelOptions2);
+    s2b_seconds = toc;
 
     t_offset = S2.Time(end);
     S2b.Time = S2b.Time + t_offset;
@@ -94,7 +105,36 @@ function export_chamber_gold()
         fprintf('Copied %s -> %s\n', src_names{i}, dst);
     end
 
+    timing.main_S1_S2_S3_seconds = main_seconds;
+    timing.restart_S2b_seconds = s2b_seconds;
+    timing.total_four_tests_seconds = main_seconds + s2b_seconds;
+
     fprintf('\nChamber gold CSV update complete.\n');
+    fprintf('F0AM compute total for current four chamber tests (S1+S2+S2b+S3): %.6f s\n', ...
+            timing.total_four_tests_seconds);
+end
+
+function root = resolve_f0am_root()
+    env_root = getenv('F0AM_ROOT');
+    if ~isempty(env_root)
+        root = env_root;
+        return;
+    end
+
+    script_dir = fileparts(mfilename('fullpath'));
+    candidate = fullfile(script_dir, '..', '..', '..', '.reasonix', 'docs', ...
+                         'BaiduSyncdisk', 'Code', 'F0AM');
+    if exist(candidate, 'dir') == 7
+        root = candidate;
+        return;
+    end
+
+    error('Set F0AM_ROOT or pass f0am_root explicitly.');
+end
+
+function gold_dir = default_chamber_gold_dir()
+    script_dir = fileparts(mfilename('fullpath'));
+    gold_dir = fullfile(script_dir, '..', 'test', 'tests', 'chamber', 'gold');
 end
 
 function air_den = resolve_air_density(S)

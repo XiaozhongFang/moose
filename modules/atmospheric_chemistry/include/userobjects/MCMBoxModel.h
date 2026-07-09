@@ -23,6 +23,8 @@
 #include <map>
 #include <memory>
 
+class BottomUpJIntegrator;
+
 /**
  * Centralized box model for atmospheric chemistry ODE systems.
  *
@@ -95,6 +97,9 @@ public:
    */
   void computeJacobianTriplets(const std::vector<Real> & C,
                                std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const;
+
+  /** Compute values for the fixed sparse Jacobian pattern used by PETSc TS. */
+  void computeJacobianCSRValues(const std::vector<Real> & C, std::vector<Real> & values) const;
 
   // -- Cached single-species interface (for ScalarKernel / ODEKernel) --
   /**
@@ -221,7 +226,13 @@ public:
   /** Invalidate BottomUp J-value cache. Call when photolysis-relevant
    *  parameters (T, P, lamp flux, reaction map) change during a simulation.
    *  Next evaluateCoefficients() will recompute all J-values. */
-  void invalidatePhotolysisCache() { _bottomup_j_valid = false; if (_mechanism) _mechanism->invalidatePhotolysisCache(); }
+  void invalidatePhotolysisCache()
+  {
+    _bottomup_j_valid = false;
+    _kpp_bottomup_j_valid = false;
+    if (_mechanism)
+      _mechanism->invalidatePhotolysisCache();
+  }
 
   // -- Solar cycle + convergence (F0AM nDays/Converge) --
   /** Set solar cycle params for multi-day simulation. */
@@ -247,6 +258,9 @@ public:
                         const std::vector<std::string> & conv_species = {}) const;
 
 protected:
+  PhysParams currentPhysParams() const;
+  std::map<std::string, Real> kppGlobalValues() const;
+
   // -- Chemical mechanism delegate --
   std::unique_ptr<IMechanism> _mechanism;
 
@@ -294,6 +308,11 @@ protected:
   std::string _hybrid_table_dir;
   std::string _bottomup_data_dir;
   std::string _lamp_flux_file;
+  std::unique_ptr<BottomUpJIntegrator> _kpp_bottomup_integrator;
+  mutable std::map<std::string, Real> _kpp_cached_bottomup_j;
+  mutable Real _kpp_cached_bottomup_T = 0.0;
+  mutable Real _kpp_cached_bottomup_P = 0.0;
+  mutable bool _kpp_bottomup_j_valid = false;
 
   /// Current simulation time (seconds since midnight)
   mutable Real _t;
@@ -313,6 +332,10 @@ protected:
   TS _ts = nullptr;
   Vec _ts_X = nullptr;
   Mat _ts_J = nullptr;
+  std::vector<PetscInt> _ts_jac_cols;
+  std::vector<Real> _ts_jac_values_real;
+  std::vector<PetscScalar> _ts_jac_values;
+  PetscReal _ts_last_dt = -1.0;
   PetscReal _solver_rtol = 1e-6;
   PetscReal _solver_atol = 1e-10;
   std::string _solver_type = "bdf";
@@ -333,4 +356,3 @@ public:
   // _use_sundials is true and _integrator->selfDriven() is true.
   void solveSundialsCVODEWrapper(Real t0, Real t1, std::vector<Real> & C);
 };
-

@@ -2,11 +2,11 @@
 """
 plot_chamber_comparison.py -- Plot MOOSE vs F0AM gold comparison figures.
 
-Generates 2x2 panel figures (C5H8, OH, NOx, O3) for each chamber scenario
-(S1, S2, S3, S2b), comparing MOOSE CSV output against F0AM gold reference.
+Generates 2x2 panel figures (C5H8, OH, NOx, O3) for each chamber scenario with
+checked-in gold (S1, S2, S3), comparing MOOSE CSV output against F0AM reference.
 
 Usage:
-    # Plot all 4 scenarios using default paths
+    # Plot checked-in comparison scenarios using default paths
     python3 scripts/plot_chamber_comparison.py
 
     # Check files only (no plotting)
@@ -21,8 +21,9 @@ Usage:
 Dependencies: numpy, matplotlib
 """
 
-import argparse, csv, os, sys
+import argparse, csv, os, sys, tempfile
 import numpy as np
+os.environ.setdefault('MPLCONFIGDIR', os.path.join(tempfile.gettempdir(), 'matplotlib'))
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -39,12 +40,11 @@ plt.rcParams.update({
     'grid.alpha': 0.3, 'grid.linestyle': ':',
 })
 
-# Default scenarios (relative paths from script location)
+# Default checked-in comparison scenarios in test/tests/chamber.
 SCENARIOS = [
     ('S1 (NO2=0.1ppb)',  'vs_F0AM_chamber_S1_box.csv',   'vs_F0AM_chamber_S1_box.csv'),
     ('S2 (NO2=1ppb)',    'vs_F0AM_chamber_S2_box.csv',   'vs_F0AM_chamber_S2_box.csv'),
     ('S3 (NO2=10ppb)',   'vs_F0AM_chamber_S3_box.csv',   'vs_F0AM_chamber_S3_box.csv'),
-    ('S2b (jcorr=10)',   'vs_F0AM_chamber_S2b_box.csv',  'vs_F0AM_chamber_S2b_box.csv'),
 ]
 
 
@@ -108,11 +108,11 @@ def plot_scenario(gold, moose, label, save_path):
     plt.close(fig)
 
 
-def check_files(actions_dir, gold_dir):
+def check_files(chamber_dir, gold_dir):
     """Check existence and size of all scenario files."""
     all_ok = True
     for label, gold_f, moose_f in SCENARIOS:
-        for desc, d, f in [('gold', gold_dir, gold_f), ('moose', actions_dir, moose_f)]:
+        for desc, d, f in [('gold', gold_dir, gold_f), ('moose', chamber_dir, moose_f)]:
             path = os.path.join(d, f)
             if os.path.exists(path):
                 sz = os.path.getsize(path)
@@ -134,8 +134,8 @@ def main():
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    actions_dir = os.path.join(script_dir, '../test/tests/actions')
-    gold_dir = os.path.join(actions_dir, 'gold')
+    chamber_dir = os.path.join(script_dir, '../test/tests/chamber')
+    gold_dir = os.path.join(chamber_dir, 'gold')
 
     # Single-scenario mode
     if args.moose and args.gold:
@@ -150,14 +150,14 @@ def main():
 
     # Check mode
     if args.check:
-        ok = check_files(actions_dir, gold_dir)
+        ok = check_files(chamber_dir, gold_dir)
         sys.exit(0 if ok else 1)
 
-    # Default: plot all 4 scenarios
+    # Default: plot checked-in comparison scenarios
     print('Loading gold and MOOSE data...')
     for label, gold_f, moose_f in SCENARIOS:
         gpath = os.path.join(gold_dir, gold_f)
-        mpath = os.path.join(actions_dir, moose_f)
+        mpath = os.path.join(chamber_dir, moose_f)
         if not os.path.exists(gpath) or not os.path.exists(mpath):
             print(f'SKIP {label}: missing file (gold={os.path.exists(gpath)}, moose={os.path.exists(mpath)})')
             continue
@@ -166,7 +166,7 @@ def main():
         print(f'  {label}: gold {len(gold["time"])} tp, MOOSE {len(moose["time"])} tp')
 
         safe = label.replace(' ', '_').replace('(', '').replace(')', '').replace('=', '')
-        save = args.save or os.path.join(actions_dir, f'chamber_{safe}.pdf')
+        save = args.save or os.path.join(chamber_dir, f'chamber_{safe}.pdf')
         plot_scenario(gold, moose, label, save)
 
     print('Done.')

@@ -10,6 +10,7 @@
 #include "MCMBoxModel.h"
 #include "MCMRuntimeMechanism.h"
 #include "MCMFacsimileParser.h"
+#include "BottomUpJIntegrator.h"
 #include "MooseVariableScalar.h"
 #include "FEProblemBase.h"
 #include "NonlinearSystemBase.h"
@@ -18,6 +19,7 @@
 #include "KppBoxIntegrator.h"
 #endif
 #include <algorithm>
+#include <cmath>
 #include <regex>
 #include <sstream>
 #include <utility>
@@ -64,6 +66,8 @@ MCMBoxModel::validParams()
       "automatically converts between ppb and molec/cm³ using the air density.");
 
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor");
+  params.addParam<bool>("roof_open", true,
+      "Roof (chamber cover) open. false forces photolysis rates to zero.");
   params.addParam<Real>("default_ic", 0.0,
       "Default initial concentration (molec/cm³) for species without explicit ICs.\n"
       "Set to a small positive value (e.g. 1e6) to prevent Jacobian singularities\n"
@@ -147,7 +151,7 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _tgauss(0.0),
     _t_start_dil(0.0),
     _use_gaussian(false),
-    _roof_open(true),
+    _roof_open(getParam<bool>("roof_open")),
     _jfac(getParam<Real>("jfac")),
     _t(0.0),
     _bottomup_j_valid(false),
@@ -257,6 +261,14 @@ MCMBoxModel::initialize()
     _n_reactions = 0;
     _console << "MCMBoxModel: Loaded " << _n_species << " species from KPP mechanism"
              << std::endl;
+
+    if (_photolysis_scheme == "BOTTOMUP")
+    {
+      _kpp_bottomup_integrator = std::make_unique<BottomUpJIntegrator>(_bottomup_data_dir);
+      _kpp_bottomup_integrator->loadLampFlux(_lamp_flux_file);
+      _kpp_bottomup_integrator->loadReactionMap("bottomup_jmap.dat");
+      _kpp_bottomup_j_valid = false;
+    }
 
     // Apply default IC (if > 0) to uninitialized species.
     {
@@ -435,6 +447,17 @@ MCMBoxModel::computeJacobianTriplets(
 
   auto * mech = static_cast<MCMRuntimeMechanism*>(_mechanism.get());
   mech->computeJacobianTriplets(C, J);
+}
+
+void
+MCMBoxModel::computeJacobianCSRValues(const std::vector<Real> & C, std::vector<Real> & values) const
+{
+  values.clear();
+  if (_n_reactions == 0 || _n_species == 0 || !_mechanism)
+    return;
+
+  auto * mech = static_cast<MCMRuntimeMechanism*>(_mechanism.get());
+  mech->computeJacobianCSRValues(C, values);
 }
 
 // -- Cached single-species interface --
@@ -664,6 +687,75 @@ MCMBoxModel::checkConvergence(const std::vector<Real> & Cp, const std::vector<Re
   return mx;
 }
 
+PhysParams
+MCMBoxModel::currentPhysParams() const
+{
+  PhysParams p;
+  p.temperature = getParam<Real>("temperature");
+  p.air_density = getParam<Real>("air_density");
+  p.water_vapor = getParam<Real>("water_vapor");
+  p.pressure = getParam<Real>("press");
+  p.rh = getParam<Real>("rh");
+  p.blheight = getParam<Real>("blheight");
+  p.jfac = _jfac;
+  p.latitude = _lat;
+  p.longitude = _lon;
+  return p;
+}
+
+std::map<std::string, Real>
+MCMBoxModel::kppGlobalValues() const
+{
+  const PhysParams p = currentPhysParams();
+
+  Real air_density = p.air_density;
+  if (p.pressure > 0.0)
+  {
+    constexpr Real NA_over_R = 6.02214129e23 / 8.3144621;
+    air_density = 1.0e-6 * NA_over_R * (p.pressure * 100.0 / p.temperature);
+  }
+
+  Real h2o = p.water_vapor;
+  if (p.rh >= 0.0)
+  {
+    const Real temp_c = p.temperature - 273.15;
+    const Real wvp =
+        (p.rh / 100.0) * 6.116441 * std::pow(10.0, (7.591386 * temp_c) / (temp_c + 240.7263));
+    const Real press_mbar = (p.pressure > 0.0) ? p.pressure : 1013.25;
+    const Real h2o_ppu = wvp / (press_mbar - wvp);
+    h2o = h2o_ppu * air_density;
+  }
+
+  std::map<std::string, Real> globals;
+  globals["TEMP"] = p.temperature;
+  globals["AIR"] = air_density;
+  globals["M"] = air_density;
+  globals["O2"] = 0.21 * air_density;
+  globals["N2"] = 0.78 * air_density;
+  globals["H2O"] = h2o;
+
+  if (_photolysis_scheme == "BOTTOMUP" && _kpp_bottomup_integrator)
+  {
+    const Real T_cur = p.temperature;
+    const Real P_cur = p.pressure > 0.0 ? p.pressure : 1013.25;
+    if (!_kpp_bottomup_j_valid ||
+        std::abs(T_cur - _kpp_cached_bottomup_T) > 1.0e-6 ||
+        std::abs(P_cur - _kpp_cached_bottomup_P) > 1.0e-6)
+    {
+      _kpp_cached_bottomup_j = _kpp_bottomup_integrator->computeAllJ(T_cur, P_cur);
+      _kpp_cached_bottomup_T = T_cur;
+      _kpp_cached_bottomup_P = P_cur;
+      _kpp_bottomup_j_valid = true;
+    }
+
+    const Real roof_factor = _roof_open ? 1.0 : 0.0;
+    for (const auto & [jname, value] : _kpp_cached_bottomup_j)
+      globals[jname] = value * _jfac * roof_factor;
+  }
+
+  return globals;
+}
+
 // ===== PETSc TS standalone integrator =====
 
 void
@@ -764,7 +856,8 @@ MCMBoxModel::execute()
     // Call KPP INTEGRATE via KppBoxIntegrator.
     KppBoxIntegrator * kpp_ptr =
         static_cast<KppBoxIntegrator *>(_integrator.get());
-    kpp_ptr->solve(t_start, t_end, C);
+    const auto globals = kppGlobalValues();
+    kpp_ptr->solve(t_start, t_end, C, globals);
 
     // Write integrated state back to all ScalarVariable storage locations.
     NonlinearSystemBase & nl = fe_problem.getNonlinearSystemBase(0);
@@ -882,25 +975,35 @@ MCMBoxModel::setupPETScTS()
   PETSC_TRY(TSSetRHSFunction(_ts, nullptr, tsRHSFunction, this));
   PETSC_TRY(VecCreateSeq(PETSC_COMM_SELF, _n_species, &_ts_X));
 
-  // Use sparse AIJ matrix for Jacobian.  Pre-allocate DENSE because MCM
-  // mechanisms are densely interconnected (most rows touch most columns).
-  // The previous value nz = n interpreted by PETSc as "n non-zeros per row
-  // in diagonal positions"; the actual Jacobian has >> n non-zeros per row
-  // for full-MCM, which caused "New nonzero at (i,j)" mallocs.
-  //
-  // For 610 species: 610×610 ≈ 3 MB.
-  // For full MCM (~5800 species): ~272 MB.
-  // Jacobian matrix — use dense because MCM mechanisms are densely
-  // interconnected.  Pre-allocating as sparse (MatCreateSeqAIJ) with too few
-  // entries per row causes PETSc to throw "New nonzero at (i,j)" mallocs
-  // once the real Jacobian non-zeros exceed the pre-allocated budget.
-  // Dense matrices have no such limitation.
+  // Preallocate the PETSc matrix from the fixed chemical reaction graph.
+  // The chamber mechanism is sparse: each reaction only couples products and
+  // reactants from that reaction.  A dense 610x610 matrix spent most of the
+  // runtime zeroing and factorizing structural zeros.
   PetscInt n = static_cast<PetscInt>(_n_species);
-  _console << "MCMBoxModel: Jacobian matrix: " << n << "×" << n
-           << " (dense; "
-           << (static_cast<std::size_t>(n) * n * sizeof(PetscScalar) / (1024*1024))
-           << " MB)" << std::endl;
-  PETSC_TRY(MatCreateSeqDense(PETSC_COMM_SELF, n, n, nullptr, &_ts_J));
+  const auto * runtime_mech = dynamic_cast<MCMRuntimeMechanism *>(_mechanism.get());
+  if (!runtime_mech)
+    mooseError("MCMBoxModel: PETSc TS sparse Jacobian requires MCMRuntimeMechanism.");
+
+  const auto & jac_row_ptr = runtime_mech->jacobianRowPtr();
+  const auto & jac_cols = runtime_mech->jacobianCols();
+  if (jac_row_ptr.size() != _n_species + 1)
+    mooseError("MCMBoxModel: invalid sparse Jacobian row pointer size.");
+
+  std::vector<PetscInt> row_nnz(_n_species, 0);
+  for (const auto i : make_range(_n_species))
+    row_nnz[i] = static_cast<PetscInt>(jac_row_ptr[i + 1] - jac_row_ptr[i]);
+
+  _ts_jac_cols.resize(jac_cols.size());
+  for (const auto i : index_range(jac_cols))
+    _ts_jac_cols[i] = static_cast<PetscInt>(jac_cols[i]);
+  _ts_jac_values_real.resize(jac_cols.size(), 0.0);
+  _ts_jac_values.resize(jac_cols.size(), 0.0);
+
+  _console << "MCMBoxModel: Jacobian matrix: " << n << "x" << n
+           << " sparse AIJ, nnz=" << jac_cols.size()
+           << " (fill=" << (100.0 * (Real)jac_cols.size() / ((Real)n * (Real)n))
+           << "%)" << std::endl;
+  PETSC_TRY(MatCreateSeqAIJ(PETSC_COMM_SELF, n, n, 0, row_nnz.data(), &_ts_J));
   PETSC_TRY(MatSetFromOptions(_ts_J));
 
   PETSC_TRY(TSSetRHSJacobian(_ts, _ts_J, _ts_J, tsRHSJacobian, this));
@@ -942,8 +1045,13 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
   PETSC_TRY(TSSetTime(_ts, t0));
   PETSC_TRY(TSSetMaxTime(_ts, t1));
 
-  // Set initial step size (very small for stiff chemistry)
-  PetscReal step0 = std::max((t1 - t0) * 1.0e-6, 1.0e-10);
+  // First chemistry interval starts conservatively because the chamber IC has
+  // many zero species.  Later intervals reuse PETSc's accepted step size so
+  // each output interval does not repeat the same tiny-step startup ramp.
+  const PetscReal max_step = t1 - t0;
+  PetscReal step0 = std::max(max_step * 1.0e-6, 1.0e-10);
+  if (_ts_last_dt > 0.0)
+    step0 = std::min(std::max(_ts_last_dt, 1.0e-10), max_step);
   PETSC_TRY(TSSetTimeStep(_ts, step0));
   // Also set adaptive step limits
   TSAdapt adapt;
@@ -965,6 +1073,7 @@ MCMBoxModel::runPETScStep(PetscReal t0, PetscReal t1)
   TSConvergedReason reason;
   PETSC_TRY(TSGetStepNumber(_ts, &steps));
   PETSC_TRY(TSGetConvergedReason(_ts, &reason));
+  PETSC_TRY(TSGetTimeStep(_ts, &_ts_last_dt));
 
 #undef PETSC_TRY
 
@@ -1031,20 +1140,30 @@ MCMBoxModel::tsRHSJacobian(TS /*ts*/, PetscReal /*t*/, Vec C, Mat Amat, Mat Pmat
   // Build concentration vector
   std::vector<Real> C_vec(c_arr, c_arr + model->_n_species);
 
-  // Compute Jacobian triplets
-  std::vector<std::tuple<unsigned int, unsigned int, Real>> J;
-  model->computeJacobianTriplets(C_vec, J);
+  model->computeJacobianCSRValues(C_vec, model->_ts_jac_values_real);
+  if (model->_ts_jac_values.size() != model->_ts_jac_values_real.size())
+    model->_ts_jac_values.resize(model->_ts_jac_values_real.size());
+  for (const auto i : index_range(model->_ts_jac_values_real))
+    model->_ts_jac_values[i] = static_cast<PetscScalar>(model->_ts_jac_values_real[i]);
 
-  // Insert into PETSc matrix — use ADD_VALUES because multiple reactions
-  // contribute to the same (row,col) pair, and the triplets from
-  // computeJacobianTriplets are per-reaction contributions.
+  const auto * runtime_mech = static_cast<MCMRuntimeMechanism *>(model->_mechanism.get());
+  const auto & row_ptr = runtime_mech->jacobianRowPtr();
+
   PetscCall(MatZeroEntries(Pmat));
-  for (const auto & [row, col, val] : J)
+  for (const auto row : make_range(model->_n_species))
   {
-    PetscInt irow = static_cast<PetscInt>(row);
-    PetscInt icol = static_cast<PetscInt>(col);
-    PetscScalar pval = val;
-    PetscCall(MatSetValues(Pmat, 1, &irow, 1, &icol, &pval, ADD_VALUES));
+    const PetscInt irow = static_cast<PetscInt>(row);
+    const auto begin = row_ptr[row];
+    const auto ncols = row_ptr[row + 1] - begin;
+    if (ncols == 0)
+      continue;
+    PetscCall(MatSetValues(Pmat,
+                           1,
+                           &irow,
+                           static_cast<PetscInt>(ncols),
+                           model->_ts_jac_cols.data() + begin,
+                           model->_ts_jac_values.data() + begin,
+                           INSERT_VALUES));
   }
 
   PetscCall(MatAssemblyBegin(Pmat, MAT_FINAL_ASSEMBLY));

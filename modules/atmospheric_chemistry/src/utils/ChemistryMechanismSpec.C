@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <fstream>
 #include <functional>
+#include <regex>
 #include <set>
 
 ChemistryMechanismSpec::ChemistryMechanismSpec(const std::string & mechanism_file,
@@ -30,7 +31,9 @@ ChemistryMechanismSpec::ChemistryMechanismSpec(const std::string & mechanism_fil
 
   if (_is_kpp)
   {
-    _species = parseKPPSpecies(mechanism_file);
+    _species = parseKPPGeneratedSpecies(mechanism_file);
+    if (_species.empty())
+      _species = parseKPPSpecies(mechanism_file);
   }
   else
   {
@@ -45,6 +48,40 @@ ChemistryMechanismSpec::ChemistryMechanismSpec(const std::string & mechanism_fil
       base_vars.insert("J<" + std::to_string(jn) + ">");
     _base_vars = base_vars;
   }
+}
+
+std::vector<std::string>
+ChemistryMechanismSpec::parseKPPGeneratedSpecies(const std::string & kpp_file) const
+{
+  auto slash = kpp_file.find_last_of('/');
+  std::string dir = (slash != std::string::npos) ? kpp_file.substr(0, slash + 1) : "";
+  std::string base = kpp_file.substr(slash + 1);
+  auto dot = base.find_last_of('.');
+  if (dot != std::string::npos)
+    base = base.substr(0, dot);
+
+  const std::string parameters_path = dir + "kpp_build_" + base + "/" + base + "_Parameters.h";
+  std::ifstream file(parameters_path);
+  if (!file.is_open())
+    return {};
+
+  std::vector<std::string> species;
+  std::string line;
+  const std::regex ind_pattern("^#define[ \t]+ind_([A-Za-z][A-Za-z0-9_]*)[ \t]+([0-9]+)");
+  while (std::getline(file, line))
+  {
+    std::smatch match;
+    if (!std::regex_search(line, match, ind_pattern))
+      continue;
+
+    const auto index = static_cast<std::size_t>(std::stoul(match[2].str()));
+    if (species.size() <= index)
+      species.resize(index + 1);
+    species[index] = match[1].str();
+  }
+
+  species.erase(std::remove(species.begin(), species.end(), ""), species.end());
+  return species;
 }
 
 std::vector<std::string>

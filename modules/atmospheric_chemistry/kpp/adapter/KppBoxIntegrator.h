@@ -5,6 +5,7 @@
 #include "ConsoleStreamInterface.h"
 #include "KppFortranBridge.h"
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -44,7 +45,10 @@ public:
   Real ppbToMolec() const override { return 1.0; }
 
   /// Advance the chemistry from t0 to t1 using KPP INTEGRATE().
-  void solve(Real t0, Real t1, std::vector<Real> & C) const;
+  void solve(Real t0,
+             Real t1,
+             std::vector<Real> & C,
+             const std::map<std::string, Real> & globals = {}) const;
 
   const std::vector<std::string> & speciesNames() const { return _species_names; }
 
@@ -62,6 +66,8 @@ private:
   using GetConcFn   = void (*)(double *, int);
   using GetIntFn    = int (*)(void);
   using NameFn      = const char * (*)(int);
+
+  void setGlobal(const std::string & name, Real value) const;
 
   InitFn      _kpp_init;
   IntegrateFn _kpp_integrate;
