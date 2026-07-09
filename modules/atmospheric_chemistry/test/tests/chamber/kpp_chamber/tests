@@ -1,0 +1,15 @@
+[Tests]
+  [./solver_timing_inputs]
+    type = RunCommand
+    command = 'python3 ../../../../scripts/benchmark_chamber_solvers.py --solvers kpp_rosenbrock,petsc_bdf --write-inputs-only --output-dir kpp_chamber/solver_runs/input_check'
+    requirement = 'The chamber KPP benchmark workflow shall generate solver-specific inputs for the current S1, S2, S2b, and S3 F0AM chamber scenarios.'
+  [../]
+
+  [./solver_accuracy_timing]
+    type = RunCommand
+    command = 'python3 ../../../../scripts/benchmark_chamber_solvers.py --solvers kpp_rosenbrock,petsc_bdf --rtol 5e-4 --atol 5e-8 --f0am-seconds 6 --timeout 300 --compare-gold --plot-comparison --output-dir kpp_chamber/solver_runs/f0am_accuracy_timing'
+    heavy = true
+    max_time = 1200
+    requirement = 'The chamber KPP benchmark workflow shall accurately solve the F0AM chamber gold scenarios and archive solver timing analysis with comparison figures using the chamber plotting layout.'
+  [../]
+[]

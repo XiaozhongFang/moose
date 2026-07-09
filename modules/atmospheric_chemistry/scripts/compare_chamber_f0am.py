@@ -117,6 +117,7 @@ def main():
     scenarios = [
         ('vs_F0AM_chamber_S1_box.csv',   'vs_F0AM_chamber_S1_box.csv'),
         ('vs_F0AM_chamber_S2_box.csv',   'vs_F0AM_chamber_S2_box.csv'),
+        ('vs_F0AM_chamber_S2b_box.csv',  'vs_F0AM_chamber_S2b_box.csv'),
         ('vs_F0AM_chamber_S3_box.csv',   'vs_F0AM_chamber_S3_box.csv'),
     ]
     total_bad = 0

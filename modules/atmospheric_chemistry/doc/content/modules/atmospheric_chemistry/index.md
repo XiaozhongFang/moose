@@ -234,20 +234,49 @@ matlab -batch "addpath('modules/atmospheric_chemistry/scripts'); export_chamber_
 ```
 
 The export script:
-1. Reads air number density from `S.Met.M` (dynamic, not hardcoded)
-2. Extracts S1/S2/S3 by `StepIndex`, then runs S2b as a restart from S2
-3. Removes F0AM pseudo-species ONE and CH3ONO (not in MOOSE mechanism);
-   keeps RO2 (now output as a diagnostic ScalarVariable in box mode)
-4. Reorders columns to match MOOSE output order (611 columns: 610 species + RO2)
-5. Writes to `gold/vs_F0AM_chamber_{S1,S2,S3,S2b}_box.csv`
-6. Prints the F0AM compute time for the current four-test chamber workflow
+1. Uses the same chamber inputs as `ExampleSetup_Chamber.m`, including
+   `MCMv331_K(Met)`, `MCMv331_J(Met,1)`, `MCMv331_Inorg_Isoprene`, and
+   `CH3ONO_hv`
+2. Reads air number density from `S.Met.M` (dynamic, not hardcoded)
+3. Extracts S1/S2/S3 by `StepIndex`, then runs S2b as a restart from S2
+4. Writes F0AM-output columns in molec/cm³ at early radical times
+   (`1-1000 s`), 1000-second comparison times, and the final chamber time
+5. Writes S2b with restart-relative CSV time so the MOOSE restart test can use
+   CSVDiff directly, while plotting helpers offset it back to the 3-4 hour
+   F0AM chamber window
+6. Copies `gold/vs_F0AM_chamber_{S1,S2,S2b,S3}_box.csv` by default; pass
+   `false` as the third argument to leave S2b only in the F0AM `Runs` directory
+7. Prints the F0AM compute time for the current four-test chamber workflow
    (`S1 + S2 + S2b + S3`)
 
+The checked-in S1/S2/S3 gold CSV files were verified against the original F0AM
+`Setups/Examples/ExampleSetup_Chamber.m` output, not just against the export
+helper. After clearing the F0AM `Runs` directory, running the original chamber
+script, loading `ChamberExampleOutput.mat`, splitting it with `SplitRun`, and
+comparing with freshly exported CSV files, the integer-rounded output times
+matched exactly. The largest relative concentration differences were
+`1.48e-13` (S1), `1.35e-13` (S2), and `1.30e-13` (S3), which are only
+roundoff-level differences between independent MATLAB runs. The S2b gold is
+generated directly from F0AM's S2 final state restart and is stored with
+restart-relative time for CSVDiff. The normal chamber runtime CSVs are ignored
+by git; the four `gold/` CSV files, including S2b, are checked in.
+
 The MOOSE chamber tests use PETSc TS BDF with `chem_solver_rtol = 5e-4` and
-`chem_solver_atol = 5e-8`. The CSVDiff comparison keeps a 5% relative tolerance
-and uses `abs_zero = 1.15e-6` to ignore roundoff-scale species concentrations
-near zero. S2 and S3 stop at the final F0AM output times in their time sequences
-(`9957 s` and `9832 s`) instead of a nominal 3-hour endpoint.
+`chem_solver_atol = 5e-8`. S1/S2/S3 run to `10800 s`; S2 writes the checkpoint
+used by the S2b restart, and S2b runs for one restart-relative hour. CSVDiff uses
+per-scenario tolerances: S1 and S3 use 10% relative tolerance for the full
+610-species early-time product set, S2 and S2b use 5%, and `abs_zero` filters
+concentrations that are too small to interpret chemically. The ordinary MOOSE
+chamber CSVDiff tests compare the shared F0AM/MOOSE columns, including `RO2`
+and `CH3ONO`.
+
+The generated-KPP solver benchmark ignores `ONE`, `RO2`, and `CH3ONO` by default
+during optional gold comparison because a single generated KPP mechanism does
+not provide those F0AM helper/diagnostic columns with the same semantics.
+Postprocessing reconstructs `RO2` from the explicit `RO2 = ... ;` family in the
+mechanism when a solver CSV does not contain a native `RO2` column, then reports
+OH/RO2/HO2/CH3O2 and major product errors separately for the first 1010 seconds
+of each scenario.
 
 ### Running Tests
 
@@ -266,6 +295,14 @@ cd modules/atmospheric_chemistry
 ./run_tests -C test/tests/chamber --heavy --re 'vs_F0AM_chamber_(S1|S2|S2b|S3)_box'
 ```
 
+Or run the generated-KPP chamber solver benchmark tests:
+
+```bash
+cd modules/atmospheric_chemistry
+./run_tests -C test/tests/chamber/kpp_chamber --re solver_timing_inputs
+./run_tests -C test/tests/chamber/kpp_chamber --heavy --re solver_accuracy_timing
+```
+
 Or run a single scenario directly:
 
 ```bash
@@ -277,12 +314,15 @@ cd modules/atmospheric_chemistry/test/tests/chamber
 
 F0AM chamber timing should be compared against the same four work items used by
 the current MOOSE chamber tests: `S1`, `S2`, `S2b` restart from the S2 checkpoint,
-and `S3`. The reference F0AM timing of about 6 seconds is therefore the total
-time for those four items, not a per-scenario value.
+and `S3`. The `--f0am-seconds` benchmark option is therefore the total time for
+those four items, not a per-scenario value.
 
 The benchmark helper generates solver-specific copies of the current chamber
-inputs under `test/tests/chamber/benchmark_runs/`, runs each scenario, and writes
-both per-scenario and total timing CSV files:
+inputs under `test/tests/chamber/kpp_chamber/solver_runs/`, runs each scenario,
+compares S1/S2/S2b/S3 output against the F0AM gold CSV files when
+`--compare-gold` is set, and writes per-scenario timing, solver totals,
+chamber-style comparison figures, early radical diagnostics, and a Markdown
+analysis file:
 
 ```bash
 cd modules/atmospheric_chemistry
@@ -290,47 +330,76 @@ cd modules/atmospheric_chemistry
 # List solver selections covered by the benchmark.
 python3 scripts/benchmark_chamber_solvers.py --list-solvers
 
-# Run all directly supported FAC solvers and generated KPP solvers.
-python3 scripts/benchmark_chamber_solvers.py --solvers all --f0am-seconds 6
+# Generate the checked solver inputs under test/tests/chamber/kpp_chamber/.
+python3 scripts/benchmark_chamber_solvers.py \
+    --solvers kpp_rosenbrock,petsc_bdf \
+    --write-inputs-only \
+    --output-dir kpp_chamber/solver_runs/input_check
 
-# Run only the current production solver.
-python3 scripts/benchmark_chamber_solvers.py --solvers petsc_bdf --f0am-seconds 6
+# Run the checked accuracy/timing benchmark against F0AM gold CSV files.
+python3 scripts/benchmark_chamber_solvers.py \
+    --solvers kpp_rosenbrock,petsc_bdf \
+    --rtol 5e-4 --atol 5e-8 \
+    --compare-gold --plot-comparison \
+    --f0am-seconds 6 \
+    --output-dir kpp_chamber/solver_runs/f0am_accuracy_timing
 
-# Run the generated KPP Rosenbrock mechanism with MATLAB/F0AM default tolerances.
+# Optional: run the generated KPP Rosenbrock mechanism with MATLAB/F0AM default tolerances.
 python3 scripts/benchmark_chamber_solvers.py \
     --solvers kpp_rosenbrock --rtol 1e-3 --atol 1e-6 --f0am-seconds 6
 ```
 
 The full solver sweep is a performance experiment and can run for many minutes
 or hours depending on the host. Use `--timeout <seconds>` to cap each scenario.
-The script writes `chamber_solver_timing.csv` and `chamber_solver_summary.csv`
-incrementally, so partial results are preserved if the run is interrupted.
+The script writes `chamber_solver_timing.csv`, `chamber_solver_summary.csv`,
+`chamber_solver_analysis.md`, and, when `--plot-comparison` is set,
+`figures/*_comparison.png`, `figures/*_radicals.png`, and
+`chamber_diagnostic_errors.csv`. Timing rows are preserved if the run is
+interrupted.
 
 For `.fac` chamber inputs, the directly runnable solver set is MOOSE implicit,
 SUNDIALS CVODE, and PETSc TS with each exposed `chem_solver_type` (`bdf`,
 `arkimex`, `eimex`, `rosw`, `mimex`, `beuler`, `cn`, `rk`, `theta`, `ssp`, and
 `sundials`). KPP selections first convert `MCMv331_Inorg_Isoprene.fac` to a
 KPP mechanism with `scripts/fac_to_kpp.py`, build the selected KPP integrator
-shared library under `test/tests/chamber/kpp_chamber/`, then run the same S1,
-S2, S2b, and S3 inputs against the generated `.kpp` mechanism. These generated
-KPP files are ignored by git and can be recreated by the benchmark script.
+shared library under `test/tests/chamber/kpp_chamber/generated_mechanisms/`,
+then run the same S1, S2, S2b, and S3 inputs against the generated `.kpp`
+mechanism. These generated KPP files and solver-run archives are ignored by git
+and can be recreated by the benchmark script.
 
 `fac_to_kpp.py` filters KPP dummy species and FAC species that are declared but
 not present in the reaction graph, keeping the generated `#DEFVAR` list aligned
 with KPP's generated `NVAR` and `SPC_NAMES`.
 
-On the reference workstation used during development, `kpp_rosenbrock` completed
-the four chamber work items in 9.38 s with `rtol=1e-3` and `atol=1e-6`
-(1.58x the 6 s F0AM total). With the stricter chamber-test tolerances
-`rtol=5e-4` and `atol=5e-8`, the same KPP run completed in 11.94 s.
+The checked solver benchmark archives a timing/accuracy report in
+`kpp_chamber/solver_runs/f0am_accuracy_timing/chamber_solver_analysis.md` and
+comparison figures in `kpp_chamber/solver_runs/f0am_accuracy_timing/figures/`.
+On the development workstation, the checked strict-tolerance run completed all
+four work items with F0AM-gold accuracy:
 
-The lightweight test `chamber_solver_timing_inputs` checks that benchmark inputs
-can be generated for the current four chamber test files without running the full
-solver sweep:
+| Solver | Total seconds | vs 6 s F0AM | Max relative CSV error |
+|--------|---------------|-------------|------------------------|
+| `kpp_rosenbrock` | 9.48 | 1.58x | 8.71e-2 |
+| `petsc_bdf` | 22.46 | 3.74x | 8.83e-2 |
+
+The largest full-CSV relative errors come from early-time trace products. The
+diagnostic table is usually more useful for chamber interpretation; in the same
+run, S2 OH errors were below `0.3%` and S2 RO2 errors were about `1.5%` for both
+checked solvers over the early radical window.
+
+KPP is faster because the generated Rosenbrock code uses a mechanism-specific
+sparse analytical Jacobian and generated linear algebra. PETSc BDF uses the
+runtime FAC mechanism path, which evaluates rate expressions through the generic
+MCM runtime and assembles through a general sparse interface each chemical
+substep.
+
+The lightweight test `solver_timing_inputs` checks that benchmark inputs can be
+generated for the current four chamber test files without running the full
+solver benchmark:
 
 ```bash
 cd modules/atmospheric_chemistry
-./run_tests -C test/tests/chamber --re chamber_solver_timing_inputs
+./run_tests -C test/tests/chamber/kpp_chamber --re solver_timing_inputs
 ```
 
 ### Comparing Results
@@ -338,7 +407,7 @@ cd modules/atmospheric_chemistry
 **Numerical comparison** (per-species ratio report):
 
 ```bash
-# Checked-in comparison scenarios (S1, S2, S3)
+# Checked-in comparison scenarios (S1, S2, S2b, S3)
 python3 scripts/compare_chamber_f0am.py
 
 # Single scenario
@@ -347,13 +416,13 @@ python3 scripts/compare_chamber_f0am.py \
     --gold test/tests/chamber/gold/vs_F0AM_chamber_S1_box.csv
 ```
 
-**Visual comparison** (2x2 panel PDFs):
+**Visual comparison** (2x2 chamber comparison figures):
 
 ```bash
 # Check files first
 python3 scripts/plot_chamber_comparison.py --check
 
-# Plot checked-in comparison scenarios (S1, S2, S3)
+# Plot checked-in comparison scenarios (S1, S2, S2b, S3)
 python3 scripts/plot_chamber_comparison.py
 
 # Single scenario, custom output
@@ -361,11 +430,42 @@ python3 scripts/plot_chamber_comparison.py \
     --moose test/tests/chamber/vs_F0AM_chamber_S1_box.csv \
     --gold test/tests/chamber/gold/vs_F0AM_chamber_S1_box.csv \
     --save chamber_S1.pdf
+
+# Plot solver benchmark CSVs using the same chamber comparison layout
+python3 scripts/plot_chamber_comparison.py \
+    --run-dir test/tests/chamber/kpp_chamber/solver_runs/f0am_accuracy_timing \
+    --solvers kpp_rosenbrock,petsc_bdf \
+    --output-dir test/tests/chamber/kpp_chamber/solver_runs/f0am_accuracy_timing/figures \
+    --diagnostics-csv test/tests/chamber/kpp_chamber/solver_runs/f0am_accuracy_timing/chamber_diagnostic_errors.csv
 ```
 
 The comparison scripts convert MOOSE's molec/cm³ output to ppb using
-`M = 2.46e19 molecules/cm³` (standard conditions at 298 K, 1013 mbar).
-Use the single-scenario options for S2b after generating an S2b gold CSV.
+`M = 2.4622e19 molecules/cm³`, matching the chamber test inputs.
+The default chamber-test mode and benchmark `--run-dir` mode both call the same
+plotting function, so solver benchmark figures and ordinary chamber comparison
+figures use the same 2x2 layout, units, labels, and F0AM gold references. Each
+scenario also gets an early radical figure for OH, RO2, HO2, and CH3O2 over the
+first 1010 seconds. S2b CSVs are restart-relative for CSVDiff, and the plotting
+helpers offset them back to the 3-4 hour F0AM chamber window.
+
+To reproduce the F0AM `PlotConc`/`PlotConcGroup` appearance from the same CSV
+outputs, use the MATLAB helper. It converts chamber or benchmark CSV output back
+to F0AM-style `S` structs and calls F0AM's plotting functions directly:
+
+```bash
+# Checked-in chamber CSV outputs
+matlab -batch "addpath('modules/atmospheric_chemistry/scripts'); plot_chamber_f0am_style"
+
+# Solver benchmark CSV outputs
+matlab -batch "addpath('modules/atmospheric_chemistry/scripts'); plot_chamber_f0am_style([], 'modules/atmospheric_chemistry/test/tests/chamber/kpp_chamber/solver_runs/f0am_accuracy_timing')"
+```
+
+This CSV-based helper reproduces the concentration-style chamber figures
+(`PlotConc` for `C5H8`, `OH`, `NO+NO2`, S2 restart `C5H8`, and `PlotConcGroup`
+for S3 RO2 where the solver CSV contains those species). The F0AM
+`PlotRates`, `PlotRatesAvg`, `PlotReactivity`, and `PlotYield` figures require
+per-reaction rate and contribution diagnostics; ordinary chamber and generated
+KPP CSV outputs do not contain those diagnostics.
 
 ### Reproducing F0AM Figures
 
@@ -401,10 +501,11 @@ plot_f0am_chamber_figures('/path/to/F0AM', '/path/to/output')
 | `scripts/convert_soas_mat.py` | Convert SOAS campaign .mat observation files to CSV |
 | `scripts/export_chamber_gold.m` | MATLAB script to run F0AM chamber scenarios and export chamber gold CSVs |
 | `scripts/compare_chamber_f0am.py` | Numerical comparison (per-species ratio) of MOOSE vs F0AM gold CSV |
-| `scripts/plot_chamber_comparison.py` | Visual comparison (2x2 panel PDFs) of MOOSE vs F0AM gold CSV |
-| `scripts/benchmark_chamber_solvers.py` | Generate/run chamber solver runtime comparisons for S1, S2, S2b, and S3 |
+| `scripts/plot_chamber_comparison.py` | Visual comparison of chamber or benchmark CSV outputs vs F0AM gold, including 2x2 chamber figures, early radical figures, and optional diagnostics CSV output |
+| `scripts/benchmark_chamber_solvers.py` | Generate/run chamber solver runtime comparisons for S1, S2, S2b, and S3; optionally compare all four scenarios against F0AM gold and write timing analysis plus chamber-style figures |
 | `scripts/run_ts_sweep.sh` | Wrapper for `benchmark_chamber_solvers.py` |
 | `scripts/plot_f0am_chamber_figures.m` | MATLAB script to reproduce the F0AM ExampleSetup_Chamber figures and timing |
+| `scripts/plot_chamber_f0am_style.m` | MATLAB script to plot chamber or benchmark CSV outputs with F0AM `PlotConc`/`PlotConcGroup` helpers |
 
 ## Database
 
@@ -432,7 +533,9 @@ Pre-converted mechanism files are available in `doc/content/modules/atmospheric_
 | `vs_F0AM_chamber_S1_box` | CSVDiff | 610 | S1 (NO₂=0.1ppb): BOTTOMUP photolysis vs F0AM |
 | `vs_F0AM_chamber_S2_box` | CSVDiff | 610 | S2 (NO₂=1ppb): BOTTOMUP photolysis vs F0AM |
 | `vs_F0AM_chamber_S3_box` | CSVDiff | 610 | S3 (NO₂=10ppb): BOTTOMUP photolysis vs F0AM |
-| `vs_F0AM_chamber_S2b_box` | RunApp | 610 | S2b (restart, jcorr=10): BOTTOMUP continuation from S2 |
+| `vs_F0AM_chamber_S2b_box` | CSVDiff | 610 | S2b (restart, jcorr=10): BOTTOMUP continuation from S2 vs F0AM |
+| `chamber/kpp_chamber.solver_timing_inputs` | RunCommand | 610 | Generate KPP/PETSc benchmark inputs under `kpp_chamber/solver_runs` |
+| `chamber/kpp_chamber.solver_accuracy_timing` | RunCommand | 610 | KPP Rosenbrock and PETSc BDF timing with F0AM-gold accuracy checks |
 | `vs_F0AM_dielcycle_box` | RunApp | 2908 | SOAS diel cycle: MCM_SZA |
 | `vs_atchem2_transport_building` | Exodiff | 29 | NS + chemistry + building emission |
 | `test_family_conservation` | RunApp | 29 | Family conservation (NOx = NO2 + NO) |

@@ -35,16 +35,16 @@
 []
 
 [ICs]
-  [C5H8_ic]    type = ScalarConstantIC  variable = C5H8  value = 2.47e11   []  # 10 ppb
-  [NO2_ic]     type = ScalarConstantIC  variable = NO2   value = 2.47e10   []  # 1 ppb (S2)
-  [H2O2_ic]    type = ScalarConstantIC  variable = H2O2  value = 4.94e12   []  # 200 ppb
+  [C5H8_ic]    type = ScalarConstantIC  variable = C5H8  value = 2.46220331841e11   []  # 10 ppb
+  [NO2_ic]     type = ScalarConstantIC  variable = NO2   value = 2.46220331841e10   []  # 1 ppb (S2)
+  [H2O2_ic]    type = ScalarConstantIC  variable = H2O2  value = 4.92440663682e12   []  # 200 ppb
 []
 
 [Executioner]
   type = Transient
   solve_type = NEWTON
   scheme = 'bdf2'
-  end_time = 9957
+  end_time = 10800
   l_max_its = 200
   l_tol = 1e-4
   nl_max_its = 15
@@ -54,7 +54,7 @@
   petsc_options_value = 'lu NONZERO'
   [TimeStepper]
     type = TimeSequenceStepper
-    time_sequence = '0 1004 1962 2955 4097 4858 6238 6858 8098 8717 9957'
+    time_sequence = '0 1 10 30 61 122 306 621 868 1004 1962 2955 4097 4858 6238 6858 8098 8717 9957 10800'
   []
 []
 

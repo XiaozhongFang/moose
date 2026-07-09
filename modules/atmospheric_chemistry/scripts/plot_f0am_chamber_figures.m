@@ -54,7 +54,7 @@ function timing = plot_f0am_chamber_figures(f0am_root, outdir)
         error('SplitRun did not create S1/S2/S3 in this workspace.');
     end
 
-    lnames = {'S1: NO2 = 0.1 ppb', 'S2: NO2 = 1 ppb', 'S3: NO2 = 10 ppb'};
+    lnames = {'low', 'mid', 'hi'};
     Splot = {S1, S2, S3};
 
     PlotConc('C5H8', Splot, 'lnames', lnames);
@@ -76,7 +76,8 @@ function timing = plot_f0am_chamber_figures(f0am_root, outdir)
     PlotRatesAvg('HCHO', S1, 5, 'ptype', 'hbar', 'unit', 'ppb_h', 'pts2avg', pts2avg);
     save_current_figure(outdir, '06_rates_avg_HCHO_S1');
 
-    Reactants = {'C5H8', 'NO2', 'H2O2', 'CO', 'CH4'};
+    Inorg = {'Inorganic'; 'CO'; 'H2'; 'O3'; 'HO2'; 'H2O2'};
+    Reactants = {Inorg; 'NO2'; 'C5H8'; 'HCHO'; 'MVK'; 'MACR'};
     PlotReactivity('OH', S3, Reactants, 'ptype', 'line');
     save_current_figure(outdir, '07_reactivity_OH_S3');
 

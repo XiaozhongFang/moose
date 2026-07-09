@@ -25,7 +25,12 @@
     lamp_flux_file = 'ExampleLightFlux.txt'
     bottomup_data_dir = '../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup'
     jfac = 10.0
+    output_ro2_sum = true
     use_limiting_reagent = true
+    chem_solver = petsc_ts
+    chem_solver_type = bdf
+    chem_solver_rtol = 5e-4
+    chem_solver_atol = 5e-8
   []
 []
 
@@ -34,8 +39,7 @@
   solve_type = NEWTON
   scheme = 'bdf2'
   start_time = 0
-  end_time = 3600       # 1h relative to restart
-  dt = 100
+  end_time = 3600
   l_max_its = 200
   l_tol = 1e-4
   nl_max_its = 15
@@ -45,16 +49,18 @@
   petsc_options_value = 'lu NONZERO'
   [TimeStepper]
     type = ConstantDT
-    dt = 100
+    dt = 3600
   []
 []
 
 [Outputs]
   checkpoint = false
+  console = false
   csv = true
   execute_on = 'timestep_end'
   file_base = 'vs_F0AM_chamber_S2b_box'
-  time_step_interval = 10
+  sync_times = '1 9 31 59 118 303 590 896 998 1983 2900 3600'
+  time_step_interval = 1
 []
 
 [Problem]

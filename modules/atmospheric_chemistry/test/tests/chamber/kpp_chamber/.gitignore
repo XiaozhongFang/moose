@@ -1,0 +1,8 @@
+# Generated KPP mechanisms and solver benchmark outputs.
+/generated_mechanisms/
+/solver_runs/
+/chamber_mcm*/
+/*.csv
+/*.log
+/*.testharness_time
+/*_cp/

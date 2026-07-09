@@ -5,6 +5,21 @@ This converter is intentionally narrow: it targets the MCM/AtChem2-style
 FACSIMILE files used by the chamber benchmark. It preserves species order,
 RO2, rate definitions, and reaction equations closely enough to build a KPP
 shared library for runtime benchmarking.
+
+Examples
+--------
+Convert the chamber FAC mechanism to a KPP Rosenbrock model:
+
+    python3 scripts/fac_to_kpp.py \
+        doc/content/modules/atmospheric_chemistry/database/MCMv331_Inorg_Isoprene.fac \
+        --output-dir test/tests/chamber/kpp_chamber/generated_mechanisms/chamber_mcm_rosenbrock \
+        --model chamber_mcm_rosenbrock \
+        --integrator rosenbrock
+
+Build the generated KPP shared library:
+
+    make -f kpp/build/Makefile \
+        MECH=test/tests/chamber/kpp_chamber/generated_mechanisms/chamber_mcm_rosenbrock/chamber_mcm_rosenbrock.kpp
 """
 
 import argparse
@@ -264,9 +279,9 @@ def parse_fac(path):
             else:
                 rates.append((name, convert_expr(expr, c_inline=True)))
 
-    # KPP fixed species and dummy species are not active ODE variables. KPP also
-    # drops declared species that never appear in the reaction graph, so filter
-    # them here to keep #DEFVAR aligned with generated NVAR/SPC_NAMES.
+    # KPP fixed/dummy species are not active ODE variables. KPP also drops
+    # declared species that never appear in the reaction graph, so filter them
+    # here to keep #DEFVAR aligned with generated NVAR/SPC_NAMES.
     ignored_species = set(BASE_FIXED) | set(KPP_DUMMY_SPECIES)
     active_species = set()
     for _, equation in reactions:

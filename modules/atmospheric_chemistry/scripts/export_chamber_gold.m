@@ -1,5 +1,5 @@
 % export_chamber_gold.m
-% Run all chamber scenarios and export/copy gold CSV files for MOOSE CSVDiff tests.
+% Run the F0AM chamber scenarios and export gold CSV files for MOOSE tests.
 %
 % Usage:
 %   cd('D:/BaiduSyncdisk/Code/F0AM/Scripts/Tutorials/ExampleSetup_Chamber')
@@ -8,19 +8,27 @@
 %
 % Optional:
 %   export_chamber_gold('/path/to/F0AM', '/path/to/moose/.../chamber/gold')
+%   export_chamber_gold('/path/to/F0AM', '/path/to/moose/.../chamber/gold', false)
+%
+% The MOOSE CSVDiff gold set covers S1/S2/S2b/S3.  Passing false for
+% copy_s2b_gold keeps the restart CSV only under F0AM/Runs for ad-hoc checks.
 
-function timing = export_chamber_gold(f0am_root, moose_gold_dir)
+function timing = export_chamber_gold(f0am_root, moose_gold_dir, copy_s2b_gold)
     if nargin < 1 || isempty(f0am_root)
         f0am_root = resolve_f0am_root();
     end
     if nargin < 2 || isempty(moose_gold_dir)
         moose_gold_dir = default_chamber_gold_dir();
     end
+    if nargin < 3 || isempty(copy_s2b_gold)
+        copy_s2b_gold = true;
+    end
     runs_dir = fullfile(f0am_root, 'Runs');
 
     addpath(genpath(f0am_root));
 
-    target_times = 1000:1000:10000;
+    % Keep early radical chemistry visible, then sample the long tail.
+    target_times = unique([1 10 30 60 120 300 600 900 1000:1000:10000 10800]);
 
     % Main run: S1/S2/S3
     Met = {'P',1013; 'T',298; 'RH',10; 'LFlux','ExampleLightFlux.txt'; 'jcorr',1};
@@ -70,28 +78,32 @@ function timing = export_chamber_gold(f0am_root, moose_gold_dir)
     S2b.Time = S2b.Time + t_offset;
 
     s2b_duration = S2b.Time(end) - t_offset;
-    target_s2b = 1000:1000:min(10000, floor(s2b_duration));
+    target_s2b = unique([1 10 30 60 120 300 600 900 ...
+                         1000:1000:min(10000, floor(s2b_duration)) ...
+                         floor(s2b_duration)]);
+    target_s2b = target_s2b(target_s2b > 0 & target_s2b <= s2b_duration);
     target_s2b_abs = t_offset + target_s2b;
 
-    write_scenario_csv(S2b, fullfile(runs_dir, 'F0AM_S2b_gold.csv'), target_s2b_abs, air_den, 'S2b');
+    write_scenario_csv(S2b, fullfile(runs_dir, 'F0AM_S2b_gold.csv'), target_s2b_abs, ...
+                       air_den, 'S2b', t_offset);
 
     if ~isfolder(moose_gold_dir)
         mkdir(moose_gold_dir);
     end
 
-    src_names = {
-        'F0AM_S1_gold.csv'
-        'F0AM_S2_gold.csv'
-        'F0AM_S3_gold.csv'
-        'F0AM_S2b_gold.csv'
-    };
-
+    src_names = {'F0AM_S1_gold.csv'; 'F0AM_S2_gold.csv'; 'F0AM_S3_gold.csv'};
     dst_names = {
         'vs_F0AM_chamber_S1_box.csv'
         'vs_F0AM_chamber_S2_box.csv'
         'vs_F0AM_chamber_S3_box.csv'
-        'vs_F0AM_chamber_S2b_box.csv'
     };
+    if copy_s2b_gold
+        src_names{end + 1} = 'F0AM_S2b_gold.csv';
+        dst_names{end + 1} = 'vs_F0AM_chamber_S2b_box.csv';
+    else
+        fprintf('S2b gold CSV kept in F0AM Runs only: %s\n', ...
+                fullfile(runs_dir, 'F0AM_S2b_gold.csv'));
+    end
 
     for i = 1:numel(src_names)
         src = fullfile(runs_dir, src_names{i});
@@ -138,8 +150,6 @@ function gold_dir = default_chamber_gold_dir()
 end
 
 function air_den = resolve_air_density(S)
-    air_den = NaN;
-
     % Case 1: struct style, e.g. S.Met.M
     if isfield(S, 'Met') && isstruct(S.Met) && isfield(S.Met, 'M')
         m = S.Met.M;
@@ -166,7 +176,11 @@ function air_den = resolve_air_density(S)
     warning('Met.M not found. Fallback air density %.3e is used.', air_den);
 end
 
-function write_scenario_csv(Sstruct, filename, target_times, air_den, tag)
+function write_scenario_csv(Sstruct, filename, target_times, air_den, tag, time_offset)
+    if nargin < 6
+        time_offset = 0;
+    end
+
     Cnames = Sstruct.Cnames;
     t = Sstruct.Time;
 
@@ -185,7 +199,7 @@ function write_scenario_csv(Sstruct, filename, target_times, air_den, tag)
         tt = target_times(ti);
         [~, idx] = min(abs(t - tt));
         actual_t = t(idx);
-        fprintf(fid, '%.0f', actual_t);
+        fprintf(fid, '%.0f', actual_t - time_offset);
         for si = 1:length(Cnames)
             v = Sstruct.Conc.(Cnames{si});
             v_molec = v(idx) * air_den / 1e9;
