@@ -22,6 +22,8 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
+#include <tuple>
 
 class BottomUpJIntegrator;
 
@@ -107,10 +109,22 @@ public:
    * before each residual/Jacobian evaluation. Idempotent — multiple calls
    * between evaluations are safe.
    */
-  void markDirty() const { if (_mechanism) _mechanism->markDirty(); }
+  void markDirty() const
+  {
+    _box_dirty = true;
+    if (_mechanism)
+      _mechanism->markDirty();
+  }
 
   /** Set current simulation time (seconds since midnight) for photolysis calculation. */
-  void setCurrentTime(Real t) const { if (_mechanism) _mechanism->setCurrentTime(t); }
+  void setCurrentTime(Real t) const
+  {
+    if (_t != t)
+      _box_dirty = true;
+    _t = t;
+    if (_mechanism)
+      _mechanism->setCurrentTime(t);
+  }
 
   /** Compute RO2 sum (peroxy radical total) from concentration vector. */
   Real getRO2Sum(const std::vector<Real> & C) const;
@@ -216,11 +230,23 @@ public:
   void loadBottomUpData(const std::string & data_dir, const std::string & flux_file);
 
   /** ROOF (chamber cover) switch. CLOSED = all photolysis rates forced to zero. */
-  void setRoofOpen(bool open) { _roof_open = open; if (_mechanism) _mechanism->setRoofOpen(open); }
+  void setRoofOpen(bool open)
+  {
+    _roof_open = open;
+    _box_dirty = true;
+    if (_mechanism)
+      _mechanism->setRoofOpen(open);
+  }
   bool isRoofOpen() const { return _mechanism ? _mechanism->isRoofOpen() : _roof_open; }
 
   /** Set JFAC scaling factor (light intensity multiplier). */
-  void setJFac(Real jfac) { _jfac = jfac; if (_mechanism) _mechanism->setJFac(jfac); }
+  void setJFac(Real jfac)
+  {
+    _jfac = jfac;
+    _box_dirty = true;
+    if (_mechanism)
+      _mechanism->setJFac(jfac);
+  }
   Real getJFac() const { return _jfac; }
 
   /** Invalidate BottomUp J-value cache. Call when photolysis-relevant
@@ -230,6 +256,7 @@ public:
   {
     _bottomup_j_valid = false;
     _kpp_bottomup_j_valid = false;
+    _box_dirty = true;
     if (_mechanism)
       _mechanism->invalidatePhotolysisCache();
   }
@@ -260,6 +287,28 @@ public:
 protected:
   PhysParams currentPhysParams() const;
   std::map<std::string, Real> kppGlobalValues() const;
+
+  struct AerosolPartitioningPair
+  {
+    std::string gas_name;
+    std::string particle_name;
+    unsigned int gas_index = 0;
+    unsigned int particle_index = 0;
+    Real cstar = 0.0;
+    Real molecular_weight = 0.0;
+  };
+
+  void setupAerosolPartitioning();
+  void computeAerosolSource(const std::vector<Real> & C, std::vector<Real> & source) const;
+  void addAerosolJacobianTriplets(
+      const std::vector<Real> & C,
+      std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const;
+  void buildBoxJacobianCache(const std::vector<Real> & C) const;
+  Real aerosolOrganicMass(const std::vector<Real> & C) const;
+  Real aerosolParticleRadius(Real organic_mass) const;
+  Real aerosolSurfaceArea(Real radius) const;
+  std::vector<unsigned int> aerosolJacobianColumns() const;
+  Real speciesMassConcentration(unsigned int species_index, Real concentration) const;
 
   // -- Chemical mechanism delegate --
   std::unique_ptr<IMechanism> _mechanism;
@@ -299,6 +348,31 @@ protected:
   Real _t_start_dil;     // Start time for Gaussian dispersion
   bool _use_gaussian;    // true = use Gaussian, false = simple first-order
 
+  // -- Dynamic gas-particle partitioning and wall loss --
+  bool _aerosol_enabled;
+  std::vector<AerosolPartitioningPair> _aerosol_pairs;
+  Real _aerosol_cstar_cutoff;
+  Real _aerosol_alpha;
+  Real _aerosol_gas_diffusivity;
+  Real _aerosol_particle_number;
+  Real _aerosol_seed_radius;
+  Real _aerosol_surface_area;
+  Real _aerosol_organic_density;
+  Real _aerosol_background_organic_mass;
+  Real _aerosol_min_organic_mass;
+  Real _aerosol_vapor_wall_loss;
+  Real _aerosol_particle_wall_loss;
+  mutable bool _aerosol_initialized = false;
+
+  // -- Full box-model caches (chemistry + dilution + aerosol) --
+  mutable bool _box_dirty = true;
+  mutable std::vector<Real> _box_cached_C;
+  mutable std::vector<Real> _box_cached_dC;
+  mutable std::vector<Real> _box_cached_diag_J;
+  mutable std::vector<size_t> _box_cached_od_row_ptr;
+  mutable std::vector<unsigned int> _box_cached_od_cols;
+  mutable std::vector<Real> _box_cached_od_vals;
+
   /// ROOF chamber cover: false = CLOSED (all J=0), true = OPEN (normal)
   bool _roof_open;
   Real _jfac;
@@ -332,6 +406,7 @@ protected:
   TS _ts = nullptr;
   Vec _ts_X = nullptr;
   Mat _ts_J = nullptr;
+  std::vector<size_t> _ts_jac_row_ptr;
   std::vector<PetscInt> _ts_jac_cols;
   std::vector<Real> _ts_jac_values_real;
   std::vector<PetscScalar> _ts_jac_values;

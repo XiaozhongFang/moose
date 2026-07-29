@@ -1,4 +1,10 @@
 [Tests]
+  [./aerosol_smoke]
+    type = RunApp
+    input = aerosol_smoke.i
+    prereq = vs_F0AM_chamber_S3_box
+    requirement = 'Smoke test: aerosol partitioning + wall loss module shall run to completion without error.'
+  [../]
   [./vs_F0AM_chamber_S1_box]
     type = CSVDiff
     input = vs_F0AM_chamber_S1_box.i
@@ -39,5 +45,12 @@
     ignore_columns = 'ONE'
     heavy = true
     requirement = 'S3: box mode shall match F0AM within 10% for chamber-relevant concentrations.'
+  [../]
+  [./vs_F0AM_chamber_aerosol]
+    type = RunApp
+    input = vs_F0AM_chamber_aerosol.i
+    heavy = true
+    prereq = vs_F0AM_chamber_S3_box
+    requirement = 'Chamber aerosol simulation shall run with dynamic gas-particle partitioning enabled for 10 species pairs, producing OA mass and wall-loss output.'
   [../]
 []

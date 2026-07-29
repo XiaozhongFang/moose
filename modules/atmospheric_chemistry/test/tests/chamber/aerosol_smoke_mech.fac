@@ -1,0 +1,21 @@
+* Aerosol Smoke Test Mechanism
+* 3 gas-phase species A, B, C with simple reactions
+* Gas-particle partitioning added by MOOSE aerosol module
+
+VARIABLE
+ ONE RO2 A B C ;
+***************************************************************************** ;
+
+* Rate constants
+K1 = 1.0D-3 ;
+K2 = 5.0D-1 ;
+K3 = 1.0D-4 ;
+K4 = 1.0D-2 ;
+K5 = 1.0D-1 ;
+
+* Reactions
+% K1     : A + B = C + B ;
+% K2     : ONE   = A ;
+% K3     : A     = ;
+% K4     : B + B = ;
+% K5     : C     = ;

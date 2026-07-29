@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 
 #include <algorithm>
 
@@ -28,29 +29,29 @@ AtmosphericChemistryBoxAction::validParams()
 {
   InputParameters params = Action::validParams();
 
-  params.addRequiredParam<std::string>(
-      "mechanism_file", "Path to the mechanism file (.fac for MCM, .kpp for KPP)");
+  params.addRequiredParam<std::string>("mechanism_file",
+                                       "Path to the mechanism file (.fac for MCM, .kpp for KPP)");
 
   // Mechanism format auto-detected from chem_solver and file extension.
 
   params.addParam<Real>("temperature", 298.15, "Ambient temperature (K)");
   params.addParam<Real>("air_density", 2.46e19, "Air number density (molecules/cm^3)");
-  params.addParam<Real>("water_vapor", 2.46e17,
-      "Background water vapor concentration (molecules/cm^3)");
-  params.addParam<Real>("press", 0.0,
-      "Pressure (mbar).  If >0, M computed dynamically via ideal gas law.");
-  params.addParam<Real>("rh", -1.0,
-      "Relative humidity (%). If >=0, water_vapor is computed from rh/temp/press.");
-  params.addParam<Real>("blheight", 0.0,
-      "Boundary layer height (m), informational unless dilution is enabled.");
+  params.addParam<Real>(
+      "water_vapor", 2.46e17, "Background water vapor concentration (molecules/cm^3)");
+  params.addParam<Real>(
+      "press", 0.0, "Pressure (mbar).  If >0, M computed dynamically via ideal gas law.");
+  params.addParam<Real>(
+      "rh", -1.0, "Relative humidity (%). If >=0, water_vapor is computed from rh/temp/press.");
+  params.addParam<Real>(
+      "blheight", 0.0, "Boundary layer height (m), informational unless dilution is enabled.");
   params.addParam<std::string>(
       "mcm_photolysis_file",
       "doc/content/modules/atmospheric_chemistry/database/mcm_photolysis_rates_v3.3.1.dat",
       "Path to the MCM photolysis-rates parameter file for SZA-based J calculation.");
 
   MooseEnum mcm_version("v3.1 v3.2 v3.3.1", "v3.3.1");
-  params.addParam<MooseEnum>("mcm_version", mcm_version,
-      "Version of the Master Chemical Mechanism (v3.1, v3.2, v3.3.1)");
+  params.addParam<MooseEnum>(
+      "mcm_version", mcm_version, "Version of the Master Chemical Mechanism (v3.1, v3.2, v3.3.1)");
 
   params.addParam<Real>("latitude", 51.51, "Latitude in degrees (North positive)");
   params.addParam<Real>("longitude", 0.13, "Longitude in degrees (East positive)");
@@ -58,15 +59,19 @@ AtmosphericChemistryBoxAction::validParams()
   params.addParam<unsigned int>("month", 6, "Month for solar zenith angle calculation");
   params.addParam<unsigned int>("year", 2010, "Year for solar zenith angle calculation");
   MooseEnum photo_scheme("MCM_SZA HYBRID BOTTOMUP", "MCM_SZA");
-  params.addParam<MooseEnum>("photolysis_scheme", photo_scheme,
-      "Photolysis scheme: MCM_SZA (empirical), HYBRID (4D TUV lookup), or "
-      "BOTTOMUP (cross-section x QY x lamp-flux)");
+  params.addParam<MooseEnum>("photolysis_scheme",
+                             photo_scheme,
+                             "Photolysis scheme: MCM_SZA (empirical), HYBRID (4D TUV lookup), or "
+                             "BOTTOMUP (cross-section x QY x lamp-flux)");
 
-  params.addParam<std::string>("hybrid_table_dir", "",
-      "Directory containing F0AM Hybrid J-value table files");
-  params.addParam<std::string>("lamp_flux_file", "",
+  params.addParam<std::string>(
+      "hybrid_table_dir", "", "Directory containing F0AM Hybrid J-value table files");
+  params.addParam<std::string>(
+      "lamp_flux_file",
+      "",
       "Path to lamp/actinic flux file (required if photolysis_scheme=BOTTOMUP)");
-  params.addParam<std::string>("bottomup_data_dir",
+  params.addParam<std::string>(
+      "bottomup_data_dir",
       "../../../doc/content/modules/atmospheric_chemistry/database/photolysis/bottomup",
       "Directory containing BottomUp photolysis data files");
   params.addParam<Real>("albedo", 0.1, "Surface albedo (0-1), used by HYBRID scheme");
@@ -74,52 +79,99 @@ AtmosphericChemistryBoxAction::validParams()
   params.addParam<Real>("altitude", 0.0, "Altitude in meters, used by HYBRID scheme");
 
   MooseEnum units_enum("molec_cm3 ppb", "molec_cm3");
-  params.addParam<MooseEnum>("units", units_enum,
-      "Concentration units for input/output: 'molec_cm3' (default) or 'ppb'.");
+  params.addParam<MooseEnum>(
+      "units", units_enum, "Concentration units for input/output: 'molec_cm3' (default) or 'ppb'.");
 
-  params.addParam<bool>("output_ro2_sum", false,
+  params.addParam<bool>(
+      "output_ro2_sum",
+      false,
       "Create a diagnostic variable 'RO2' = sum of peroxy radical concentrations.");
   params.addParam<Real>("jfac", 1.0, "JFAC scaling factor for photolysis rates");
-  params.addParam<Real>("default_ic", 0.0,
+  params.addParam<Real>(
+      "default_ic",
+      0.0,
       "Default initial concentration (molec/cm3) for species without explicit ICs.");
   params.addParam<bool>("roof_open", true, "Roof (chamber cover) open.");
-  params.addParam<bool>("use_limiting_reagent", false,
-      "Enable F0AM-style limiting-reagent formulation for RO2+RO2 termination.");
+  params.addParam<bool>("use_limiting_reagent",
+                        false,
+                        "Enable F0AM-style limiting-reagent formulation for RO2+RO2 termination.");
+
+  params.addParam<std::vector<std::string>>(
+      "aerosol_gas_species",
+      {},
+      "Gas-phase species that participate in dynamic gas-particle partitioning.");
+  params.addParam<std::vector<std::string>>(
+      "aerosol_particle_species",
+      {},
+      "Particle-phase pseudo-species paired with aerosol_gas_species.");
+  params.addParam<std::vector<Real>>(
+      "aerosol_cstar",
+      {},
+      "Effective saturation concentrations c* for partitioning species (ug/m3).");
+  params.addParam<std::vector<Real>>(
+      "aerosol_molecular_weights", {}, "Molecular weights for partitioning species (g/mol).");
+  params.addParam<Real>("aerosol_cstar_cutoff",
+                        100.0,
+                        "Maximum c* (ug/m3) allowed to participate in gas-particle partitioning.");
+  params.addParam<Real>("aerosol_alpha", 0.1, "Mass accommodation coefficient.");
+  params.addParam<Real>("aerosol_gas_diffusivity", 1.0e-5, "Gas-phase diffusivity (m2/s).");
+  params.addParam<Real>("aerosol_particle_number", 1.0e10, "Particle number concentration (#/m3).");
+  params.addParam<Real>("aerosol_seed_radius", 25.0e-9, "Seed-particle radius (m).");
+  params.addParam<Real>(
+      "aerosol_surface_area",
+      0.0,
+      "Fixed aerosol surface area concentration (m2/m3). If <=0, compute from particle number, "
+      "seed radius, and organic mass.");
+  params.addParam<Real>("aerosol_organic_density", 1400.0, "Organic aerosol density (kg/m3).");
+  params.addParam<Real>("aerosol_background_organic_mass",
+                        0.0,
+                        "Background organic aerosol mass included in c_OA (ug/m3).");
+  params.addParam<Real>("aerosol_min_organic_mass",
+                        1.0e-12,
+                        "Lower bound for c_OA in evaporation-rate calculations (ug/m3).");
+  params.addParam<Real>(
+      "aerosol_vapor_wall_loss",
+      0.0,
+      "First-order vapor wall-loss rate applied to partitioning gas species (/s).");
+  params.addParam<Real>(
+      "aerosol_particle_wall_loss",
+      0.0,
+      "First-order particle wall-loss rate applied to partitioning particle species (/s).");
 
   // --- Chemical solver selection ---
-  MooseEnum solver_enum(
-      "moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
-      "moose_implicit");
-  params.addParam<MooseEnum>("chem_solver", solver_enum,
-      "Chemical ODE solver backend:\n"
-      "  moose_implicit  — MOOSE Newton solver\n"
-      "  petsc_ts        — PETSc TS (BDF/ARKIMEX)\n"
-      "  sundials        — SUNDIALS CVODE\n"
-      "  kpp_rosenbrock  — KPP Rosenbrock shared-library solver\n"
-      "  kpp_sdirk       — KPP SDIRK shared-library solver\n"
-      "  kpp_runge_kutta — KPP implicit Runge-Kutta shared-library solver");
+  MooseEnum solver_enum("moose_implicit petsc_ts sundials kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
+                        "moose_implicit");
+  params.addParam<MooseEnum>("chem_solver",
+                             solver_enum,
+                             "Chemical ODE solver backend:\n"
+                             "  moose_implicit  — MOOSE Newton solver\n"
+                             "  petsc_ts        — PETSc TS (BDF/ARKIMEX)\n"
+                             "  sundials        — SUNDIALS CVODE\n"
+                             "  kpp_rosenbrock  — KPP Rosenbrock shared-library solver\n"
+                             "  kpp_sdirk       — KPP SDIRK shared-library solver\n"
+                             "  kpp_runge_kutta — KPP implicit Runge-Kutta shared-library solver");
 
-  params.addParam<Real>("chem_solver_rtol", 1e-6,
-      "Relative tolerance for the chemical ODE solver.");
-  params.addParam<Real>("chem_solver_atol", 1e-10,
-      "Absolute tolerance for the chemical ODE solver.");
-  MooseEnum chem_type_enum(
-      "bdf arkimex eimex rosw mimex beuler cn rk theta ssp sundials", "bdf");
-  params.addParam<MooseEnum>("chem_solver_type", chem_type_enum,
-      "ODE solver type (petsc_ts only): 'bdf' (default), 'arkimex', etc.");
+  params.addParam<Real>(
+      "chem_solver_rtol", 1e-6, "Relative tolerance for the chemical ODE solver.");
+  params.addParam<Real>(
+      "chem_solver_atol", 1e-10, "Absolute tolerance for the chemical ODE solver.");
+  MooseEnum chem_type_enum("bdf arkimex eimex rosw mimex beuler cn rk theta ssp sundials", "bdf");
+  params.addParam<MooseEnum>("chem_solver_type",
+                             chem_type_enum,
+                             "ODE solver type (petsc_ts only): 'bdf' (default), 'arkimex', etc.");
 
   // --- Family conservation (F0AM DAE method) ---
-  params.addParam<std::vector<std::string>>("family_names", {},
-      "Names of chemical families for DAE conservation (e.g. 'NOx', 'Ox').");
+  params.addParam<std::vector<std::string>>(
+      "family_names", {}, "Names of chemical families for DAE conservation (e.g. 'NOx', 'Ox').");
   params.addParam<std::vector<std::vector<std::string>>>(
-      "family_members", {},
+      "family_members",
+      {},
       "Member species for each family. First member is the DAE slack variable.");
-  params.addParam<std::vector<std::vector<Real>>>("family_scaling", {},
-      "Scaling/weighting factors for each family member.");
+  params.addParam<std::vector<std::vector<Real>>>(
+      "family_scaling", {}, "Scaling/weighting factors for each family member.");
 
-  params.addClassDescription(
-      "Action for 0-D ODE box-model atmospheric chemistry. Creates scalar "
-      "variables, ODE kernels, and an MCMBoxModel UserObject.");
+  params.addClassDescription("Action for 0-D ODE box-model atmospheric chemistry. Creates scalar "
+                             "variables, ODE kernels, and an MCMBoxModel UserObject.");
   return params;
 }
 
@@ -133,23 +185,47 @@ AtmosphericChemistryBoxAction::AtmosphericChemistryBoxAction(const InputParamete
   // ---- Validate mechanism file path ----
   std::string mech_file = getParam<std::string>("mechanism_file");
   if (!mech_file.empty() && mech_file[0] == '/')
-    mooseError("AtmosphericChemistryBox: mechanism_file must be relative, got absolute: ", mech_file);
+    mooseError("AtmosphericChemistryBox: mechanism_file must be relative, got absolute: ",
+               mech_file);
 
   // ---- Parse mechanism ----
   std::string mcm_ver = getParam<MooseEnum>("mcm_version");
   std::string photo_path = getParam<std::string>("mcm_photolysis_file");
   if (!photo_path.empty() && photo_path[0] == '/')
-    mooseError("AtmosphericChemistryBox: mcm_photolysis_file must be relative, got absolute: ", photo_path);
+    mooseError("AtmosphericChemistryBox: mcm_photolysis_file must be relative, got absolute: ",
+               photo_path);
   std::string peroxy_path =
       "doc/content/modules/atmospheric_chemistry/database/mcm_peroxy_radicals_" + mcm_ver + ".dat";
 
   auto input_files = _app.getInputFileNames();
-  ChemistryMechanismSpec spec(mech_file, _chem_solver, mcm_ver,
-                               photo_path, peroxy_path, input_files);
+  ChemistryMechanismSpec spec(
+      mech_file, _chem_solver, mcm_ver, photo_path, peroxy_path, input_files);
 
   _species = spec.species();
   _mech_data = spec.mechanismData();
   _use_kpp = spec.isKPP();
+
+  const auto aerosol_gas_species = getParam<std::vector<std::string>>("aerosol_gas_species");
+  const auto aerosol_particle_species =
+      getParam<std::vector<std::string>>("aerosol_particle_species");
+  if (aerosol_gas_species.size() != aerosol_particle_species.size())
+    mooseError("AtmosphericChemistryBox: aerosol_gas_species and aerosol_particle_species "
+               "must have the same length.");
+  if (!aerosol_gas_species.empty() && _use_kpp)
+    mooseError("AtmosphericChemistryBox: dynamic aerosol partitioning is only supported "
+               "with FACSIMILE runtime mechanisms, not KPP-generated mechanisms.");
+  if (!aerosol_particle_species.empty())
+  {
+    std::set<std::string> seen(_species.begin(), _species.end());
+    const auto n_reactions = _mech_data.reactions.size();
+    for (const auto & particle_name : aerosol_particle_species)
+      if (seen.insert(particle_name).second)
+      {
+        _species.push_back(particle_name);
+        _mech_data.species.push_back(particle_name);
+        _mech_data.stoichiometric_matrix.emplace_back(n_reactions, 0.0);
+      }
+  }
 
   // ---- Derive use_box_solver ----
   _use_box_solver = (_chem_solver != "moose_implicit");
@@ -169,16 +245,26 @@ AtmosphericChemistryBoxAction::AtmosphericChemistryBoxAction(const InputParamete
     _family_members = getParam<std::vector<std::vector<std::string>>>("family_members");
     _family_scaling = getParam<std::vector<std::vector<Real>>>("family_scaling");
     if (_family_members.size() != _family_names.size())
-      mooseError("AtmosphericChemistryBox: family_names (", _family_names.size(),
-                 ") and family_members (", _family_members.size(), ") must have same length");
+      mooseError("AtmosphericChemistryBox: family_names (",
+                 _family_names.size(),
+                 ") and family_members (",
+                 _family_members.size(),
+                 ") must have same length");
     if (_family_scaling.size() != _family_names.size())
-      mooseError("AtmosphericChemistryBox: family_names (", _family_names.size(),
-                 ") and family_scaling (", _family_scaling.size(), ") must have same length");
+      mooseError("AtmosphericChemistryBox: family_names (",
+                 _family_names.size(),
+                 ") and family_scaling (",
+                 _family_scaling.size(),
+                 ") must have same length");
     for (unsigned int i = 0; i < _family_names.size(); ++i)
       if (_family_members[i].size() != _family_scaling[i].size())
-        mooseError("AtmosphericChemistryBox: Family '", _family_names[i],
-                   "' has ", _family_members[i].size(),
-                   " members but ", _family_scaling[i].size(), " scalings.");
+        mooseError("AtmosphericChemistryBox: Family '",
+                   _family_names[i],
+                   "' has ",
+                   _family_members[i].size(),
+                   " members but ",
+                   _family_scaling[i].size(),
+                   " scalings.");
   }
 }
 
@@ -208,8 +294,8 @@ AtmosphericChemistryBoxAction::actAddVariable()
   if (_ro2_diagnostic_enabled)
     _problem->addVariable("MooseVariableScalar", "RO2", var_params);
 
-  _console << "AtmosphericChemistryBox: Created " << _species.size()
-           << " scalar variable(s)" << std::endl;
+  _console << "AtmosphericChemistryBox: Created " << _species.size() << " scalar variable(s)"
+           << std::endl;
 }
 
 void
@@ -234,7 +320,26 @@ AtmosphericChemistryBoxAction::actAddUserObject()
   uo_params.set<bool>("roof_open") = getParam<bool>("roof_open");
   uo_params.set<Real>("default_ic") = getParam<Real>("default_ic");
   uo_params.set<bool>("use_limiting_reagent") = getParam<bool>("use_limiting_reagent");
-  // Photolysis file: empty for BOTTOMUP (parsed from data files), 
+  uo_params.set<std::vector<std::string>>("aerosol_gas_species") =
+      getParam<std::vector<std::string>>("aerosol_gas_species");
+  uo_params.set<std::vector<std::string>>("aerosol_particle_species") =
+      getParam<std::vector<std::string>>("aerosol_particle_species");
+  uo_params.set<std::vector<Real>>("aerosol_cstar") = getParam<std::vector<Real>>("aerosol_cstar");
+  uo_params.set<std::vector<Real>>("aerosol_molecular_weights") =
+      getParam<std::vector<Real>>("aerosol_molecular_weights");
+  uo_params.set<Real>("aerosol_cstar_cutoff") = getParam<Real>("aerosol_cstar_cutoff");
+  uo_params.set<Real>("aerosol_alpha") = getParam<Real>("aerosol_alpha");
+  uo_params.set<Real>("aerosol_gas_diffusivity") = getParam<Real>("aerosol_gas_diffusivity");
+  uo_params.set<Real>("aerosol_particle_number") = getParam<Real>("aerosol_particle_number");
+  uo_params.set<Real>("aerosol_seed_radius") = getParam<Real>("aerosol_seed_radius");
+  uo_params.set<Real>("aerosol_surface_area") = getParam<Real>("aerosol_surface_area");
+  uo_params.set<Real>("aerosol_organic_density") = getParam<Real>("aerosol_organic_density");
+  uo_params.set<Real>("aerosol_background_organic_mass") =
+      getParam<Real>("aerosol_background_organic_mass");
+  uo_params.set<Real>("aerosol_min_organic_mass") = getParam<Real>("aerosol_min_organic_mass");
+  uo_params.set<Real>("aerosol_vapor_wall_loss") = getParam<Real>("aerosol_vapor_wall_loss");
+  uo_params.set<Real>("aerosol_particle_wall_loss") = getParam<Real>("aerosol_particle_wall_loss");
+  // Photolysis file: empty for BOTTOMUP (parsed from data files),
   // otherwise the MCM photolysis rates file (mcm_photolysis_file).
   {
     auto scheme = getParam<MooseEnum>("photolysis_scheme");
@@ -310,14 +415,13 @@ AtmosphericChemistryBoxAction::actAddScalarKernel()
 
   // Logging
   {
-    std::string mode_label =
-        (_chem_solver == "moose_implicit") ? "MOOSE implicit"
-      : (_chem_solver == "sundials")      ? "SUNDIALS CVODE"
-      : (_chem_solver.find("kpp_") == 0)  ? "KPP " + _chem_solver
-      : "PETSc TS";
+    std::string mode_label = (_chem_solver == "moose_implicit") ? "MOOSE implicit"
+                             : (_chem_solver == "sundials")     ? "SUNDIALS CVODE"
+                             : (_chem_solver.find("kpp_") == 0) ? "KPP " + _chem_solver
+                                                                : "PETSc TS";
     _console << "AtmosphericChemistryBox: " << mode_label << " — "
-             << "created ChemistryODEKernel + ODETimeDerivative for "
-             << _species.size() << " species" << std::endl;
+             << "created ChemistryODEKernel + ODETimeDerivative for " << _species.size()
+             << " species" << std::endl;
   }
 
   // Set sparse Jacobian coupling pattern (MOOSE implicit mode only)
@@ -326,6 +430,9 @@ AtmosphericChemistryBoxAction::actAddScalarKernel()
     std::map<std::string, unsigned int> sp_idx;
     for (unsigned int i = 0; i < _species.size(); ++i)
       sp_idx[_species[i]] = i;
+    const auto aerosol_gas_species = getParam<std::vector<std::string>>("aerosol_gas_species");
+    const auto aerosol_particle_species =
+        getParam<std::vector<std::string>>("aerosol_particle_species");
 
     auto cm = std::make_unique<libMesh::CouplingMatrix>(_species.size());
     for (unsigned int i = 0; i < _species.size(); ++i)
@@ -340,6 +447,28 @@ AtmosphericChemistryBoxAction::actAddScalarKernel()
           auto it = sp_idx.find(reactant_pair.second);
           if (it != sp_idx.end())
             (*cm)(i, it->second) = 1;
+        }
+      }
+    }
+    for (const auto i : index_range(aerosol_gas_species))
+    {
+      auto gas_it = sp_idx.find(aerosol_gas_species[i]);
+      auto particle_it = sp_idx.find(aerosol_particle_species[i]);
+      if (gas_it == sp_idx.end() || particle_it == sp_idx.end())
+        continue;
+      for (const auto j : index_range(aerosol_gas_species))
+      {
+        auto gas_col = sp_idx.find(aerosol_gas_species[j]);
+        auto particle_col = sp_idx.find(aerosol_particle_species[j]);
+        if (gas_col != sp_idx.end())
+        {
+          (*cm)(gas_it->second, gas_col->second) = 1;
+          (*cm)(particle_it->second, gas_col->second) = 1;
+        }
+        if (particle_col != sp_idx.end())
+        {
+          (*cm)(gas_it->second, particle_col->second) = 1;
+          (*cm)(particle_it->second, particle_col->second) = 1;
         }
       }
     }

@@ -22,6 +22,7 @@
 #include <cmath>
 #include <regex>
 #include <sstream>
+#include <set>
 #include <utility>
 
 registerMooseObject("AtmosphericChemistryApp", MCMBoxModel);
@@ -77,6 +78,36 @@ MCMBoxModel::validParams()
       "reactions: rate = k * min([RO2_i], [RO2]) instead of k * [RO2_i] * [RO2]. "
       "Default false (standard MCM chemistry). Set true for F0AM-compatible "
       "RO2 termination or when comparing against F0AM reference outputs.");
+
+  params.addParam<std::vector<std::string>>("aerosol_gas_species", {},
+      "Gas-phase species that participate in dynamic gas-particle partitioning.");
+  params.addParam<std::vector<std::string>>("aerosol_particle_species", {},
+      "Particle-phase pseudo-species paired with aerosol_gas_species.");
+  params.addParam<std::vector<Real>>("aerosol_cstar", {},
+      "Effective saturation concentrations c* for partitioning species (ug/m3).");
+  params.addParam<std::vector<Real>>("aerosol_molecular_weights", {},
+      "Molecular weights for partitioning species (g/mol). Used for thermal speed and OA mass.");
+  params.addParam<Real>("aerosol_cstar_cutoff", 100.0,
+      "Maximum c* (ug/m3) allowed to participate in gas-particle partitioning.");
+  params.addParam<Real>("aerosol_alpha", 0.1, "Mass accommodation coefficient.");
+  params.addParam<Real>("aerosol_gas_diffusivity", 1.0e-5,
+      "Gas-phase diffusivity (m2/s). 1.0e-5 m2/s equals 0.1 cm2/s.");
+  params.addParam<Real>("aerosol_particle_number", 1.0e10,
+      "Particle number concentration (#/m3). 1.0e10 #/m3 equals 1.0e4 #/cm3.");
+  params.addParam<Real>("aerosol_seed_radius", 25.0e-9, "Seed-particle radius (m).");
+  params.addParam<Real>("aerosol_surface_area", 0.0,
+      "Fixed aerosol surface area concentration (m2/m3). If <=0, compute from particle number, "
+      "seed radius, and organic mass.");
+  params.addParam<Real>("aerosol_organic_density", 1400.0,
+      "Organic aerosol density (kg/m3) used to grow particle radius from condensed mass.");
+  params.addParam<Real>("aerosol_background_organic_mass", 0.0,
+      "Background organic aerosol mass concentration included in c_OA (ug/m3).");
+  params.addParam<Real>("aerosol_min_organic_mass", 1.0e-12,
+      "Lower bound for c_OA in evaporation-rate calculations (ug/m3).");
+  params.addParam<Real>("aerosol_vapor_wall_loss", 0.0,
+      "First-order vapor wall-loss rate applied to partitioning gas species (/s).");
+  params.addParam<Real>("aerosol_particle_wall_loss", 0.0,
+      "First-order particle wall-loss rate applied to partitioning particle species (/s).");
   MooseEnum stoich_fmt("CSR COO DENSE CSC", "CSR");
   params.addParam<MooseEnum>(
       "stoich_format", stoich_fmt,
@@ -151,6 +182,18 @@ MCMBoxModel::MCMBoxModel(const InputParameters & params)
     _tgauss(0.0),
     _t_start_dil(0.0),
     _use_gaussian(false),
+    _aerosol_enabled(false),
+    _aerosol_cstar_cutoff(getParam<Real>("aerosol_cstar_cutoff")),
+    _aerosol_alpha(getParam<Real>("aerosol_alpha")),
+    _aerosol_gas_diffusivity(getParam<Real>("aerosol_gas_diffusivity")),
+    _aerosol_particle_number(getParam<Real>("aerosol_particle_number")),
+    _aerosol_seed_radius(getParam<Real>("aerosol_seed_radius")),
+    _aerosol_surface_area(getParam<Real>("aerosol_surface_area")),
+    _aerosol_organic_density(getParam<Real>("aerosol_organic_density")),
+    _aerosol_background_organic_mass(getParam<Real>("aerosol_background_organic_mass")),
+    _aerosol_min_organic_mass(getParam<Real>("aerosol_min_organic_mass")),
+    _aerosol_vapor_wall_loss(getParam<Real>("aerosol_vapor_wall_loss")),
+    _aerosol_particle_wall_loss(getParam<Real>("aerosol_particle_wall_loss")),
     _roof_open(getParam<bool>("roof_open")),
     _jfac(getParam<Real>("jfac")),
     _t(0.0),
@@ -246,12 +289,23 @@ MCMBoxModel::initialize()
   // Parse .fac file only once
   if (_n_species > 0) return;
 
+  const auto aerosol_gas_species = getParam<std::vector<std::string>>("aerosol_gas_species");
+  const auto aerosol_particle_species =
+      getParam<std::vector<std::string>>("aerosol_particle_species");
+  if (aerosol_gas_species.size() != aerosol_particle_species.size())
+    mooseError("MCMBoxModel: aerosol_gas_species and aerosol_particle_species must have "
+               "the same length.");
+
   std::string mech_file = getParam<std::string>("mechanism_file");
 
   // KPP mode: mechanism is handled by KppBoxIntegrator (.so).
   // Get species info from the ScalarVariables set up by the Action.
   if (_use_kpp)
   {
+    if (!aerosol_gas_species.empty())
+      mooseError("MCMBoxModel: dynamic aerosol partitioning is only supported with "
+                 "FACSIMILE runtime mechanisms, not KPP-generated mechanisms.");
+
     _console << "MCMBoxModel: KPP mode — using " << mech_file << std::endl;
 #ifdef KPP_ENABLED
     const auto * kpp_ptr = static_cast<const KppBoxIntegrator *>(_integrator.get());
@@ -298,6 +352,20 @@ MCMBoxModel::initialize()
     _console << "MCMBoxModel: parsing " << mech_file << "..." << std::endl;
     MCMFacsimileParser parser;
     ParsedMechanism mech = parser.parse(mech_file, photo_file);
+
+    if (!aerosol_particle_species.empty())
+    {
+      std::set<std::string> seen(mech.species.begin(), mech.species.end());
+      for (const auto & particle_name : aerosol_particle_species)
+      {
+        if (seen.insert(particle_name).second)
+        {
+          mech.species.push_back(particle_name);
+          mech.stoichiometry.emplace_back(mech.reactions.size(), 0.0);
+        }
+      }
+    }
+
     _console << "MCMBoxModel: parsing complete." << std::endl;
     bool use_lr = getParam<bool>("use_limiting_reagent");
 
@@ -331,6 +399,7 @@ MCMBoxModel::initialize()
     _n_species = _mechanism->nSpecies();
     _n_reactions = _mechanism->nReactions();
     _species_names = _mechanism->speciesNames();
+    setupAerosolPartitioning();
     _console << "MCMBoxModel: Loaded " << _n_species << " species, "
              << _n_reactions << " reactions from " << mech_file << std::endl;
 
@@ -434,6 +503,14 @@ MCMBoxModel::computeDCdt(const std::vector<Real> & C, std::vector<Real> & dC) co
   if (_kdil > 0.0 && !_conc_bkgd.empty())
     for (unsigned int i = 0; i < _n_species; ++i)
       dC[i] -= _kdil * (C[i] - _conc_bkgd[i]);
+
+  if (_aerosol_enabled)
+  {
+    std::vector<Real> aerosol_source;
+    computeAerosolSource(C, aerosol_source);
+    for (const auto i : make_range(_n_species))
+      dC[i] += aerosol_source[i];
+  }
 }
 
 void
@@ -442,22 +519,43 @@ MCMBoxModel::computeJacobianTriplets(
     std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const
 {
   J.clear();
-  if (_n_reactions == 0 || _n_species == 0 || !_mechanism)
+  if (_n_species == 0 || !_mechanism)
     return;
 
-  auto * mech = static_cast<MCMRuntimeMechanism*>(_mechanism.get());
-  mech->computeJacobianTriplets(C, J);
+  if (_n_reactions > 0)
+  {
+    auto * mech = static_cast<MCMRuntimeMechanism*>(_mechanism.get());
+    mech->computeJacobianTriplets(C, J);
+  }
+
+  if (_kdil > 0.0 && !_conc_bkgd.empty())
+    for (const auto i : make_range(_n_species))
+      J.emplace_back(i, i, -_kdil);
+
+  if (_aerosol_enabled)
+    addAerosolJacobianTriplets(C, J);
 }
 
 void
 MCMBoxModel::computeJacobianCSRValues(const std::vector<Real> & C, std::vector<Real> & values) const
 {
-  values.clear();
-  if (_n_reactions == 0 || _n_species == 0 || !_mechanism)
+  if (_n_species == 0 || !_mechanism)
+  {
+    values.clear();
     return;
+  }
 
-  auto * mech = static_cast<MCMRuntimeMechanism*>(_mechanism.get());
-  mech->computeJacobianCSRValues(C, values);
+  std::vector<std::tuple<unsigned int, unsigned int, Real>> triplets;
+  computeJacobianTriplets(C, triplets);
+  values.assign(_ts_jac_cols.size(), 0.0);
+  for (const auto & [row, col, value] : triplets)
+  {
+    const auto begin = _ts_jac_cols.begin() + _ts_jac_row_ptr[row];
+    const auto end = _ts_jac_cols.begin() + _ts_jac_row_ptr[row + 1];
+    const auto it = std::lower_bound(begin, end, static_cast<PetscInt>(col));
+    if (it != end && *it == static_cast<PetscInt>(col))
+      values[std::distance(_ts_jac_cols.begin(), it)] += value;
+  }
 }
 
 // -- Cached single-species interface --
@@ -471,24 +569,283 @@ MCMBoxModel::getDCdt(unsigned int idx, const std::vector<Real> & C) const
   if (_n_species == 0)
     const_cast<MCMBoxModel*>(this)->initialize();
   if (!_mechanism) return 0.0;
-  return _mechanism->getDCdt(idx, C);
+  if (_box_dirty || _box_cached_dC.size() != _n_species || _box_cached_C != C)
+  {
+    computeDCdt(C, _box_cached_dC);
+    _box_cached_C = C;
+    _box_dirty = false;
+  }
+  return (idx < _box_cached_dC.size()) ? _box_cached_dC[idx] : 0.0;
 }
 
 Real
 MCMBoxModel::getJacobianDiagonal(unsigned int idx, const std::vector<Real> & C) const
 {
   if (!_mechanism) return 0.0;
-  return _mechanism->getJacobianDiagonal(idx, C);
+  if (_box_dirty || _box_cached_diag_J.size() != _n_species || _box_cached_C != C)
+    buildBoxJacobianCache(C);
+  return (idx < _box_cached_diag_J.size()) ? _box_cached_diag_J[idx] : 0.0;
 }
 
 Real
 MCMBoxModel::getJacobianOffDiagonal(unsigned int i, unsigned int j, const std::vector<Real> & C) const
 {
   if (!_mechanism) return 0.0;
-  return _mechanism->getJacobianOffDiagonal(i, j, C);
+  if (_box_dirty || _box_cached_od_row_ptr.size() != _n_species + 1 || _box_cached_C != C)
+    buildBoxJacobianCache(C);
+  if (i >= _n_species || _box_cached_od_row_ptr.size() != _n_species + 1)
+    return 0.0;
+  size_t lo = _box_cached_od_row_ptr[i];
+  const size_t hi = _box_cached_od_row_ptr[i + 1];
+  while (lo < hi)
+  {
+    const size_t mid = lo + (hi - lo) / 2;
+    const unsigned int col = _box_cached_od_cols[mid];
+    if (col == j)
+      return _box_cached_od_vals[mid];
+    if (col < j)
+      lo = mid + 1;
+    else
+      break;
+  }
+  return 0.0;
 }
 
-// _buildJacobianCache is now handled by MCMRuntimeMechanism
+void
+MCMBoxModel::setupAerosolPartitioning()
+{
+  if (_aerosol_initialized)
+    return;
+  _aerosol_initialized = true;
+
+  const auto gas_species = getParam<std::vector<std::string>>("aerosol_gas_species");
+  const auto particle_species = getParam<std::vector<std::string>>("aerosol_particle_species");
+  const auto cstar = getParam<std::vector<Real>>("aerosol_cstar");
+  const auto mw = getParam<std::vector<Real>>("aerosol_molecular_weights");
+
+  if (gas_species.empty())
+    return;
+  if (gas_species.size() != particle_species.size() ||
+      gas_species.size() != cstar.size() ||
+      gas_species.size() != mw.size())
+    mooseError("MCMBoxModel: aerosol_gas_species, aerosol_particle_species, aerosol_cstar, "
+               "and aerosol_molecular_weights must have the same length.");
+  if (_aerosol_alpha <= 0.0 || _aerosol_gas_diffusivity <= 0.0 ||
+      _aerosol_particle_number <= 0.0 || _aerosol_seed_radius <= 0.0 ||
+      _aerosol_organic_density <= 0.0)
+    mooseError("MCMBoxModel: aerosol transport parameters must be positive.");
+
+  _aerosol_pairs.clear();
+  for (const auto i : index_range(gas_species))
+  {
+    if (cstar[i] > _aerosol_cstar_cutoff)
+      continue;
+
+    auto gas_it = std::find(_species_names.begin(), _species_names.end(), gas_species[i]);
+    auto particle_it =
+        std::find(_species_names.begin(), _species_names.end(), particle_species[i]);
+    if (gas_it == _species_names.end())
+      mooseError("MCMBoxModel: aerosol gas species '", gas_species[i],
+                 "' was not found in the mechanism.");
+    if (particle_it == _species_names.end())
+      mooseError("MCMBoxModel: aerosol particle species '", particle_species[i],
+                 "' was not found in the mechanism.");
+    if (mw[i] <= 0.0)
+      mooseError("MCMBoxModel: aerosol molecular weight for species '", gas_species[i],
+                 "' must be positive.");
+
+    AerosolPartitioningPair pair;
+    pair.gas_name = gas_species[i];
+    pair.particle_name = particle_species[i];
+    pair.gas_index = std::distance(_species_names.begin(), gas_it);
+    pair.particle_index = std::distance(_species_names.begin(), particle_it);
+    pair.cstar = cstar[i];
+    pair.molecular_weight = mw[i];
+    _aerosol_pairs.push_back(pair);
+  }
+
+  _aerosol_enabled = !_aerosol_pairs.empty();
+  if (_aerosol_enabled)
+    _console << "MCMBoxModel: Dynamic aerosol partitioning enabled for "
+             << _aerosol_pairs.size() << " species pair(s)" << std::endl;
+}
+
+Real
+MCMBoxModel::speciesMassConcentration(unsigned int species_index, Real concentration) const
+{
+  for (const auto & pair : _aerosol_pairs)
+    if (pair.gas_index == species_index || pair.particle_index == species_index)
+      return concentration * pair.molecular_weight * 1.0e12 / 6.02214076e23;
+  return 0.0;
+}
+
+Real
+MCMBoxModel::aerosolOrganicMass(const std::vector<Real> & C) const
+{
+  Real organic_mass = _aerosol_background_organic_mass;
+  for (const auto & pair : _aerosol_pairs)
+    organic_mass += speciesMassConcentration(pair.particle_index, C[pair.particle_index]);
+  return std::max(organic_mass, _aerosol_min_organic_mass);
+}
+
+Real
+MCMBoxModel::aerosolParticleRadius(Real organic_mass) const
+{
+  if (_aerosol_surface_area > 0.0)
+    return _aerosol_seed_radius;
+
+  constexpr Real pi = 3.14159265358979323846;
+  const Real seed_volume = 4.0 / 3.0 * pi * std::pow(_aerosol_seed_radius, 3);
+  const Real organic_volume_per_particle =
+      organic_mass * 1.0e-9 / (_aerosol_organic_density * _aerosol_particle_number);
+  return std::cbrt(std::max(seed_volume + organic_volume_per_particle, seed_volume) *
+                   3.0 / (4.0 * pi));
+}
+
+Real
+MCMBoxModel::aerosolSurfaceArea(Real radius) const
+{
+  if (_aerosol_surface_area > 0.0)
+    return _aerosol_surface_area;
+  constexpr Real pi = 3.14159265358979323846;
+  return 4.0 * pi * radius * radius * _aerosol_particle_number;
+}
+
+void
+MCMBoxModel::computeAerosolSource(const std::vector<Real> & C, std::vector<Real> & source) const
+{
+  source.assign(_n_species, 0.0);
+  if (!_aerosol_enabled)
+    return;
+
+  const Real c_oa = aerosolOrganicMass(C);
+  const Real radius = aerosolParticleRadius(c_oa);
+  const Real surface_area = aerosolSurfaceArea(radius);
+  constexpr Real gas_constant = 8.31446261815324;
+  constexpr Real pi = 3.14159265358979323846;
+
+  for (const auto & pair : _aerosol_pairs)
+  {
+    const Real mw_kg_per_mol = pair.molecular_weight * 1.0e-3;
+    const Real thermal_speed =
+        std::sqrt(8.0 * gas_constant * getParam<Real>("temperature") /
+                  (pi * mw_kg_per_mol));
+    const Real k_mt =
+        1.0 / (radius / _aerosol_gas_diffusivity + 4.0 / (_aerosol_alpha * thermal_speed));
+    const Real k_cond = k_mt * surface_area;
+    const Real k_evap = k_cond * pair.cstar / c_oa;
+    const Real gas = C[pair.gas_index];
+    const Real particle = C[pair.particle_index];
+    const Real transfer = k_cond * gas - k_evap * particle;
+
+    source[pair.gas_index] -= transfer;
+    source[pair.particle_index] += transfer;
+
+    if (_aerosol_vapor_wall_loss > 0.0)
+      source[pair.gas_index] -= _aerosol_vapor_wall_loss * gas;
+    if (_aerosol_particle_wall_loss > 0.0)
+      source[pair.particle_index] -= _aerosol_particle_wall_loss * particle;
+  }
+}
+
+std::vector<unsigned int>
+MCMBoxModel::aerosolJacobianColumns() const
+{
+  std::vector<unsigned int> columns;
+  for (const auto & pair : _aerosol_pairs)
+  {
+    columns.push_back(pair.gas_index);
+    columns.push_back(pair.particle_index);
+  }
+  std::sort(columns.begin(), columns.end());
+  columns.erase(std::unique(columns.begin(), columns.end()), columns.end());
+  return columns;
+}
+
+void
+MCMBoxModel::addAerosolJacobianTriplets(
+    const std::vector<Real> & C,
+    std::vector<std::tuple<unsigned int, unsigned int, Real>> & J) const
+{
+  if (!_aerosol_enabled)
+    return;
+
+  std::vector<Real> base_source;
+  computeAerosolSource(C, base_source);
+  const auto columns = aerosolJacobianColumns();
+
+  for (const auto col : columns)
+  {
+    std::vector<Real> perturbed = C;
+    const Real step = std::max(std::abs(C[col]) * 1.0e-6, 1.0e6);
+    perturbed[col] += step;
+
+    std::vector<Real> perturbed_source;
+    computeAerosolSource(perturbed, perturbed_source);
+
+    for (const auto & pair : _aerosol_pairs)
+    {
+      const unsigned int rows[] = {pair.gas_index, pair.particle_index};
+      for (const auto row : rows)
+      {
+        const Real value = (perturbed_source[row] - base_source[row]) / step;
+        if (std::abs(value) > 1.0e-30)
+          J.emplace_back(row, col, value);
+      }
+    }
+  }
+}
+
+void
+MCMBoxModel::buildBoxJacobianCache(const std::vector<Real> & C) const
+{
+  std::vector<std::tuple<unsigned int, unsigned int, Real>> triplets;
+  computeJacobianTriplets(C, triplets);
+
+  _box_cached_diag_J.assign(_n_species, 0.0);
+  std::vector<std::vector<std::pair<unsigned int, Real>>> rows(_n_species);
+  for (const auto & [row, col, value] : triplets)
+  {
+    if (row >= _n_species || col >= _n_species)
+      continue;
+    if (row == col)
+      _box_cached_diag_J[row] += value;
+    else
+      rows[row].emplace_back(col, value);
+  }
+
+  _box_cached_od_row_ptr.assign(_n_species + 1, 0);
+  for (const auto row_index : make_range(_n_species))
+  {
+    auto & row = rows[row_index];
+    std::sort(row.begin(), row.end());
+    std::vector<std::pair<unsigned int, Real>> combined;
+    for (const auto & entry : row)
+    {
+      if (!combined.empty() && combined.back().first == entry.first)
+        combined.back().second += entry.second;
+      else
+        combined.push_back(entry);
+    }
+    row.swap(combined);
+    _box_cached_od_row_ptr[row_index + 1] = _box_cached_od_row_ptr[row_index] + row.size();
+  }
+
+  _box_cached_od_cols.resize(_box_cached_od_row_ptr[_n_species]);
+  _box_cached_od_vals.resize(_box_cached_od_row_ptr[_n_species]);
+  for (const auto row_index : make_range(_n_species))
+  {
+    const auto base = _box_cached_od_row_ptr[row_index];
+    for (const auto j : index_range(rows[row_index]))
+    {
+      _box_cached_od_cols[base + j] = rows[row_index][j].first;
+      _box_cached_od_vals[base + j] = rows[row_index][j].second;
+    }
+  }
+
+  _box_cached_C = C;
+  _box_dirty = false;
+}
 
 // loadMechanism is now handled by MCMRuntimeMechanism constructor
 
@@ -984,24 +1341,55 @@ MCMBoxModel::setupPETScTS()
   if (!runtime_mech)
     mooseError("MCMBoxModel: PETSc TS sparse Jacobian requires MCMRuntimeMechanism.");
 
-  const auto & jac_row_ptr = runtime_mech->jacobianRowPtr();
-  const auto & jac_cols = runtime_mech->jacobianCols();
-  if (jac_row_ptr.size() != _n_species + 1)
+  const auto & chem_jac_row_ptr = runtime_mech->jacobianRowPtr();
+  const auto & chem_jac_cols = runtime_mech->jacobianCols();
+  if (chem_jac_row_ptr.size() != _n_species + 1)
     mooseError("MCMBoxModel: invalid sparse Jacobian row pointer size.");
 
+  std::vector<std::vector<unsigned int>> row_cols(_n_species);
+  for (const auto row : make_range(_n_species))
+    for (auto k = chem_jac_row_ptr[row]; k < chem_jac_row_ptr[row + 1]; ++k)
+      row_cols[row].push_back(chem_jac_cols[k]);
+
+  if (_kdil > 0.0 && !_conc_bkgd.empty())
+    for (const auto row : make_range(_n_species))
+      row_cols[row].push_back(row);
+
+  if (_aerosol_enabled)
+  {
+    const auto cols = aerosolJacobianColumns();
+    for (const auto & pair : _aerosol_pairs)
+    {
+      row_cols[pair.gas_index].insert(row_cols[pair.gas_index].end(), cols.begin(), cols.end());
+      row_cols[pair.particle_index].insert(
+          row_cols[pair.particle_index].end(), cols.begin(), cols.end());
+    }
+  }
+
+  _ts_jac_row_ptr.assign(_n_species + 1, 0);
   std::vector<PetscInt> row_nnz(_n_species, 0);
   for (const auto i : make_range(_n_species))
-    row_nnz[i] = static_cast<PetscInt>(jac_row_ptr[i + 1] - jac_row_ptr[i]);
+  {
+    auto & row = row_cols[i];
+    std::sort(row.begin(), row.end());
+    row.erase(std::unique(row.begin(), row.end()), row.end());
+    row_nnz[i] = static_cast<PetscInt>(row.size());
+    _ts_jac_row_ptr[i + 1] = _ts_jac_row_ptr[i] + row.size();
+  }
 
-  _ts_jac_cols.resize(jac_cols.size());
-  for (const auto i : index_range(jac_cols))
-    _ts_jac_cols[i] = static_cast<PetscInt>(jac_cols[i]);
-  _ts_jac_values_real.resize(jac_cols.size(), 0.0);
-  _ts_jac_values.resize(jac_cols.size(), 0.0);
+  _ts_jac_cols.resize(_ts_jac_row_ptr[_n_species]);
+  for (const auto row : make_range(_n_species))
+  {
+    const auto base = _ts_jac_row_ptr[row];
+    for (const auto k : index_range(row_cols[row]))
+      _ts_jac_cols[base + k] = static_cast<PetscInt>(row_cols[row][k]);
+  }
+  _ts_jac_values_real.resize(_ts_jac_cols.size(), 0.0);
+  _ts_jac_values.resize(_ts_jac_cols.size(), 0.0);
 
   _console << "MCMBoxModel: Jacobian matrix: " << n << "x" << n
-           << " sparse AIJ, nnz=" << jac_cols.size()
-           << " (fill=" << (100.0 * (Real)jac_cols.size() / ((Real)n * (Real)n))
+           << " sparse AIJ, nnz=" << _ts_jac_cols.size()
+           << " (fill=" << (100.0 * (Real)_ts_jac_cols.size() / ((Real)n * (Real)n))
            << "%)" << std::endl;
   PETSC_TRY(MatCreateSeqAIJ(PETSC_COMM_SELF, n, n, 0, row_nnz.data(), &_ts_J));
   PETSC_TRY(MatSetFromOptions(_ts_J));
@@ -1146,15 +1534,12 @@ MCMBoxModel::tsRHSJacobian(TS /*ts*/, PetscReal /*t*/, Vec C, Mat Amat, Mat Pmat
   for (const auto i : index_range(model->_ts_jac_values_real))
     model->_ts_jac_values[i] = static_cast<PetscScalar>(model->_ts_jac_values_real[i]);
 
-  const auto * runtime_mech = static_cast<MCMRuntimeMechanism *>(model->_mechanism.get());
-  const auto & row_ptr = runtime_mech->jacobianRowPtr();
-
   PetscCall(MatZeroEntries(Pmat));
   for (const auto row : make_range(model->_n_species))
   {
     const PetscInt irow = static_cast<PetscInt>(row);
-    const auto begin = row_ptr[row];
-    const auto ncols = row_ptr[row + 1] - begin;
+    const auto begin = model->_ts_jac_row_ptr[row];
+    const auto ncols = model->_ts_jac_row_ptr[row + 1] - begin;
     if (ncols == 0)
       continue;
     PetscCall(MatSetValues(Pmat,
