@@ -22,6 +22,11 @@ registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryCoupledAction
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryCoupledAction, "add_material");
 registerMooseAction("AtmosphericChemistryApp", AtmosphericChemistryCoupledAction, "add_kernel");
 
+namespace
+{
+const char * const transport_velocity_property = "atmospheric_chemistry_transport_velocity";
+}
+
 InputParameters
 AtmosphericChemistryCoupledAction::validParams()
 {
@@ -69,6 +74,34 @@ AtmosphericChemistryCoupledAction::validParams()
   params.addParam<MooseEnum>("units", units_enum,
       "Concentration units for input/output: 'molec_cm3' (default) or 'ppb'.");
 
+  params.addParam<std::vector<VariableName>>(
+      "transport_velocity",
+      {},
+      "Scalar velocity component variables used to add a ConservativeAdvection kernel for every "
+      "species.");
+  params.addParam<MaterialPropertyName>(
+      "transport_velocity_material",
+      "RealVectorValue material property used to add a ConservativeAdvection kernel for every "
+      "species.");
+  MooseEnum upwinding_type("none full", "none");
+  params.addParam<MooseEnum>(
+      "advection_upwinding_type", upwinding_type, "Upwinding type for species advection kernels.");
+  params.addParam<FunctionName>(
+      "diffusivity",
+      "Diffusion coefficient/function used to add a FunctionDiffusion kernel for every species. "
+      "Numeric constants are accepted.");
+  params.addParam<FunctionName>(
+      "density_weighted_diffusivity",
+      "Turbulent diffusivity K used to add an AtmosphericDensityWeightedDiffusion kernel for every "
+      "species.");
+  params.addParam<FunctionName>(
+      "density_weighted_air_density",
+      "Air number-density function rho used with density_weighted_diffusivity.");
+  MooseEnum density_weighted_component("x y z", "z");
+  params.addParam<MooseEnum>("density_weighted_component",
+                             density_weighted_component,
+                             "Coordinate direction for density-weighted diffusion.");
+
   MooseEnum solver_enum("moose_implicit kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
                         "moose_implicit");
   params.addParam<MooseEnum>(
@@ -85,7 +118,8 @@ AtmosphericChemistryCoupledAction::validParams()
 
   params.addClassDescription(
       "Action for FEM transport + chemistry (coupled mode). Creates FE variables, "
-      "chemistry material properties, and source kernels for each species.");
+      "chemistry material properties, source kernels, and optional transport kernels for each "
+      "species.");
   return params;
 }
 
@@ -95,6 +129,22 @@ AtmosphericChemistryCoupledAction::AtmosphericChemistryCoupledAction(const Input
     _use_kpp(false),
     _ro2_diagnostic_enabled(false)
 {
+  if (!getParam<std::vector<VariableName>>("transport_velocity").empty() &&
+      isParamValid("transport_velocity_material"))
+    paramError("transport_velocity",
+               "Specify only one of transport_velocity or transport_velocity_material.");
+  if (getParam<std::vector<VariableName>>("transport_velocity").size() > LIBMESH_DIM)
+    paramError("transport_velocity",
+               "The number of velocity component variables cannot exceed LIBMESH_DIM.");
+  if (isParamValid("diffusivity") && isParamValid("density_weighted_diffusivity"))
+    paramError("diffusivity",
+               "Specify only one of diffusivity or density_weighted_diffusivity.");
+  if (isParamValid("density_weighted_diffusivity") !=
+      isParamValid("density_weighted_air_density"))
+    paramError("density_weighted_diffusivity",
+               "density_weighted_diffusivity and density_weighted_air_density must be specified "
+               "together.");
+
   std::string mech_file = getParam<std::string>("mechanism_file");
   if (!mech_file.empty() && mech_file[0] == '/')
     mooseError("AtmosphericChemistryCoupled: mechanism_file must be relative, got absolute: ", mech_file);
@@ -173,6 +223,66 @@ AtmosphericChemistryCoupledAction::kppLibraryPath(const std::string & mechanism_
   return dir + "kpp_build_" + base + "/libkpp_" + base + ".so";
 }
 
+bool
+AtmosphericChemistryCoupledAction::hasAdvection() const
+{
+  return !getParam<std::vector<VariableName>>("transport_velocity").empty() ||
+         isParamValid("transport_velocity_material");
+}
+
+bool
+AtmosphericChemistryCoupledAction::hasDiffusion() const
+{
+  return isParamValid("diffusivity");
+}
+
+bool
+AtmosphericChemistryCoupledAction::hasDensityWeightedDiffusion() const
+{
+  return isParamValid("density_weighted_diffusivity");
+}
+
+void
+AtmosphericChemistryCoupledAction::addTransportKernels(const std::string & species_name)
+{
+  if (hasAdvection())
+  {
+    auto adv_params = _factory.getValidParams("ConservativeAdvection");
+    adv_params.set<NonlinearVariableName>("variable") = species_name;
+    adv_params.set<MooseEnum>("upwinding_type") = getParam<MooseEnum>("advection_upwinding_type");
+
+    const auto & velocity = getParam<std::vector<VariableName>>("transport_velocity");
+    if (!velocity.empty())
+      adv_params.set<MaterialPropertyName>("velocity_material") = transport_velocity_property;
+    else
+      adv_params.set<MaterialPropertyName>("velocity_material") =
+          getParam<MaterialPropertyName>("transport_velocity_material");
+
+    _problem->addKernel("ConservativeAdvection", "advect_" + species_name, adv_params);
+  }
+
+  if (hasDiffusion())
+  {
+    auto diff_params = _factory.getValidParams("FunctionDiffusion");
+    diff_params.set<NonlinearVariableName>("variable") = species_name;
+    diff_params.set<FunctionName>("function") = getParam<FunctionName>("diffusivity");
+    _problem->addKernel("FunctionDiffusion", "diff_" + species_name, diff_params);
+  }
+
+  if (hasDensityWeightedDiffusion())
+  {
+    auto diff_params = _factory.getValidParams("AtmosphericDensityWeightedDiffusion");
+    diff_params.set<NonlinearVariableName>("variable") = species_name;
+    diff_params.set<FunctionName>("diffusivity") =
+        getParam<FunctionName>("density_weighted_diffusivity");
+    diff_params.set<FunctionName>("density") =
+        getParam<FunctionName>("density_weighted_air_density");
+    diff_params.set<MooseEnum>("component") = getParam<MooseEnum>("density_weighted_component");
+    _problem->addKernel(
+        "AtmosphericDensityWeightedDiffusion", "rho_diff_" + species_name, diff_params);
+  }
+}
+
 void
 AtmosphericChemistryCoupledAction::actAddVariable()
 {
@@ -221,6 +331,21 @@ AtmosphericChemistryCoupledAction::buildReactantMatrix() const
 void
 AtmosphericChemistryCoupledAction::actAddMaterial()
 {
+  const auto & velocity = getParam<std::vector<VariableName>>("transport_velocity");
+  if (!velocity.empty())
+  {
+    auto velocity_params = _factory.getValidParams("VectorFromComponentVariablesMaterial");
+    velocity_params.set<MaterialPropertyName>("vector_prop_name") = transport_velocity_property;
+    velocity_params.set<std::vector<VariableName>>("u") = {velocity[0]};
+    if (velocity.size() > 1)
+      velocity_params.set<std::vector<VariableName>>("v") = {velocity[1]};
+    if (velocity.size() > 2)
+      velocity_params.set<std::vector<VariableName>>("w") = {velocity[2]};
+    _problem->addMaterial("VectorFromComponentVariablesMaterial",
+                          "atmospheric_chemistry_transport_velocity",
+                          velocity_params);
+  }
+
   if (_use_kpp)
   {
     auto params = _factory.getValidParams("KPPMechanismMaterial");
@@ -316,7 +441,7 @@ AtmosphericChemistryCoupledAction::actAddKernel()
     const Real unit_conversion = (u == "ppb") ? M / 1.0e9 : 1.0;
     std::vector<VariableName> all_species(_species.begin(), _species.end());
 
-    for (unsigned int j = 0; j < _species.size(); ++j)
+    for (const auto j : make_range(_species.size()))
     {
       auto td_params = _factory.getValidParams("TimeDerivative");
       td_params.set<NonlinearVariableName>("variable") = _species[j];
@@ -328,6 +453,8 @@ AtmosphericChemistryCoupledAction::actAddKernel()
       src_params.set<std::vector<VariableName>>("all_species") = all_species;
       src_params.set<Real>("unit_conversion") = unit_conversion;
       _problem->addKernel("KPPChemicalSourceKernel", "src_" + _species[j], src_params);
+
+      addTransportKernels(_species[j]);
     }
 
     _console << "AtmosphericChemistryCoupled: Created TimeDerivative + KPPChemicalSourceKernel for "
@@ -338,12 +465,12 @@ AtmosphericChemistryCoupledAction::actAddKernel()
   // Build species index mapping
   std::unordered_map<std::string, unsigned int> species_name_to_idx;
   species_name_to_idx.reserve(_species.size());
-  for (unsigned int i = 0; i < _species.size(); ++i)
+  for (const auto i : make_range(_species.size()))
     species_name_to_idx[_species[i]] = i;
 
   // Build species_reactants matrix
   std::vector<std::vector<Real>> species_reactants(_species.size());
-  for (unsigned int r = 0; r < _mech_data.reactions.size(); ++r)
+  for (const auto r : make_range(_mech_data.reactions.size()))
     for (auto & [coeff, name] : _mech_data.reactions[r].reactants)
     {
       auto it = species_name_to_idx.find(name);
@@ -361,7 +488,7 @@ AtmosphericChemistryCoupledAction::actAddKernel()
   Real unit_conversion = (u == "ppb") ? M / 1.0e9 : 1.0;
   std::vector<VariableName> all_species(_species.begin(), _species.end());
 
-  for (unsigned int j = 0; j < _species.size(); ++j)
+  for (const auto j : make_range(_species.size()))
   {
     auto td_params = _factory.getValidParams("TimeDerivative");
     td_params.set<NonlinearVariableName>("variable") = _species[j];
@@ -374,6 +501,8 @@ AtmosphericChemistryCoupledAction::actAddKernel()
     src_params.set<std::vector<std::vector<Real>>>("species_reactants") = species_reactants;
     src_params.set<Real>("unit_conversion") = unit_conversion;
     _problem->addKernel("ChemicalSourceKernel", "src_" + _species[j], src_params);
+
+    addTransportKernels(_species[j]);
   }
 
   _console << "AtmosphericChemistryCoupled: Created TimeDerivative + ChemicalSourceKernel for "

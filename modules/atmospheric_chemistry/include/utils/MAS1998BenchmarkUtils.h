@@ -16,6 +16,7 @@ namespace MAS1998
 {
 Real verticalDiffusivity(Real z_km);
 Real airNumberDensity(Real z_km, Real ground_number_density);
+Real airNumberDensityDerivative(Real z_km, Real ground_number_density);
 Real groundConcentration(const std::string & species);
 bool hasCylinderInitialCondition(const std::string & species);
 Real cylinderMaximumConcentration(const std::string & species);

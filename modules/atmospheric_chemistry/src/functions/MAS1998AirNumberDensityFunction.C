@@ -50,3 +50,12 @@ MAS1998AirNumberDensityFunction::value(Real /*t*/, const Point & p) const
 {
   return MAS1998::airNumberDensity(p(_height_component), _ground_number_density);
 }
+
+RealGradient
+MAS1998AirNumberDensityFunction::gradient(Real /*t*/, const Point & p) const
+{
+  RealGradient grad(0.0);
+  grad(_height_component) =
+      MAS1998::airNumberDensityDerivative(p(_height_component), _ground_number_density);
+  return grad;
+}

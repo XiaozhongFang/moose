@@ -48,6 +48,14 @@ protected:
   void actAddMaterial();
   /// Create TimeDerivative + ChemicalSourceKernel for each species
   void actAddKernel();
+  /// Whether species advection kernels should be created
+  bool hasAdvection() const;
+  /// Whether species diffusion kernels should be created
+  bool hasDiffusion() const;
+  /// Whether density-weighted species diffusion kernels should be created
+  bool hasDensityWeightedDiffusion() const;
+  /// Create optional transport kernels for a species
+  void addTransportKernels(const std::string & species_name);
 
   /// Parsed species names in mechanism order
   std::vector<std::string> _species;

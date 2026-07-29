@@ -1,4 +1,14 @@
 [Tests]
+  [./coupled_action_transport_smoke]
+    type = RunApp
+    input = coupled_action_transport_smoke.i
+    requirement = 'The coupled atmospheric chemistry action shall add advection and diffusion kernels for every species.'
+  [../]
+  [./coupled_action_density_weighted_diffusion_smoke]
+    type = RunApp
+    input = coupled_action_density_weighted_diffusion_smoke.i
+    requirement = 'The coupled atmospheric chemistry action shall add density-weighted diffusion kernels for every species.'
+  [../]
   [./vs_atchem2_transport_building]
     type = RunApp
     input = vs_atchem2_transport_building.i

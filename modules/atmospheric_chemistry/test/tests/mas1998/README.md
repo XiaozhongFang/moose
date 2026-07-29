@@ -35,4 +35,16 @@ IMEX/splitting context, not for replacing the benchmark chemistry constants.
 The original `Ref_Sol_Benchmark_Global.text` is still unavailable. These files
 are enough to build the chemistry mechanism and verify the scalar benchmark
 constants, but generating a replacement high-accuracy 3D reference solution
-still requires the transport discretization and solver input deck.
+still requires the paper-specific spherical transport discretization and solver
+input deck.
+
+Generic coupled transport support now lives in `AtmosphericChemistryCoupled`.
+`transport_velocity` accepts scalar velocity component variables, `diffusivity`
+accepts a constant or MOOSE Function for ordinary diffusion, and
+`density_weighted_diffusivity` plus `density_weighted_air_density` add the
+atmospheric `d_z(rho K d_z(c/rho))` form used by this benchmark. The MAS1998
+input deck should use these Action parameters for common species
+advection/diffusion kernel creation instead of duplicating per-species kernels
+in the benchmark.
+The remaining reproduction gap is the benchmark's conservative spherical
+finite-volume advection operator with the published third-order limited flux.

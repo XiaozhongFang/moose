@@ -18,6 +18,7 @@ public:
   MAS1998AirNumberDensityFunction(const InputParameters & parameters);
 
   virtual Real value(Real t, const Point & p) const override;
+  virtual RealGradient gradient(Real t, const Point & p) const override;
 
 private:
   const unsigned int _height_component;

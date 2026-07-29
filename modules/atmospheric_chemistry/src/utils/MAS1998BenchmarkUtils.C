@@ -29,13 +29,17 @@ degreesToRadians(const Real degrees)
   return degrees * mas1998_pi / 180.0;
 }
 
-Real
-standardAtmosphereRelativeNumberDensity(const Real z_km)
+std::pair<Real, Real>
+standardAtmosphereRelativeNumberDensityAndDerivative(const Real z_km)
 {
-  const Real z_m = std::max(z_km, 0.0) * 1000.0;
+  if (z_km < 0.0)
+    return std::make_pair(1.0, 0.0);
+
+  const Real z_m = z_km * 1000.0;
 
   constexpr Real g = 9.80665;
   constexpr Real r_air = 287.05287;
+  constexpr Real sea_level_number_density = 101325.0 / 288.15;
 
   Real base_z = 0.0;
   Real base_t = 288.15;
@@ -58,36 +62,43 @@ standardAtmosphereRelativeNumberDensity(const Real z_km)
 
   const auto eval_layer = [&](const Real lapse, const Real dz, const Real t0, const Real p0)
   {
+    Real t;
+    Real p;
     if (std::abs(lapse) < 1.0e-14)
-      return std::make_pair(t0, p0 * std::exp(-g * dz / (r_air * t0)));
+    {
+      t = t0;
+      p = p0 * std::exp(-g * dz / (r_air * t0));
+    }
+    else
+    {
+      t = t0 + lapse * dz;
+      p = p0 * std::pow(t0 / t, g / (r_air * lapse));
+    }
 
-    const Real t = t0 + lapse * dz;
-    return std::make_pair(t, p0 * std::pow(t0 / t, g / (r_air * lapse)));
+    const Real relative_density = (p / t) / sea_level_number_density;
+    const Real d_relative_density_dz_m = relative_density * (-g / (r_air * t) - lapse / t);
+    return std::make_pair(relative_density, d_relative_density_dz_m * 1000.0);
   };
 
   if (z_m <= 11000.0)
-  {
-    const auto [t, p] = eval_layer(-0.0065, z_m, base_t, base_p);
-    return (p / t) / (base_p / base_t);
-  }
+    return eval_layer(-0.0065, z_m, base_t, base_p);
 
   advance_layer(11000.0, -0.0065, base_z, base_t, base_p);
   if (z_m <= 20000.0)
-  {
-    const auto [t, p] = eval_layer(0.0, z_m - base_z, base_t, base_p);
-    return (p / t) / (101325.0 / 288.15);
-  }
+    return eval_layer(0.0, z_m - base_z, base_t, base_p);
 
   advance_layer(20000.0, 0.0, base_z, base_t, base_p);
   if (z_m <= 32000.0)
-  {
-    const auto [t, p] = eval_layer(0.001, z_m - base_z, base_t, base_p);
-    return (p / t) / (101325.0 / 288.15);
-  }
+    return eval_layer(0.001, z_m - base_z, base_t, base_p);
 
   advance_layer(32000.0, 0.001, base_z, base_t, base_p);
-  const auto [t, p] = eval_layer(0.0028, z_m - base_z, base_t, base_p);
-  return (p / t) / (101325.0 / 288.15);
+  return eval_layer(0.0028, z_m - base_z, base_t, base_p);
+}
+
+Real
+standardAtmosphereRelativeNumberDensity(const Real z_km)
+{
+  return standardAtmosphereRelativeNumberDensityAndDerivative(z_km).first;
 }
 
 const std::map<std::string, Real> &
@@ -121,6 +132,12 @@ Real
 airNumberDensity(const Real z_km, const Real ground_number_density)
 {
   return ground_number_density * standardAtmosphereRelativeNumberDensity(z_km);
+}
+
+Real
+airNumberDensityDerivative(const Real z_km, const Real ground_number_density)
+{
+  return ground_number_density * standardAtmosphereRelativeNumberDensityAndDerivative(z_km).second;
 }
 
 Real
