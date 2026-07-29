@@ -23,6 +23,7 @@
     density_weighted_diffusivity = 1e-4
     density_weighted_air_density = '1 + 0.1*y'
     density_weighted_component = y
+    density_weighted_coordinate_scale = 1000
   []
 []
 

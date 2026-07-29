@@ -101,6 +101,11 @@ AtmosphericChemistryCoupledAction::validParams()
   params.addParam<MooseEnum>("density_weighted_component",
                              density_weighted_component,
                              "Coordinate direction for density-weighted diffusion.");
+  params.addParam<Real>(
+      "density_weighted_coordinate_scale",
+      1.0,
+      "Scale from the density-weighted diffusion mesh coordinate unit to meters. Use 1000 when "
+      "height is in km and diffusivity is in m^2/s.");
 
   MooseEnum solver_enum("moose_implicit kpp_rosenbrock kpp_sdirk kpp_runge_kutta",
                         "moose_implicit");
@@ -144,6 +149,9 @@ AtmosphericChemistryCoupledAction::AtmosphericChemistryCoupledAction(const Input
     paramError("density_weighted_diffusivity",
                "density_weighted_diffusivity and density_weighted_air_density must be specified "
                "together.");
+  if (getParam<Real>("density_weighted_coordinate_scale") <= 0.0)
+    paramError("density_weighted_coordinate_scale",
+               "The density-weighted coordinate scale must be positive.");
 
   std::string mech_file = getParam<std::string>("mechanism_file");
   if (!mech_file.empty() && mech_file[0] == '/')
@@ -278,6 +286,8 @@ AtmosphericChemistryCoupledAction::addTransportKernels(const std::string & speci
     diff_params.set<FunctionName>("density") =
         getParam<FunctionName>("density_weighted_air_density");
     diff_params.set<MooseEnum>("component") = getParam<MooseEnum>("density_weighted_component");
+    diff_params.set<Real>("coordinate_scale") =
+        getParam<Real>("density_weighted_coordinate_scale");
     _problem->addKernel(
         "AtmosphericDensityWeightedDiffusion", "rho_diff_" + species_name, diff_params);
   }

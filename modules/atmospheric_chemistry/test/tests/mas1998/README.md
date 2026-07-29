@@ -46,5 +46,12 @@ atmospheric `d_z(rho K d_z(c/rho))` form used by this benchmark. The MAS1998
 input deck should use these Action parameters for common species
 advection/diffusion kernel creation instead of duplicating per-species kernels
 in the benchmark.
-The remaining reproduction gap is the benchmark's conservative spherical
-finite-volume advection operator with the published third-order limited flux.
+
+The spherical finite-volume horizontal transport weights are available through
+`AtmosphericSphericalFVTimeDerivative` and `AtmosphericSphericalFVAdvection`.
+These objects encode the physical longitude-latitude cell area and face flux
+metrics for the paper's conservative spherical form. `AtmosphericSphericalFVAdvection`
+also provides the MAS1998 third-order upwind flux with the published limiter.
+The remaining transport gap is reduced-grid connectivity, including a closed FV
+longitude seam because MOOSE periodic boundary actions do not currently apply
+to FV variables, and the full coupled reference-solution input deck.

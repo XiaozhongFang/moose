@@ -21,4 +21,10 @@
     rel_err = 1e-10
     requirement = 'The atmospheric chemistry module shall provide MAS1998 benchmark functions and initial conditions for the paper constants, solid-body wind, vertical diffusivity, NO emission, and cylinder species.'
   [../]
+
+  [./mas1998_spherical_fv_advection]
+    type = RunApp
+    input = mas1998_spherical_fv_advection.i
+    requirement = 'The atmospheric chemistry module shall run MAS1998 spherical finite-volume horizontal advection on a longitude-latitude grid.'
+  [../]
 []

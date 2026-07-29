@@ -32,4 +32,5 @@ private:
   const Function & _diffusivity;
   const Function & _density;
   const unsigned int _component;
+  const Real _coordinate_scale;
 };
