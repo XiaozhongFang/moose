@@ -1,0 +1,117 @@
+// Reduced methane chemistry for the Spee et al. MAS-R9702 global benchmark.
+// Source: recovered Wayback copy of chemistry.k for the MAS-R9702 benchmark page.
+// NM-R9505 Appendix B documents the 46-reaction, 19-species CIRK predecessor;
+// this file follows the benchmark page's 45-reaction, 17-variable KPP form.
+
+#INLINE C_GLOBAL
+extern double PRESS;
+extern double MAS1998_DELTA;
+extern double MAS1998_PHI;
+extern double MAS1998_K0;
+extern double MAS1998_K2;
+extern double MAS1998_K3;
+extern double MAS1998_RK23;
+extern double MAS1998_RK24;
+extern double MAS1998_SEC_Z;
+double MAS1998_THREEBODY(double k0, double nn, double kinf, double mm);
+#ENDINLINE
+
+#INLINE C_DATA
+double PRESS = 1013.25;
+double MAS1998_DELTA = 0.0;
+double MAS1998_PHI = 0.0;
+double MAS1998_K0 = 0.0;
+double MAS1998_K2 = 0.0;
+double MAS1998_K3 = 0.0;
+double MAS1998_RK23 = 0.0;
+double MAS1998_RK24 = 0.0;
+double MAS1998_SEC_Z = 1.0;
+
+double
+MAS1998_THREEBODY(double k0, double nn, double kinf, double mm)
+{
+  const double sxmin = 1.0E-15;
+  const double kq1 = FIX[indf_M] * k0 * pow(TEMP / 300.0, -nn);
+  double logkq;
+  double pwr;
+
+  if (fabs(kinf) <= sxmin)
+  {
+    logkq = log10(kq1);
+    pwr = 1.0 / (1.0 + logkq * logkq);
+    return kq1 / (1.0 + kq1) * pow(0.6, pwr);
+  }
+
+  const double kq2 = kq1 / kinf * pow(TEMP / 300.0, mm);
+  logkq = log10(kq2);
+  pwr = 1.0 / (1.0 + logkq * logkq);
+  return kq1 / (1.0 + kq2) * pow(0.6, pwr);
+}
+#ENDINLINE
+
+#INLINE C_RCONST
+  {
+    const double sxmin = 1.0E-15;
+    const double cos_zenith =
+        sin(MAS1998_DELTA) * sin(MAS1998_PHI) +
+        cos(MAS1998_DELTA) * cos(MAS1998_PHI) *
+            cos((1.0 - TIME / 43200.0) * 3.14159265358979323846);
+
+    MAS1998_K0 = 7.2E-15 * exp(785.0 / TEMP);
+    MAS1998_K2 = 4.1E-16 * exp(1440.0 / TEMP);
+    MAS1998_K3 = 1.9E-33 * FIX[indf_M] * exp(725.0 / TEMP);
+    MAS1998_RK23 =
+        (0.23E-12 * exp(590.0 / TEMP) + FIX[indf_M] * 0.17E-32 * exp(1000.0 / TEMP)) *
+        (1.0 + 1.4E-21 * FIX[indf_H2O] * exp(2200.0 / TEMP));
+    MAS1998_RK24 = 0.17E-10 * exp(416.0 / TEMP) +
+                   FIX[indf_M] * 3.0E-31 * exp(500.0 / TEMP);
+    MAS1998_SEC_Z = 1.0 / fmax(cos_zenith, sxmin);
+  }
+#ENDINLINE
+
+#EQUATIONS {reduced methane chemistry}
+<R1>  OH + CO = CO2 + HO2                              : 1.5E-13 * (1.0 + 6.0E-6 * PRESS);
+<R2>  OH + CH4 = H2O + CH3O2                           : 2.36E-12 * exp(-1710.0 / TEMP);
+<R3>  NO + CH3O2 = HCHO + HO2 + NO2                    : 4.2E-12 * exp(180.0 / TEMP);
+<R4>  CH3O2 + HO2 = CH3OOH + O2                        : 7.7E-14 * exp(1300.0 / TEMP);
+<R5>  CH3O2 + CH3O2 = HCHO + HCHO + HO2 + HO2          : 1.9E-13 * exp(220.0 / TEMP);
+<R6>  HCHO + O3P = CO + HO2 + OH                       : 1.7E-13 * exp(-1550.0 / TEMP);
+<R7>  O3P = O3                                         : 0.209 * FIX[indf_M] * 1.5E-11;
+<R8>  NO + O3 = NO2 + O2                               : 1.8E-12 * exp(-1370.0 / TEMP);
+<R9>  NO + HO2 = NO2 + OH                              : 3.7E-12 * exp(240.0 / TEMP);
+<R10> NO2 + O3 = NO3 + O2                              : 1.2E-13 * exp(-2450.0 / TEMP);
+<R11> NO2 + NO3 = NO + NO2 + O2                        : 2.3E-13 * exp(-1000.0 / TEMP);
+<R12> NO + NO3 = NO2 + NO2                             : 1.3E-11 * exp(250.0 / TEMP);
+<R13> OH + NO2 = HNO3                                  : MAS1998_THREEBODY(2.6E-30, 3.2, 2.4E-11, 1.3);
+<R14> OH + NO = HNO2                                   : MAS1998_THREEBODY(7.0E-31, 2.6, 1.5E-11, 0.5);
+<R15> OH + HNO3 = NO3                                  : MAS1998_K0 + (MAS1998_K3 / (1.0 + (MAS1998_K3 / MAS1998_K2)));
+<R16> NO2 + NO3 = N2O5                                 : MAS1998_THREEBODY(2.2E-30, 4.3, 1.5E-12, 0.5);
+<R17> N2O5 = NO2 + NO3                                 : 5.7E14 * exp(-10600.0 / TEMP);
+<R18> NO2 + HO2 = HO2NO2                               : MAS1998_THREEBODY(2.0E-31, 2.7, 4.2E-12, 2.0);
+<R19> HO2NO2 = NO2 + HO2                               : 2.0E16 * exp(-11900.0 / TEMP);
+<R20> OH + HO2NO2 = NO2 + H2O + O2                     : 1.3E-12 * exp(380.0 / TEMP);
+<R21> OH + O3 = HO2 + O2                               : 1.6E-12 * exp(-960.0 / TEMP);
+<R22> O3 + HO2 = OH + O2 + O2                          : 1.3E-14 * exp(-580.0 / TEMP);
+<R23> OH + H2O2 = HO2 + H2O                            : 3.1E-12 * exp(-187.0 / TEMP);
+<R24> HO2 + HO2 = H2O2 + O2                            : MAS1998_RK23;
+<R25> OH + HO2 = H2O + O2                              : MAS1998_RK24;
+<R26> OH + OH = O3P + H2O                              : 4.2E-12 * exp(-242.0 / TEMP);
+<R27> OH + OH = H2O2                                   : MAS1998_THREEBODY(6.9E-31, 0.8, 1.0E-11, 1.0);
+<R28> O1D = O3P + M                                    : FIX[indf_M] * 2.88E-11;
+<R29> CH3OOH + OH = CH3O2 + H2O                        : 1.0E-11;
+<R30> HCHO + OH = HO2 + CO + H2O                       : 1.0E-11;
+<R31> O1D + H2O = OH + OH                              : 2.2E-10;
+<R32> N2O5 + H2O = HNO3 + HNO3                         : 1.3E-21;
+<R33> HCHO + hv = CO + HO2 + HO2                       : 5.4E-5 * exp(-0.79 * MAS1998_SEC_Z);
+<R34> HCHO + hv = CO + H2                              : 6.65E-5 * exp(-0.6 * MAS1998_SEC_Z);
+<R35> CH3OOH + hv = HCHO + HO2 + OH                    : 2.27E-5 * exp(-0.6208 * MAS1998_SEC_Z);
+<R36> O3 + hv = O3P + O2                               : 1.23E-3 * exp(-0.6 * MAS1998_SEC_Z);
+<R37> O3 + hv = O1D + O2                               : 2.0E-4 * exp(-1.4 * MAS1998_SEC_Z);
+<R38> NO2 + hv = NO + O3P                              : 1.45E-2 * exp(-0.4 * MAS1998_SEC_Z);
+<R39> NO3 + hv = NO + O2                               : 3.53E-2 * exp(-8.1E-2 * MAS1998_SEC_Z);
+<R40> NO3 + hv = NO2 + O3P                             : 8.94E-2 * exp(-5.92E-2 * MAS1998_SEC_Z);
+<R41> HNO3 + hv = NO2 + OH                             : 3.0E-6 * exp(-1.25 * MAS1998_SEC_Z);
+<R42> HNO2 + hv = NO + OH                              : 2.8E-3 * exp(-0.45 * MAS1998_SEC_Z);
+<R43> H2O2 + hv = OH + OH                              : 2.2E-5 * exp(-0.75 * MAS1998_SEC_Z);
+<R44> HO2NO2 + hv = HO2 + NO2                          : 1.347E-4 * exp(-0.6024 * MAS1998_SEC_Z);
+<R45> N2O5 + hv = NO2 + NO3                            : 3.324E-5 * exp(-0.567 * MAS1998_SEC_Z);

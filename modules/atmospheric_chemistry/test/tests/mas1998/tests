@@ -1,0 +1,24 @@
+[Tests]
+  [./build_mas1998_methane_kpp]
+    type = RunCommand
+    command = 'make -f ../../../kpp/build/Makefile MECH=chemistry/mas1998_methane.kpp'
+    heavy = true
+    requirement = 'The atmospheric chemistry module shall build the recovered MAS1998 methane KPP mechanism.'
+  [../]
+
+  [./mas1998_methane_box]
+    type = RunApp
+    input = mas1998_methane_box.i
+    heavy = true
+    prereq = build_mas1998_methane_kpp
+    requirement = 'The atmospheric chemistry module shall run a 0D KPP Rosenbrock smoke test for the recovered MAS1998 methane mechanism.'
+  [../]
+
+  [./mas1998_physics]
+    type = CSVDiff
+    input = mas1998_physics.i
+    csvdiff = mas1998_physics.csv
+    rel_err = 1e-10
+    requirement = 'The atmospheric chemistry module shall provide MAS1998 benchmark functions and initial conditions for the paper constants, solid-body wind, vertical diffusivity, NO emission, and cylinder species.'
+  [../]
+[]

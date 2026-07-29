@@ -240,6 +240,11 @@ KPPGeneratedMechanism::updateParams(const PhysParams & params)
       air_dens = (params.pressure * 100.0) /
                  (1.380649e-23 * params.temperature) * 1e-6;
     }
+    const double pressure_pa =
+        params.pressure > 0.0
+            ? static_cast<double>(params.pressure) * 100.0
+            : air_dens * 1.0e6 * 1.380649e-23 * static_cast<double>(params.temperature);
+    set_global("PRESS", pressure_pa);
     set_global("AIR", air_dens);
     set_global("M", air_dens);
     set_global("O2", 0.21 * air_dens);
