@@ -358,6 +358,7 @@ binaryoutput
 !codegraph.json
 
 # Code Agent
+.codex
 .claude/
 .reasonix/
 .qoder/

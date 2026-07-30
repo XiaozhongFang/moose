@@ -54,8 +54,16 @@ protected:
   bool hasDiffusion() const;
   /// Whether density-weighted species diffusion kernels should be created
   bool hasDensityWeightedDiffusion() const;
+  /// Whether species variables and kernels should use finite volume objects
+  bool useFV() const;
+  /// Whether FV time/source kernels should use longitude-latitude spherical weights
+  bool useSphericalFVTime() const;
+  /// Whether spherical FV horizontal advection kernels should be created
+  bool hasSphericalFVAdvection() const;
   /// Create optional transport kernels for a species
   void addTransportKernels(const std::string & species_name);
+  /// Create optional FV transport kernels for a species
+  void addFVTransportKernels(const std::string & species_name);
 
   /// Parsed species names in mechanism order
   std::vector<std::string> _species;
