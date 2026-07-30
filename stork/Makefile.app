@@ -26,6 +26,7 @@ include $(FRAMEWORK_DIR)/moose.mk
 
 ALL_MODULES                 := no
 
+ATMOSPHERIC_CHEMISTRY       := no
 CHEMICAL_REACTIONS          := no
 CONTACT                     := no
 ELECTROMAGNETICS            := no

@@ -11,6 +11,9 @@
 
 #include "MooseApp.h"
 
+#ifdef ATMOSPHERIC_CHEMISTRY_ENABLED
+#include "AtmosphericChemistryApp.h"
+#endif
 #ifdef CHEMICAL_REACTIONS_ENABLED
 #include "ChemicalReactionsApp.h"
 #endif
@@ -111,6 +114,10 @@ template <typename T>
 void
 ModulesApp::registerAllObjects(Factory & f, ActionFactory & af, Syntax & s)
 {
+#ifdef ATMOSPHERIC_CHEMISTRY_ENABLED
+  AtmosphericChemistryApp::registerAll(f, af, s);
+#endif
+
 #ifdef CHEMICAL_REACTIONS_ENABLED
   ChemicalReactionsApp::registerAll(f, af, s);
 #endif

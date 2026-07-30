@@ -13,6 +13,9 @@
 #include "AppFactory.h"
 #include "MooseSyntax.h"
 
+#ifdef ATMOSPHERIC_CHEMISTRY_ENABLED
+#include "AtmosphericChemistryApp.h"
+#endif
 #ifdef CHEMICAL_REACTIONS_ENABLED
 #include "ChemicalReactionsApp.h"
 #endif
@@ -110,6 +113,10 @@ void
 ModulesApp::registerApps()
 {
   registerApp(ModulesApp);
+
+#ifdef ATMOSPHERIC_CHEMISTRY_ENABLED
+  AtmosphericChemistryApp::registerApps();
+#endif
 
 #ifdef CHEMICAL_REACTIONS_ENABLED
   ChemicalReactionsApp::registerApps();
@@ -218,6 +225,10 @@ ModulesApp::registerAll(Factory & f, ActionFactory & af, Syntax & s)
   ::mooseDeprecated(
       "\"registerAll\" in Modules is deprecated. Please update your *App.C file(s) to call the new "
       "templated \"registerAllObjects\" method (e.g. ModulesApp::registerAllObjects<MyApp>(...))");
+
+#ifdef ATMOSPHERIC_CHEMISTRY_ENABLED
+  AtmosphericChemistryApp::registerAll(f, af, s);
+#endif
 
 #ifdef CHEMICAL_REACTIONS_ENABLED
   ChemicalReactionsApp::registerAll(f, af, s);

@@ -14,27 +14,6 @@ FRAMEWORK_DIR      ?= $(MOOSE_DIR)/framework
 ADDITIONAL_CPPFLAGS += -Wall -Wextra
 ###############################################################################
 
-# SUNDIALS direct ODE solver support for box-mode integration.
-# When SUNDIALS is available, SundialsBoxIntegrator in BoxIntegrator.C uses
-# SUNDIALS CVODE/ARKODE instead of PETSc TS for the solver_type=sundials path.
-# No-op when SUNDIALS is not detected at build time.
-SUNDIALS_DIR ?= $(CONDA_PREFIX)
-ifneq ($(wildcard $(SUNDIALS_DIR)/include/cvode/cvode.h),)
-  ADDITIONAL_CPPFLAGS += -I$(SUNDIALS_DIR)/include
-  ADDITIONAL_LIBS      += -L$(SUNDIALS_DIR)/lib \
-                          -Wl,-rpath,$(SUNDIALS_DIR)/lib \
-                          -lsundials_cvode \
-                          -lsundials_arkode \
-                          -lsundials_nvecserial \
-                          -lsundials_sunlinsoldense \
-                          -lsundials_sunmatrixdense
-  ADDITIONAL_CPPFLAGS  += -DHAVE_SUNDIALS
-endif
-
-# KPP shared-library backend support.
-ADDITIONAL_CPPFLAGS += -I$(APPLICATION_DIR)/kpp/adapter -I$(APPLICATION_DIR)/kpp/runtime
-ADDITIONAL_CPPFLAGS += -DKPP_ENABLED
-
 # framework
 include $(FRAMEWORK_DIR)/build.mk
 include $(FRAMEWORK_DIR)/moose.mk
