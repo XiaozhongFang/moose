@@ -140,31 +140,23 @@ private:
   const MCMBoxModel & _box;
 };
 
-// SundialsBoxIntegrator is declared only when SUNDIALS is available at build
-// time.  When HAVE_SUNDIALS is undefined it is opaque (not declared) — the
-// sundials solver path simply cannot be selected.
-//
-// When SUNDIALS IS available, pull in the types this header needs so the
-// method signature resolves.  This header is included from unity builds that
-// combine every .C file — if we don't bring the types along, compilation
-// fails for translation units that combine sundials code with non-sundials
-// code (MCMLifetimePostprocessor.C, ChemistryODEKernel.C, etc.).
+// The integrator remains declared without SUNDIALS so its existing runtime
+// stub can report that the selected solver is unavailable.  When SUNDIALS is
+// available, pull in the types needed by the callback signatures.
 #if defined(HAVE_SUNDIALS)
 #include <sundials/sundials_types.h>    // sunrealtype, sunindextype, SUNContext
 #include <sundials/sundials_matrix.h>  // SUNMatrix
 #include <nvector/nvector_serial.h>    // N_Vector (defines N_Vector)
 #endif
 
-#if defined(HAVE_SUNDIALS)
-
 /**
  * SUNDIALS CVODE/ARKODE integrator: wraps MCMBoxModel for full-system integration
  * using the standalone SUNDIALS library (bypassing PETSc TS).
  *
- * Available only when MOOSE is compiled with SUNDIALS support (preprocessor guard
- * HAVE_SUNDIALS). computeResidual/Jacobian*() return 0 — same no-op contract as
- * PetscTSIntegrator. selfDriven() === true so MCMBoxModel::execute() dispatches
- * to solveSundialsCVODE() instead of runPETScStep().
+ * Without SUNDIALS support, solveSundialsCVODE() reports a runtime build error.
+ * computeResidual/Jacobian*() return 0, matching the PetscTSIntegrator no-op contract.
+ * selfDriven() === true so MCMBoxModel::execute() dispatches to
+ * solveSundialsCVODE() instead of runPETScStep().
  *
  * The actual SUNDIALS solve is implemented in BoxIntegrator.C.
  */
@@ -212,6 +204,7 @@ private:
   const Real _rtol;
   const Real _atol;
 
+#if defined(HAVE_SUNDIALS)
   /** SUNDIALS RHS callback: reads N_Vector y, writes dy/dt into dy. */
   static int sundialsRHSF(sunrealtype t, N_Vector y, N_Vector dy, void *user_data);
 
@@ -234,6 +227,5 @@ private:
   static int sundialsJacFn(sunrealtype t, N_Vector y, N_Vector fy,
                             SUNMatrix J, void *user_data,
                             N_Vector tmp1, N_Vector tmp2, N_Vector tmp3);
+#endif
 };
-
-#endif // HAVE_SUNDIALS
