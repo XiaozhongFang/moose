@@ -38,8 +38,7 @@ KPPFVChemicalSourceKernel::validParams()
   params.addParam<bool>(
       "spherical_volume_weight",
       false,
-      "Apply longitude-latitude spherical volume weights to the source term. Use with "
-      "AtmosphericSphericalFVTimeDerivative.");
+      "Apply longitude-latitude spherical volume weights to the source term.");
   params.addParam<Real>("radius", 6.378e6, "Sphere radius in meters.");
   MooseEnum coordinate_units("degrees radians", "degrees");
   params.addParam<MooseEnum>(

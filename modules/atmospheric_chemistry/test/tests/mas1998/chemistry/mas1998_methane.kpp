@@ -1,8 +1,0 @@
-#MODEL      mas1998_methane
-#LANGUAGE   C
-#EQNTAGS    ON
-#STOICMAT   OFF
-#HESSIAN    OFF
-#MEX        OFF
-#INTEGRATOR rosenbrock
-
