@@ -11,6 +11,7 @@
 
 #include "IMechanism.h"
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -95,6 +96,26 @@ public:
   /// Set a KPP-generated global double, if the shared library exports it.
   bool setGlobal(const std::string & name, Real value);
 
+  /**
+   * Override a KPP fixed-species concentration.
+   *
+   * The override is applied after the physical-parameter defaults and before
+   * Update_RCONST is called.
+   */
+  void setFixedSpecies(const std::string & species, Real concentration);
+
+  /// Remove all fixed-species overrides.
+  void clearFixedSpecies();
+
+  /**
+   * Compute the KPP split form dC/dt = production - loss_coefficient * C.
+   */
+  void computeProductionLoss(Real t,
+                             const std::vector<Real> & concentrations,
+                             const PhysParams & params,
+                             std::vector<Real> & production,
+                             std::vector<Real> & loss_coefficient) const;
+
   Real getJValue(unsigned int j_number) const override;
   unsigned int nJValues() const override { return _n_j_vals; }
 
@@ -121,6 +142,8 @@ private:
 
   /// Fun(Y, FIX, RCONST, Ydot) — compute RHS
   using KppFunFn = void (*)(double[], double[], double[], double[]);
+  /// Fun_SPLIT(Y, FIX, RCONST, Ydot, P, D) — compute production/loss form
+  using KppFunSplitFn = void (*)(double[], double[], double[], double[], double[], double[]);
   /// Jac_SP(Y, FIX, RCONST, JVS) — compute sparse Jacobian into caller buffer
   using KppJacFn = void (*)(double[], double[], double[], double[]);
   /// Initialize() / Update_RCONST — set up KPP global state
@@ -131,6 +154,7 @@ private:
 
   void * _lib_handle;
   KppFunFn _fun;
+  KppFunSplitFn _fun_split;
   KppJacFn _jac;
   KppInitFn _init;
   KppVoidFn _update_rconst;
@@ -156,6 +180,7 @@ private:
   unsigned int _jac_nnz;
   std::vector<std::string> _species_names;
   std::vector<std::string> _all_species_names;
+  std::map<std::string, Real> _fixed_species;
 
   // ===== Runtime state =====
 

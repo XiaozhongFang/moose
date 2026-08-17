@@ -38,6 +38,7 @@ samePhysParams(const PhysParams & a, const PhysParams & b)
 KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
   : _lib_handle(nullptr),
     _fun(nullptr),
+    _fun_split(nullptr),
     _jac(nullptr),
     _init(nullptr),
     _update_rconst(nullptr),
@@ -69,6 +70,7 @@ KPPGeneratedMechanism::KPPGeneratedMechanism(const std::string & lib_path)
 
   // Resolve KPP C API function symbols
   _fun  = reinterpret_cast<KppFunFn>(dlsym(_lib_handle, "Fun"));
+  _fun_split = reinterpret_cast<KppFunSplitFn>(dlsym(_lib_handle, "Fun_SPLIT"));
   _jac  = reinterpret_cast<KppJacFn>(dlsym(_lib_handle, "Jac_SP"));
   _init = reinterpret_cast<KppInitFn>(dlsym(_lib_handle, "Initialize"));
   _update_rconst = reinterpret_cast<KppVoidFn>(dlsym(_lib_handle, "Update_RCONST"));
@@ -198,6 +200,29 @@ KPPGeneratedMechanism::setGlobal(const std::string & name, Real value)
 }
 
 void
+KPPGeneratedMechanism::setFixedSpecies(const std::string & species, const Real concentration)
+{
+  std::lock_guard<std::recursive_mutex> lock(kpp_generated_mechanism_mutex);
+
+  const auto variable_end = _all_species_names.begin() + static_cast<std::ptrdiff_t>(_n_variable);
+  if (std::find(_all_species_names.begin(), variable_end, species) != variable_end)
+    mooseError("KPPGeneratedMechanism::setFixedSpecies: '", species, "' is a variable species");
+  if (std::find(variable_end, _all_species_names.end(), species) == _all_species_names.end())
+    mooseError("KPPGeneratedMechanism::setFixedSpecies: unknown fixed species '", species, "'");
+
+  _fixed_species[species] = concentration;
+  markDirty();
+}
+
+void
+KPPGeneratedMechanism::clearFixedSpecies()
+{
+  std::lock_guard<std::recursive_mutex> lock(kpp_generated_mechanism_mutex);
+  _fixed_species.clear();
+  markDirty();
+}
+
+void
 KPPGeneratedMechanism::updateParams(const PhysParams & params)
 {
   std::lock_guard<std::recursive_mutex> lock(kpp_generated_mechanism_mutex);
@@ -240,11 +265,11 @@ KPPGeneratedMechanism::updateParams(const PhysParams & params)
       air_dens = (params.pressure * 100.0) /
                  (1.380649e-23 * params.temperature) * 1e-6;
     }
-    const double pressure_pa =
+    const double pressure_mbar =
         params.pressure > 0.0
-            ? static_cast<double>(params.pressure) * 100.0
-            : air_dens * 1.0e6 * 1.380649e-23 * static_cast<double>(params.temperature);
-    set_global("PRESS", pressure_pa);
+            ? static_cast<double>(params.pressure)
+            : air_dens * 1.0e6 * 1.380649e-23 * static_cast<double>(params.temperature) / 100.0;
+    set_global("PRESS", pressure_mbar);
     set_global("AIR", air_dens);
     set_global("M", air_dens);
     set_global("O2", 0.21 * air_dens);
@@ -281,6 +306,10 @@ KPPGeneratedMechanism::updateParams(const PhysParams & params)
           fix[fix_index] = n2;
         else if (name == "H2O")
           fix[fix_index] = h2o;
+
+        const auto override_it = _fixed_species.find(name);
+        if (override_it != _fixed_species.end())
+          fix[fix_index] = static_cast<double>(override_it->second);
       }
     }
 
@@ -447,13 +476,54 @@ KPPGeneratedMechanism::computeJacobian(
 }
 
 SpeciesRates
-KPPGeneratedMechanism::computeSpeciesRates(
-    Real /*t*/,
-    const std::vector<Real> & /*C*/,
-    const PhysParams & /*params*/) const
+KPPGeneratedMechanism::computeSpeciesRates(const Real t,
+                                           const std::vector<Real> & C,
+                                           const PhysParams & params) const
 {
-  mooseError("KPPGeneratedMechanism::computeSpeciesRates: separated production/loss "
-             "rates require stoichiometry metadata that KPP shared libraries do not export.");
+  SpeciesRates rates;
+  std::vector<Real> loss_coefficient;
+  computeProductionLoss(t, C, params, rates.production, loss_coefficient);
+  rates.loss.resize(_n_variable);
+  for (const auto i : make_range(_n_variable))
+    rates.loss[i] = loss_coefficient[i] * C[i];
+  return rates;
+}
+
+void
+KPPGeneratedMechanism::computeProductionLoss(const Real t,
+                                             const std::vector<Real> & concentrations,
+                                             const PhysParams & params,
+                                             std::vector<Real> & production,
+                                             std::vector<Real> & loss_coefficient) const
+{
+  std::lock_guard<std::recursive_mutex> lock(kpp_generated_mechanism_mutex);
+
+  if (!_fun_split)
+    mooseError("KPPGeneratedMechanism::computeProductionLoss: KPP function Fun_SPLIT is not "
+               "available. Regenerate the mechanism with production/loss output enabled.");
+  if (concentrations.size() < _n_variable)
+    mooseError("KPPGeneratedMechanism::computeProductionLoss: concentration vector size mismatch");
+
+  double * const var = *_kpp_VAR_ptr;
+  double * const fix = *_kpp_FIX_ptr;
+  for (const auto i : make_range(_n_variable))
+    var[i] = static_cast<double>(concentrations[i]);
+
+  _t = t;
+  const_cast<KPPGeneratedMechanism *>(this)->updateParams(params);
+
+  std::vector<double> rhs(_n_variable);
+  std::vector<double> p(_n_variable);
+  std::vector<double> d(_n_variable);
+  _fun_split(var, fix, _kpp_RCONST, rhs.data(), p.data(), d.data());
+
+  production.resize(_n_variable);
+  loss_coefficient.resize(_n_variable);
+  for (const auto i : make_range(_n_variable))
+  {
+    production[i] = static_cast<Real>(p[i]);
+    loss_coefficient[i] = static_cast<Real>(d[i]);
+  }
 }
 
 // ===== Single-species accessors (delegate to computeRHS / computeJacobian) =====
