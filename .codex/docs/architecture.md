@@ -40,6 +40,7 @@ mas1998_benchmark/
 |-- unit/src/MAS1998*Test.C
 `-- scripts/
     |-- compare_diagonal.py
+    |-- monitor_quantitative_reproduction.py
     |-- plot_diagonal.py
     `-- run_quantitative_reproduction.sh
 
@@ -143,6 +144,14 @@ Python 合成误差测试和所有长输入的语法检查。生产 checker 要�
 非负总量和非负全局最小值；参考 checker 要求每纬圈恰好一行、证据标签正确且所有浓度有限
 非负。14 天任务不属于 CI；`run_quantitative_reproduction.sh` 以独立进程受控并发运行，验证
 最终时刻，再生成三份 O3/NOx/HNO3/HO2NO2 误差表和叠加图。
+
+长任务恢复是任务级而不是时间步级。`monitor_quantitative_reproduction.py` 读取
+`/proc/*/cmdline` 中精确的 `Executioner/output_file` 参数，只有实际求解进程存在时才报告
+`RUNNING`；有部分产物但无进程和退出状态时报告 `STALE`。runner 的 `--resume` 在目录独占锁
+下跳过有成功退出证明及完整最终输出的 `DONE` 任务，发现活跃孤儿任务则整体拒绝启动；对
+`STALE/FAILED/INCOMPLETE` 任务先把旧 CSV、summary、日志和 time report 移到带时间戳的
+`previous_attempts/`（时间戳碰撞时使用递增后缀），再从 `t=0` 重算。只要重跑任一输入，旧误差表和图也一并归档，避免把
+派生旧证据误认为恢复结果。
 
 ## 7. 证据边界
 

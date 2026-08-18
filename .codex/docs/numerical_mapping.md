@@ -668,6 +668,19 @@ CWI reference，也不应在特征线参考收敛后作为首选 reference。
 `--with-convergence` 后再运行两个 `64x32` 收敛输入并强制执行第 13.3 节判据。每个任务各有
 `.log` 和 `.time.txt`，终止后必须存在 `t=1209600`，才会生成误差 CSV 和叠加图。
 
+`scripts/monitor_quantitative_reproduction.py` 不再用“日志文件存在”推断运行状态，而是扫描
+`/proc/*/cmdline`，要求某个活跃进程带有精确匹配的
+`Executioner/output_file=<absolute output path>` 参数才标为 `RUNNING`。状态含义为：
+
+```text
+PENDING     没有任务产物
+RUNNING     输出路径由活跃求解进程持有
+DONE        GNU time exit=0，进度完整，生产主 CSV 最终纬圈行也完整
+STALE       有部分产物但无活跃进程和退出状态
+FAILED      GNU time 记录非零退出状态
+INCOMPLETE  正常退出或到达最终进度，但完成证据不完整
+```
+
 2026-08-17 在本机单进程测得：`64x32` Type I 的一个 4800 s split 用 28.35 s，Type II 用
 29.90 s，RSS 约 150 MB。据此线性外推每个生产 case：粗网格 2.0-2.1 h，中网格 7.5-7.9 h，
 细网格 31-33 h；六个串行约 84 h。这些是外推而非完整计时，并发时会受 CPU 竞争影响。
@@ -683,7 +696,20 @@ nohup scripts/run_quantitative_reproduction.sh \
   > runs/mas1998_quantitative_2026-08-17.launch.log 2>&1 &
 ```
 
-自定义 executioner 没有中途 checkpoint/restart；中断的单个任务必须从 `t=0` 重算。
+自定义 executioner 没有中途 checkpoint/restart；中断的单个任务必须从 `t=0` 重算。已有目录
+用以下命令作任务级恢复：
+
+```bash
+nohup scripts/run_quantitative_reproduction.sh \
+  --resume --jobs 4 --with-convergence \
+  --output-dir runs/mas1998_quantitative_2026-08-17 \
+  >> runs/mas1998_quantitative_2026-08-17.launch.log 2>&1 &
+```
+
+恢复时 runner 持有 `.runner.lock` 独占锁，跳过 `DONE`，若存在 `RUNNING` 则在改变数值产物前
+拒绝启动。`STALE/FAILED/INCOMPLETE` 的旧产物移到
+`previous_attempts/YYYYmmddTHHMMSS[_N]/JOB/` 后从零重算；任何输入重算时，旧误差 CSV、参考收敛
+表和叠加图同步归档。`--dry-run --resume` 只打印选择和命令，不创建锁或移动文件。
 
 ## 14. 验证证据能说明什么
 
@@ -692,13 +718,13 @@ nohup scripts/run_quantitative_reproduction.sh \
 | 验证层 | 结果 | 覆盖范围 |
 | --- | ---: | --- |
 | Atmospheric Chemistry 定向 KPP tests | 3/3 通过 | KPP 共享库通用能力 |
-| app unit tests | 17/17 通过 | 网格、物理、坐标/轨迹、平流、垂直和化学测试，另含 2 个模板 sample test |
-| app non-heavy tests | 3/3 通过 | 静态物理、既有 FV/基础 app 路径 |
+| app unit tests | 15/15 通过 | 网格、物理、坐标/轨迹、平流、垂直和化学测试；模板 sample 已删除 |
+| app non-heavy tests | 2/2 通过 | 静态物理与既有 FV 路径；通用 simple diffusion 脚手架已删除 |
 | app heavy tests | 8/8 通过 | KPP 生成、0D box、Type I/II/参考 600 s 全链路及 CSV 检查 |
-| Python 定量比较 tests | 4/4 通过 | 已知范数、元数据/坐标/非有限值拒绝和收敛判据 |
+| Python 定量与恢复 tests | 17/17 通过 | 范数/收敛判据、进程感知状态和 resume 选择/防重复启动/旧产物归档 |
 | 九个主输入与两个收敛输入 | 11/11 Syntax OK | 参数、对象构造和输入继承关系 |
-| 批量运行器 dry-run | 默认 9、收敛模式 11 条命令 | 输入选择、并发参数及无输出目录副作用 |
-| 14 天生产/参考运行 | 未执行 | 计算成本高，不在 CI 中；需按第 13.6 节后台执行 |
+| 批量运行器 dry-run | fresh 11 条；resume 跳过 2 条、运行 9 条 | 中断目录选择正确且 dry-run 前后目录树指纹一致 |
+| 14 天生产/参考运行 | 部分完成 | 两个 `64x32` 生产任务完成；两个 `128x64` 在第 9 天中断，其余待恢复 |
 
 关键测试和它们真正证明的内容：
 
@@ -745,7 +771,7 @@ nohup scripts/run_quantitative_reproduction.sh \
 | 45 反应机制 | `test/tests/mas1998/chemistry/mas1998_methane.eqn` |
 | 六个生产输入 | `test/tests/mas1998/production/` |
 | 特征线候选、收敛及旧细化配方 | `test/tests/mas1998/reference/` |
-| 定量误差、运行器与绘图 | `scripts/compare_diagonal.py`, `scripts/run_quantitative_reproduction.sh`, `scripts/plot_diagonal.py` |
+| 定量误差、监控、恢复运行器与绘图 | `scripts/compare_diagonal.py`, `scripts/monitor_quantitative_reproduction.py`, `scripts/run_quantitative_reproduction.sh`, `scripts/plot_diagonal.py` |
 | app 单元测试 | `unit/src/MAS1998*Test.C` |
 | MOOSE 通用 KPP P/L API | `modules/atmospheric_chemistry/{include,src}/utils/KPPGeneratedMechanism.*` |
 
